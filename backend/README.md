@@ -57,3 +57,65 @@ cd backend
 docker build -t kiwi-backend .
 docker run --rm -p 8080:8080 -e KIWI_API_KEY=dev kiwi-backend
 ```
+
+## Deploy a Cloud Run
+
+### Setup inicial (una sola vez)
+
+`backend/scripts/setup-gcp.sh` provisiona todo lo que necesita Cloud Run +
+GitHub Actions de forma idempotente. Necesitas tener `gcloud` autenticado
+contra el proyecto.
+
+```bash
+gcloud auth login
+export GCP_PROJECT=kiwi-assistant-494421
+export GCP_REGION=europe-west1
+export GH_REPO=berti95/kiwi_assistant
+./backend/scripts/setup-gcp.sh
+```
+
+El script crea:
+
+- APIs habilitadas (run, artifactregistry, secretmanager, aiplatform, etc.).
+- Artifact Registry `kiwi` en `europe-west1`.
+- Service account de runtime `kiwi-backend@…` con `roles/aiplatform.user` y
+  `roles/secretmanager.secretAccessor`.
+- Service account de deploy `gha-deploy@…` con permisos para empujar imagen
+  y desplegar Cloud Run.
+- Workload Identity Federation pool/provider que permite a GitHub Actions
+  obtener tokens del SA de deploy sin claves JSON.
+- Secret Manager `KIWI_API_KEY` con un valor aleatorio recién generado (la
+  primera vez; reruns no lo tocan).
+
+Al final imprime los dos secretos que tienes que añadir a GitHub:
+
+| Secreto en GitHub | Valor |
+|---|---|
+| `WIF_PROVIDER` | `projects/.../providers/github` (que imprime el script) |
+| `WIF_SERVICE_ACCOUNT` | `gha-deploy@kiwi-assistant-494421.iam.gserviceaccount.com` |
+
+Después de añadirlos en `Settings → Secrets and variables → Actions`, cualquier
+push a `main` que toque `backend/**` dispara `.github/workflows/backend-deploy.yml`
+y despliega automáticamente.
+
+### Deploy manual (para forzar uno)
+
+`Actions → Backend Deploy → Run workflow`. El workflow hace:
+
+1. Auth contra GCP via WIF (no hay claves en el repo).
+2. Build de la imagen Docker desde `backend/`.
+3. Push a `europe-west1-docker.pkg.dev/kiwi-assistant-494421/kiwi/kiwi-backend`.
+4. `gcloud run deploy` con `--service-account=kiwi-backend@…`,
+   `KIWI_API_KEY` montado desde Secret Manager,
+   `--session-affinity` (importante para WebSockets), `--timeout=3600`.
+
+### Rotar el API key
+
+```bash
+NEW=kwi_$(openssl rand -hex 32)
+printf '%s' "$NEW" | gcloud secrets versions add KIWI_API_KEY --data-file=-
+```
+
+Y dispara `Backend Deploy` para que Cloud Run levante una nueva revisión que
+lea la versión `latest`. Hasta entonces la revisión vieja sigue con la key
+anterior.
