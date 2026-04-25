@@ -18,11 +18,50 @@ KIWI_API_KEY=kwi_xxxxxxxxxxxxxxxx
 PICOVOICE_ACCESS_KEY=xxxx
 ```
 
+## Versionado
+
+`versionCode` y `versionName` se leen de variables de entorno
+(`KIWI_VERSION_CODE`, `KIWI_VERSION_NAME`). En CI el workflow las setea con
+el número del run de GitHub Actions, así que cada build a `main` produce un
+APK con un `versionCode` monotónicamente creciente que el AutoUpdater de la
+tablet usa para detectar nuevas versiones. En desarrollo local sin esas
+variables, se usa `versionCode=1` y `versionName="0.1.0-dev"`.
+
 ## Build
 
 ```bash
 cd android
 ./gradlew assembleDebug
+```
+
+## Firma del release
+
+`./gradlew assembleRelease` lee la firma de cuatro variables de entorno:
+
+- `ANDROID_KEYSTORE_B64` — keystore JKS codificado en base64.
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS` (típicamente `kiwi`)
+- `ANDROID_KEY_PASSWORD`
+
+Si las cuatro están presentes, el release se firma con esa keystore. Si
+falta cualquiera, el release cae al `signingConfig` de debug — útil en
+local sin tener que copiar el JKS, pero esos APKs **no** sirven para
+auto-actualizar la tablet.
+
+Para generar la keystore una sola vez:
+
+```bash
+keytool -genkey -v \
+    -keystore kiwi-release.jks \
+    -keyalg RSA -keysize 2048 -validity 10000 \
+    -alias kiwi
+```
+
+Y para subirla a GitHub Secrets en PowerShell:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("kiwi-release.jks")) | clip
+# pega el contenido del portapapeles en Settings > Secrets como ANDROID_KEYSTORE_B64
 ```
 
 ## Setup inicial de la tablet (modo kiosk)

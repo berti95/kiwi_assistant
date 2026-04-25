@@ -1,3 +1,4 @@
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -25,6 +26,36 @@ fun secret(name: String, default: String = ""): String =
         ?: localProperties.getProperty(name)
         ?: default
 
+/**
+ * Builds a release signing config from env vars when they are set (CI),
+ * decoding the base64 keystore into the build dir on the fly. When the
+ * env vars are missing the signingConfig is null and release builds fall
+ * back to the debug signing config — so local `./gradlew assembleRelease`
+ * keeps working without anyone having to copy the keystore around.
+ */
+val releaseSigningConfig = run {
+    val keystoreB64 = System.getenv("ANDROID_KEYSTORE_B64")
+    val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+    val keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+    val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+    if (keystoreB64.isNullOrBlank() || keystorePassword.isNullOrBlank() ||
+        keyAlias.isNullOrBlank() || keyPassword.isNullOrBlank()
+    ) {
+        null
+    } else {
+        val decoded = Base64.getDecoder().decode(keystoreB64)
+        val target = layout.buildDirectory.file("release-keystore.jks").get().asFile
+        target.parentFile.mkdirs()
+        target.writeBytes(decoded)
+        mapOf(
+            "storeFile" to target,
+            "storePassword" to keystorePassword,
+            "keyAlias" to keyAlias,
+            "keyPassword" to keyPassword,
+        )
+    }
+}
+
 android {
     namespace = "com.kiwi.assistant"
     compileSdk = 35
@@ -33,8 +64,8 @@ android {
         applicationId = "com.kiwi.assistant"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (System.getenv("KIWI_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("KIWI_VERSION_NAME") ?: "0.1.0-dev"
 
         buildConfigField("String", "CLOUD_RUN_URL", "\"${secret("CLOUD_RUN_URL")}\"")
         buildConfigField("String", "KIWI_API_KEY", "\"${secret("KIWI_API_KEY")}\"")
@@ -45,12 +76,26 @@ android {
         )
     }
 
+    signingConfigs {
+        if (releaseSigningConfig != null) {
+            create("release") {
+                @Suppress("UNCHECKED_CAST")
+                storeFile = releaseSigningConfig["storeFile"] as java.io.File
+                storePassword = releaseSigningConfig["storePassword"] as String
+                keyAlias = releaseSigningConfig["keyAlias"] as String
+                keyPassword = releaseSigningConfig["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
