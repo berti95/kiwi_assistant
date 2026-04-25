@@ -1,5 +1,14 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_SYSTEM_PROMPT = """\
+Eres Kiwi, un asistente personal inteligente instalado en el salón de Alberto.
+Respondes siempre en español.
+Eres conciso y directo. No des explicaciones innecesarias.
+Si no sabes algo, dilo claramente.
+Tienes un tono amable pero no servil.
+Cuando te pregunten la hora o el tiempo, usa los datos más recientes disponibles.
+"""
+
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from environment variables.
@@ -21,10 +30,14 @@ class Settings(BaseSettings):
 
     # Vertex AI configuration. The backend uses Application Default
     # Credentials provided by the Cloud Run service account, so no API key
-    # is required.
+    # is required. When `gcp_project` is empty the WebSocket session falls
+    # back to echo mode (useful for local dev / tests / pre-Vertex sanity
+    # checks).
     gcp_project: str = ""
     gcp_location: str = "europe-west1"
     gemini_model: str = "gemini-2.5-flash-preview-native-audio-dialog"
+    gemini_voice: str = "Aoede"
+    gemini_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     # Auto-update endpoint payload. The Android app polls /api/version and
     # compares against its BuildConfig.VERSION_CODE.
