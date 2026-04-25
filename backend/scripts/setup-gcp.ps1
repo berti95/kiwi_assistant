@@ -122,14 +122,14 @@ if (Invoke-GcloudCheck { gcloud iam service-accounts describe $deploySaEmail }) 
     gcloud iam service-accounts create $DeploySa --display-name="Kiwi GitHub Actions deployer"
 }
 
-foreach ($role in @("roles/run.developer", "roles/artifactregistry.writer", "roles/iam.serviceAccountUser")) {
+foreach ($role in @("roles/run.admin", "roles/artifactregistry.writer", "roles/iam.serviceAccountUser")) {
     gcloud projects add-iam-policy-binding $GcpProject `
         --member="serviceAccount:$deploySaEmail" `
         --role=$role `
         --condition=None `
         --quiet | Out-Null
 }
-Write-Host "  bound roles: run.developer, artifactregistry.writer, iam.serviceAccountUser"
+Write-Host "  bound roles: run.admin, artifactregistry.writer, iam.serviceAccountUser"
 
 gcloud iam service-accounts add-iam-policy-binding $runtimeSaEmail `
     --member="serviceAccount:$deploySaEmail" `

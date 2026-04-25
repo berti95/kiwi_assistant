@@ -18,7 +18,7 @@
 #   - Runtime SA `kiwi-backend@...` with roles/aiplatform.user and
 #     roles/secretmanager.secretAccessor so Cloud Run can call Vertex AI Live
 #     and read the tablet API key from Secret Manager.
-#   - Deploy SA `gha-deploy@...` with roles/run.developer,
+#   - Deploy SA `gha-deploy@...` with roles/run.admin,
 #     roles/artifactregistry.writer and the binding to act as the runtime SA.
 #   - Workload Identity Federation pool/provider tied to GitHub Actions for
 #     repository $GH_REPO.
@@ -101,7 +101,7 @@ else
 fi
 
 for role in \
-    roles/run.developer \
+    roles/run.admin \
     roles/artifactregistry.writer \
     roles/iam.serviceAccountUser; do
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
@@ -110,7 +110,7 @@ for role in \
         --condition=None \
         --quiet >/dev/null
 done
-echo "  bound roles: run.developer, artifactregistry.writer, iam.serviceAccountUser"
+echo "  bound roles: run.admin, artifactregistry.writer, iam.serviceAccountUser"
 
 # Allow the deploy SA to "act as" the runtime SA when deploying Cloud Run.
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA_EMAIL" \
