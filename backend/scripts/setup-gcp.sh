@@ -173,6 +173,37 @@ gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
     --role=roles/secretmanager.secretAccessor \
     --quiet >/dev/null
 
+APK_BUCKET="${GCP_PROJECT}-apks"
+
+step "APK bucket gs://${APK_BUCKET}"
+if ! gcloud storage buckets describe "gs://${APK_BUCKET}" >/dev/null 2>&1; then
+    gcloud storage buckets create "gs://${APK_BUCKET}" \
+        --location="$GCP_REGION" \
+        --uniform-bucket-level-access
+else
+    echo "  already exists"
+fi
+
+step "Granting deploy SA upload access on gs://${APK_BUCKET}"
+gcloud storage buckets add-iam-policy-binding "gs://${APK_BUCKET}" \
+    --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
+    --role=roles/storage.objectAdmin \
+    --quiet >/dev/null
+
+step "Granting public read on gs://${APK_BUCKET}"
+if gcloud storage buckets add-iam-policy-binding "gs://${APK_BUCKET}" \
+    --member=allUsers \
+    --role=roles/storage.objectViewer \
+    --quiet >/dev/null 2>&1; then
+    echo "  done"
+else
+    echo "  ! org policy denied allUsers binding (same as Cloud Run)."
+    echo "  ! Once the org policy is relaxed for this project, run:"
+    echo "  !   gcloud storage buckets add-iam-policy-binding \\"
+    echo "  !     gs://${APK_BUCKET} \\"
+    echo "  !     --member=allUsers --role=roles/storage.objectViewer"
+fi
+
 WIF_PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${WIF_POOL}/providers/${WIF_PROVIDER}"
 
 cat <<EOF
@@ -185,13 +216,20 @@ Actions for $GH_REPO:
   WIF_PROVIDER         $WIF_PROVIDER_RESOURCE
   WIF_SERVICE_ACCOUNT  $DEPLOY_SA_EMAIL
 
-(Optional, for the Android build to talk to the deployed backend:
-  CLOUD_RUN_URL        https://kiwi-backend-XXXXX-ew.a.run.app
-                       fill in once the first deploy succeeds.
-  KIWI_API_KEY         the value printed above (or read from Secret
-                       Manager: gcloud secrets versions access latest \\
-                       --secret=$SECRET_NAME).
-)
+For the Android release pipeline you will also need (generated locally
+once with keytool -genkey -v -keystore kiwi-release.jks -keyalg RSA
+-keysize 2048 -validity 10000 -alias kiwi):
+
+  ANDROID_KEYSTORE_B64       base64 -w0 kiwi-release.jks (Linux/macOS)
+                             [System.Convert]::ToBase64String(
+                               [IO.File]::ReadAllBytes("kiwi-release.jks"))
+                             (PowerShell)
+  ANDROID_KEYSTORE_PASSWORD  storepass set above
+  ANDROID_KEY_ALIAS          kiwi
+  ANDROID_KEY_PASSWORD       keypass set above
+
+APK bucket created: gs://${APK_BUCKET}
+APK URL pattern:    https://storage.googleapis.com/${APK_BUCKET}/kiwi-vN.apk
 
 Next: push to main (or trigger backend-deploy manually) to roll out
 the first version of the backend to Cloud Run.

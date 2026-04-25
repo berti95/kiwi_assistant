@@ -206,6 +206,39 @@ gcloud secrets add-iam-policy-binding $SecretName `
     --role=roles/secretmanager.secretAccessor `
     --quiet | Out-Null
 
+$apkBucket = "$GcpProject-apks"
+
+Step "APK bucket gs://$apkBucket"
+if (Invoke-GcloudCheck { gcloud storage buckets describe "gs://$apkBucket" }) {
+    Write-Host "  already exists"
+} else {
+    gcloud storage buckets create "gs://$apkBucket" `
+        --location=$GcpRegion `
+        --uniform-bucket-level-access
+}
+
+Step "Granting deploy SA upload access on gs://$apkBucket"
+gcloud storage buckets add-iam-policy-binding "gs://$apkBucket" `
+    --member="serviceAccount:$deploySaEmail" `
+    --role=roles/storage.objectAdmin `
+    --quiet | Out-Null
+
+Step "Granting public read on gs://$apkBucket"
+$publicOk = Invoke-GcloudCheck {
+    gcloud storage buckets add-iam-policy-binding "gs://$apkBucket" `
+        --member=allUsers `
+        --role=roles/storage.objectViewer `
+        --quiet
+}
+if ($publicOk) {
+    Write-Host "  done"
+} else {
+    Write-Host "  ! org policy denied allUsers binding (same as Cloud Run)."
+    Write-Host "  ! Once the org policy is relaxed for this project, run:"
+    Write-Host "  !   gcloud storage buckets add-iam-policy-binding gs://$apkBucket \"
+    Write-Host "  !     --member=allUsers --role=roles/storage.objectViewer"
+}
+
 $wifProviderResource = "projects/$projectNumber/locations/global/workloadIdentityPools/$WifPool/providers/$WifProvider"
 
 Write-Host ""
@@ -215,6 +248,20 @@ Write-Host "Add the following to GitHub > Settings > Secrets and variables > Act
 Write-Host ""
 Write-Host "  WIF_PROVIDER         $wifProviderResource"
 Write-Host "  WIF_SERVICE_ACCOUNT  $deploySaEmail"
+Write-Host ""
+Write-Host "For the Android release pipeline (generated once with"
+Write-Host "keytool -genkey -v -keystore kiwi-release.jks -keyalg RSA"
+Write-Host "-keysize 2048 -validity 10000 -alias kiwi):"
+Write-Host ""
+Write-Host "  ANDROID_KEYSTORE_B64       PowerShell:"
+Write-Host "                               [Convert]::ToBase64String("
+Write-Host "                                 [IO.File]::ReadAllBytes('kiwi-release.jks'))"
+Write-Host "  ANDROID_KEYSTORE_PASSWORD  storepass set above"
+Write-Host "  ANDROID_KEY_ALIAS          kiwi"
+Write-Host "  ANDROID_KEY_PASSWORD       keypass set above"
+Write-Host ""
+Write-Host "APK bucket created: gs://$apkBucket"
+Write-Host "APK URL pattern:    https://storage.googleapis.com/$apkBucket/kiwi-vN.apk"
 Write-Host ""
 Write-Host "Next: push to main (or trigger backend-deploy manually) to roll out"
 Write-Host "the first version of the backend to Cloud Run."
