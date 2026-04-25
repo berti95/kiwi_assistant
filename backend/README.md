@@ -62,17 +62,40 @@ docker run --rm -p 8080:8080 -e KIWI_API_KEY=dev kiwi-backend
 
 ### Setup inicial (una sola vez)
 
-`backend/scripts/setup-gcp.sh` provisiona todo lo que necesita Cloud Run +
-GitHub Actions de forma idempotente. Necesitas tener `gcloud` autenticado
-contra el proyecto.
+Se provisiona todo lo que necesita Cloud Run + GitHub Actions de forma
+idempotente. Necesitas tener `gcloud` autenticado contra el proyecto:
+
+```
+gcloud auth login
+```
+
+Después corres uno de los dos scripts equivalentes según tu sistema:
+
+**macOS / Linux / WSL / Git Bash:**
 
 ```bash
-gcloud auth login
 export GCP_PROJECT=kiwi-assistant-494421
 export GCP_REGION=europe-west1
 export GH_REPO=berti95/kiwi_assistant
 ./backend/scripts/setup-gcp.sh
 ```
+
+**Windows PowerShell:**
+
+```powershell
+$env:GCP_PROJECT = "kiwi-assistant-494421"
+$env:GCP_REGION  = "europe-west1"
+$env:GH_REPO     = "berti95/kiwi_assistant"
+.\backend\scripts\setup-gcp.ps1
+```
+
+Si PowerShell se queja con "no se puede ejecutar scripts en este sistema":
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+(solo afecta a la sesión actual de PowerShell).
 
 El script crea:
 
