@@ -27,6 +27,14 @@ APK con un `versionCode` monotónicamente creciente que el AutoUpdater de la
 tablet usa para detectar nuevas versiones. En desarrollo local sin esas
 variables, se usa `versionCode=1` y `versionName="0.1.0-dev"`.
 
+## Pipeline de release
+
+1. Push a `main` (o disparo manual) → workflow `Android Deploy`.
+2. Build firmado con `versionCode` = `github.run_number`.
+3. APK subido a `gs://kiwi-assistant-494421-apks/kiwi-vN.apk` y a `latest.apk`.
+4. Cloud Run actualiza `APP_VERSION_CODE`, `APP_VERSION_NAME` y `APK_URL`.
+5. La tablet polea `/api/version` cada 30 min, descarga e instala.
+
 ## Build
 
 ```bash
