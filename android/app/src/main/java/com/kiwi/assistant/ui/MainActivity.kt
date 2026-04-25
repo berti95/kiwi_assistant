@@ -13,18 +13,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.kiwi.assistant.kiosk.KioskController
 import com.kiwi.assistant.ui.theme.KiwiTheme
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var kioskController: KioskController
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        kioskController = KioskController(this)
         setContent {
             KiwiTheme {
                 PlaceholderScreen()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        kioskController.enableKiosk()
     }
 }
 
