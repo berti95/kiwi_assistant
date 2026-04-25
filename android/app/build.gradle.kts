@@ -43,7 +43,11 @@ val releaseSigningConfig = run {
     ) {
         null
     } else {
-        val decoded = Base64.getDecoder().decode(keystoreB64)
+        // Strip any whitespace the GitHub Secret may have picked up from the
+        // clipboard (PowerShell `clip` notoriously appends \r\n) — the strict
+        // base64 decoder rejects even a trailing newline.
+        val cleaned = keystoreB64.replace("\\s".toRegex(), "")
+        val decoded = Base64.getDecoder().decode(cleaned)
         val target = layout.buildDirectory.file("release-keystore.jks").get().asFile
         target.parentFile.mkdirs()
         target.writeBytes(decoded)
