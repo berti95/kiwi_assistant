@@ -46,9 +46,24 @@ function Step([string]$Msg) {
 
 function Invoke-GcloudCheck {
     <# Runs a gcloud "describe" command silently and returns $true if it
-       succeeded (resource exists), $false otherwise. #>
+       succeeded (resource exists), $false otherwise.
+
+       gcloud.ps1 on Windows wraps python.exe and forwards stderr, which
+       under $ErrorActionPreference='Stop' makes a NOT_FOUND look like a
+       terminating PowerShell error. We lower the preference for the
+       duration of the call and merge stderr into stdout so the only
+       signal that matters is $LASTEXITCODE. #>
     param([Parameter(Mandatory=$true)][scriptblock]$Block)
-    & $Block 2>$null | Out-Null
+    $oldEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Block 2>&1 | Out-Null
+    } catch {
+        # Native command "error" wrapped as a terminating exception; the
+        # exit code is still authoritative, fall through.
+    } finally {
+        $ErrorActionPreference = $oldEAP
+    }
     return ($LASTEXITCODE -eq 0)
 }
 
