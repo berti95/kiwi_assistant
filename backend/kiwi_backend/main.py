@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 
+from .session import run_session
 from .settings import settings
 
 app = FastAPI(title="Kiwi backend", version=settings.app_version_name)
@@ -17,3 +18,8 @@ async def version() -> dict[str, object]:
         "version_name": settings.app_version_name,
         "apk_url": settings.apk_url,
     }
+
+
+@app.websocket("/ws/session")
+async def ws_session(websocket: WebSocket) -> None:
+    await run_session(websocket)
