@@ -41,7 +41,7 @@ $SecretName  = "KIWI_API_KEY"
 
 function Step([string]$Msg) {
     Write-Host ""
-    Write-Host "▸ $Msg" -ForegroundColor Cyan
+    Write-Host "> $Msg" -ForegroundColor Cyan
 }
 
 function Invoke-GcloudCheck {
@@ -52,7 +52,7 @@ function Invoke-GcloudCheck {
     return ($LASTEXITCODE -eq 0)
 }
 
-Write-Host "─── Kiwi GCP setup ────────────────────────────────────────────"
+Write-Host "--- Kiwi GCP setup --------------------------------------------"
 Write-Host "  Project: $GcpProject"
 Write-Host "  Region:  $GcpRegion"
 Write-Host "  Repo:    $GhRepo"
@@ -158,7 +158,7 @@ Step "Secret $SecretName"
 if (Invoke-GcloudCheck { gcloud secrets describe $SecretName }) {
     Write-Host "  already exists; leaving its value alone"
 } else {
-    # Generate 32 random bytes → 64-char hex, prefixed with kwi_.
+    # Generate 32 random bytes -> 64-char hex, prefixed with kwi_.
     $bytes = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $hex = (-join ($bytes | ForEach-Object { '{0:x2}' -f $_ }))
@@ -180,9 +180,9 @@ if (Invoke-GcloudCheck { gcloud secrets describe $SecretName }) {
 
     Write-Host "  created with a freshly generated value"
     Write-Host ""
-    Write-Host "  ┌─ Save this somewhere safe (it is the API key the tablet sends):"
-    Write-Host "  │   $newKey"
-    Write-Host "  └─ It is also stored in Secret Manager for Cloud Run."
+    Write-Host "  Save this somewhere safe (it is the API key the tablet sends):"
+    Write-Host "    $newKey"
+    Write-Host "  It is also stored in Secret Manager for Cloud Run."
 }
 
 Step "Granting runtime SA access to the secret"
@@ -194,9 +194,9 @@ gcloud secrets add-iam-policy-binding $SecretName `
 $wifProviderResource = "projects/$projectNumber/locations/global/workloadIdentityPools/$WifPool/providers/$WifProvider"
 
 Write-Host ""
-Write-Host "═══ Done ═══════════════════════════════════════════════════════"
+Write-Host "=== Done ======================================================="
 Write-Host ""
-Write-Host "Add the following to GitHub → Settings → Secrets and variables → Actions for ${GhRepo}:"
+Write-Host "Add the following to GitHub > Settings > Secrets and variables > Actions for ${GhRepo}:"
 Write-Host ""
 Write-Host "  WIF_PROVIDER         $wifProviderResource"
 Write-Host "  WIF_SERVICE_ACCOUNT  $deploySaEmail"

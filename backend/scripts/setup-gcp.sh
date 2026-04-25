@@ -15,10 +15,10 @@
 #   - APIs: run, artifactregistry, secretmanager, aiplatform, iamcredentials,
 #     iam, sts.
 #   - Artifact Registry repo `kiwi` (Docker, $GCP_REGION).
-#   - Runtime SA `kiwi-backend@…` with roles/aiplatform.user and
+#   - Runtime SA `kiwi-backend@...` with roles/aiplatform.user and
 #     roles/secretmanager.secretAccessor so Cloud Run can call Vertex AI Live
 #     and read the tablet API key from Secret Manager.
-#   - Deploy SA `gha-deploy@…` with roles/run.developer,
+#   - Deploy SA `gha-deploy@...` with roles/run.developer,
 #     roles/artifactregistry.writer and the binding to act as the runtime SA.
 #   - Workload Identity Federation pool/provider tied to GitHub Actions for
 #     repository $GH_REPO.
@@ -40,7 +40,7 @@ WIF_POOL="github-actions"
 WIF_PROVIDER="github"
 SECRET_NAME="KIWI_API_KEY"
 
-echo "─── Kiwi GCP setup ────────────────────────────────────────────"
+echo "--- Kiwi GCP setup --------------------------------------------"
 echo "  Project: $GCP_PROJECT"
 echo "  Region:  $GCP_REGION"
 echo "  Repo:    $GH_REPO"
@@ -52,7 +52,7 @@ PROJECT_NUMBER="$(gcloud projects describe "$GCP_PROJECT" --format='value(projec
 RUNTIME_SA_EMAIL="${RUNTIME_SA}@${GCP_PROJECT}.iam.gserviceaccount.com"
 DEPLOY_SA_EMAIL="${DEPLOY_SA}@${GCP_PROJECT}.iam.gserviceaccount.com"
 
-step() { printf '\n▸ %s\n' "$*"; }
+step() { printf '\n> %s\n' "$*"; }
 
 step "Enabling APIs"
 gcloud services enable \
@@ -160,9 +160,9 @@ if ! gcloud secrets describe "$SECRET_NAME" >/dev/null 2>&1; then
         --data-file=-
     echo "  created with a freshly generated value"
     echo
-    echo "  ┌─ Save this somewhere safe (it is the API key the tablet sends):"
-    echo "  │   $NEW_KEY"
-    echo "  └─ It is also stored in Secret Manager for Cloud Run."
+    echo "  Save this somewhere safe (it is the API key the tablet sends):"
+    echo "    $NEW_KEY"
+    echo "  It is also stored in Secret Manager for Cloud Run."
 else
     echo "  already exists; leaving its value alone"
 fi
@@ -177,9 +177,9 @@ WIF_PROVIDER_RESOURCE="projects/${PROJECT_NUMBER}/locations/global/workloadIdent
 
 cat <<EOF
 
-═══ Done ═══════════════════════════════════════════════════════
+=== Done =======================================================
 
-Add the following to GitHub → Settings → Secrets and variables →
+Add the following to GitHub > Settings > Secrets and variables >
 Actions for $GH_REPO:
 
   WIF_PROVIDER         $WIF_PROVIDER_RESOURCE
@@ -187,7 +187,7 @@ Actions for $GH_REPO:
 
 (Optional, for the Android build to talk to the deployed backend:
   CLOUD_RUN_URL        https://kiwi-backend-XXXXX-ew.a.run.app
-                       — fill in once the first deploy succeeds.
+                       fill in once the first deploy succeeds.
   KIWI_API_KEY         the value printed above (or read from Secret
                        Manager: gcloud secrets versions access latest \\
                        --secret=$SECRET_NAME).
