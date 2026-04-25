@@ -74,6 +74,18 @@ jobs:
             --set-env-vars="GCP_PROJECT=${GCP_PROJECT},GCP_LOCATION=${GCP_REGION}" \
             --set-secrets="KIWI_API_KEY=KIWI_API_KEY:latest"
 
+      - name: Allow public invocations
+        # `gcloud run deploy --allow-unauthenticated` silently no-ops if the
+        # org policy blocks `allUsers`. We add the binding explicitly so a
+        # fresh deploy is always reachable; if the org policy denies it the
+        # step fails loudly instead of leaving a 403'ing service behind.
+        run: |
+          gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+            --region="$GCP_REGION" \
+            --member=allUsers \
+            --role=roles/run.invoker \
+            --quiet
+
       - name: Print service URL
         run: |
           URL=$(gcloud run services describe "$SERVICE_NAME" \
