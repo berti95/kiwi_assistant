@@ -18,21 +18,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Orquesta la sesión completa de Kiwi:
- *   tap → conexión WebSocket → captura de micro → respuesta de audio.
+ * Orquesta la sesión completa de Kiwi.
  *
- * El flujo (V1, conversación continua sin barge-in):
- *   Idle ── tap ──▶ Listening (captura activa, audio.input streaming)
- *   Listening ── audio.output ──▶ Responding (captura PAUSADA mientras
- *                                              Kiwi habla, así no se
- *                                              auto-interrumpe por eco)
- *   Responding ── response.end ──▶ Listening (captura reanudada)
- *   Cualquier estado activo ── tap ──▶ Idle (sesión cerrada)
+ * Flujo (V1, manual tap-to-talk dentro de la misma sesión Gemini):
+ *
+ *   Idle ── tap ──▶ Standby           (abre WebSocket, sesión Gemini lista)
+ *   Standby ── tap ──▶ Listening      (activity.start, captura on)
+ *   Listening ── tap ──▶ Processing   (activity.end, captura off)
+ *   Processing ── audio.output ──▶ Responding
+ *   Responding ── response.end ──▶ Standby (siguiente turno)
+ *   Cualquier estado activo ── long-press ──▶ Idle (sesión cerrada)
  *   Cualquier estado ── error ──▶ Error (con limpieza)
  *
- * Gemini Live se encarga del end-of-turn vía VAD: tú hablas, paras, él
- * responde, vuelves a hablar, etc., todo dentro de una sola sesión
- * WebSocket. Para cerrar tocas la pantalla.
+ * Manual activity detection sortea el bug del VAD automático de Gemini Live
+ * que deja la sesión muda tras el primer turno (python-genai #1657,
+ * cookbook #977). Cada turno tiene bordes explícitos via tap.
  */
 class KiwiViewModel : ViewModel() {
 
@@ -43,14 +43,7 @@ class KiwiViewModel : ViewModel() {
     private val playback = AudioPlaybackManager()
     private var session: KiwiSession? = null
 
-    // Audio chunks llegan en el thread de OkHttp. Los empujamos a un canal
-    // FIFO con un único consumidor para garantizar orden de reproducción.
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
-
-    // Counter of chunks enqueued but not yet written to AudioTrack. We use
-    // it on ResponseEnd to wait for the queue to drain before re-arming
-    // the mic — otherwise the still-playing audio bleeds into the mic and
-    // Gemini Live sees its own voice as user input on the next turn.
     private val pendingPlaybackChunks = AtomicInteger(0)
 
     private val playbackWorker: Job = viewModelScope.launch(Dispatchers.IO) {
@@ -73,16 +66,22 @@ class KiwiViewModel : ViewModel() {
 
     fun onTap() {
         when (_state.value) {
-            KiwiState.Idle -> startSession()
-            KiwiState.Listening,
+            KiwiState.Idle -> openSession()
+            KiwiState.Standby -> startUserTurn()
+            KiwiState.Listening -> endUserTurn()
             KiwiState.Processing,
             is KiwiState.Responding,
-            -> endSession()
+            -> Unit
             is KiwiState.Error -> _state.value = KiwiState.Idle
         }
     }
 
-    private fun startSession() {
+    /** Long press anywhere → close the conversation entirely. */
+    fun onLongPress() {
+        if (_state.value !is KiwiState.Idle) endSession()
+    }
+
+    private fun openSession() {
         if (!permissionGranted) {
             _state.value = KiwiState.Error("Concede permiso de micrófono para usar Kiwi.")
             return
@@ -94,30 +93,42 @@ class KiwiViewModel : ViewModel() {
             return
         }
 
-        _state.value = KiwiState.Listening
         playback.start()
         val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
         session = s
+        // Show Standby right away; SessionReady is just confirmation that
+        // the backend handshake succeeded, no UI change needed.
+        _state.value = KiwiState.Standby
         s.connect { event ->
             viewModelScope.launch(Dispatchers.Main) { handleEvent(event) }
         }
     }
 
+    private fun startUserTurn() {
+        session?.sendActivityStart()
+        val ok = capture.start(viewModelScope) { chunk -> session?.sendAudio(chunk) }
+        if (!ok) {
+            _state.value = KiwiState.Error("No se pudo iniciar la captura de audio.")
+            cleanup()
+            return
+        }
+        _state.value = KiwiState.Listening
+    }
+
+    private fun endUserTurn() {
+        capture.stop()
+        session?.sendActivityEnd()
+        _state.value = KiwiState.Processing
+    }
+
     private fun handleEvent(event: KiwiSessionEvent) {
         when (event) {
-            KiwiSessionEvent.SessionReady -> startCapture()
+            KiwiSessionEvent.SessionReady -> Unit
 
             is KiwiSessionEvent.AudioOutput -> {
                 pendingPlaybackChunks.incrementAndGet()
                 playbackQueue.trySend(event.pcm)
-                // First chunk of the assistant's reply: visually flip from
-                // Listening to Responding AND stop the mic capture so the
-                // tablet speakers don't bleed Kiwi's own voice back into
-                // the WebSocket. Without this, Gemini Live's VAD picks up
-                // its own audio, decides the user has started talking
-                // again, and interrupts the in-flight response.
-                if (_state.value is KiwiState.Listening) {
-                    capture.stop()
+                if (_state.value is KiwiState.Processing) {
                     _state.value = KiwiState.Responding(transcript = "")
                 }
             }
@@ -125,7 +136,7 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.InputTranscript -> Unit
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
-            KiwiSessionEvent.ResponseEnd -> reArmCaptureWhenAudioDrained()
+            KiwiSessionEvent.ResponseEnd -> waitForAudioAndGoStandby()
 
             is KiwiSessionEvent.Closed -> {
                 val current = _state.value
@@ -133,9 +144,6 @@ class KiwiViewModel : ViewModel() {
                     current is KiwiState.Error -> Unit
                     current is KiwiState.Idle -> Unit
                     else -> {
-                        // Server closed mid-session (cold start, timeout,
-                        // network blip…). Surface code+reason so we can
-                        // tell what happened.
                         val reason = event.reason.takeIf { it.isNotBlank() }
                         val msg = if (reason != null) {
                             "Sesión cerrada (code=${event.code}, ${reason})"
@@ -155,47 +163,25 @@ class KiwiViewModel : ViewModel() {
         }
     }
 
-    private fun startCapture() {
-        if (_state.value != KiwiState.Listening) return
-        val ok = capture.start(viewModelScope) { chunk -> session?.sendAudio(chunk) }
-        if (!ok) {
-            _state.value = KiwiState.Error("No se pudo iniciar la captura de audio.")
-            cleanup()
-        }
-    }
-
-    /**
-     * Wait until every queued audio chunk has been written to AudioTrack,
-     * plus a short tail to let AudioTrack's own buffer drain, before
-     * flipping back to Listening and re-opening the mic. Prevents the
-     * speakers' tail from being captured and shipped back to Gemini —
-     * which on the next turn manifests as Kiwi getting confused, repeating
-     * itself, or going silent.
-     */
-    private fun reArmCaptureWhenAudioDrained() {
-        if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return
-        viewModelScope.launch(Dispatchers.Main) {
-            // Wait for the worker to drain the channel.
-            while (pendingPlaybackChunks.get() > 0) {
-                delay(50)
-            }
-            // AudioTrack's internal buffer is sized for ~1 s of PCM
-            // (MIN_BUFFER_BYTES = 48 000). Wait long enough that the
-            // very last sample written has actually played out of the
-            // speaker; otherwise the speaker tail bleeds into the mic
-            // we are about to re-open and Gemini's VAD never sees a
-            // clean silence to mark the start of the next user turn.
-            delay(1500)
-            if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return@launch
-            _state.value = KiwiState.Listening
-            startCapture()
-        }
-    }
-
     private fun appendOutputTranscript(chunk: String) {
         val current = _state.value
         val previous = (current as? KiwiState.Responding)?.transcript ?: ""
         _state.value = KiwiState.Responding(transcript = previous + chunk)
+    }
+
+    /**
+     * Wait for AudioTrack to actually finish playing the response before
+     * showing Standby — otherwise the UI says "ready for next turn" while
+     * Kiwi is still mid-sentence.
+     */
+    private fun waitForAudioAndGoStandby() {
+        if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return
+        viewModelScope.launch(Dispatchers.Main) {
+            while (pendingPlaybackChunks.get() > 0) delay(50)
+            delay(800)  // AudioTrack internal buffer drain
+            if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return@launch
+            _state.value = KiwiState.Standby
+        }
     }
 
     private fun endSession() {

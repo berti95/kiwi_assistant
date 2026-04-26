@@ -1,7 +1,8 @@
 package com.kiwi.assistant.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,26 +24,30 @@ import com.kiwi.assistant.ui.screens.IdleScreen
 import com.kiwi.assistant.ui.screens.ListeningScreen
 import com.kiwi.assistant.ui.screens.ProcessingScreen
 import com.kiwi.assistant.ui.screens.RespondingScreen
+import com.kiwi.assistant.ui.screens.StandbyScreen
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
 
-    // The whole surface is tappable in Idle / Listening so the user can
-    // start or cancel a session anywhere — fullscreen activation gesture.
+    // Single tap drives the state machine; long-press anywhere ends the
+    // whole conversation and returns to the clock.
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(
+            .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = viewModel::onTap,
+                onLongClick = viewModel::onLongPress,
             ),
     ) {
         when (val s = state) {
             is KiwiState.Idle -> IdleScreen()
+            is KiwiState.Standby -> StandbyScreen()
             is KiwiState.Listening -> ListeningScreen()
             is KiwiState.Processing -> ProcessingScreen()
             is KiwiState.Responding -> RespondingScreen(transcript = s.transcript)

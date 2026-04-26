@@ -25,7 +25,9 @@ WebSocket close codes used for auth/protocol errors:
 
 # Client → server message types.
 TYPE_SESSION_START = "session.start"
+TYPE_ACTIVITY_START = "activity.start"
 TYPE_AUDIO_INPUT = "audio.input"
+TYPE_ACTIVITY_END = "activity.end"
 TYPE_AUDIO_END = "audio.end"
 TYPE_SESSION_END = "session.end"
 

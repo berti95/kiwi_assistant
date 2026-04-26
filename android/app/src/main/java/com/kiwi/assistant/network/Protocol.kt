@@ -11,7 +11,9 @@ import kotlinx.serialization.Serializable
  */
 object Protocol {
     const val TYPE_SESSION_START = "session.start"
+    const val TYPE_ACTIVITY_START = "activity.start"
     const val TYPE_AUDIO_INPUT = "audio.input"
+    const val TYPE_ACTIVITY_END = "activity.end"
     const val TYPE_AUDIO_END = "audio.end"
     const val TYPE_SESSION_END = "session.end"
 
@@ -31,7 +33,13 @@ object Protocol {
 data class SessionStart(val type: String = Protocol.TYPE_SESSION_START, val api_key: String)
 
 @Serializable
+data class ActivityStart(val type: String = Protocol.TYPE_ACTIVITY_START)
+
+@Serializable
 data class AudioInput(val type: String = Protocol.TYPE_AUDIO_INPUT, val data: String)
+
+@Serializable
+data class ActivityEnd(val type: String = Protocol.TYPE_ACTIVITY_END)
 
 @Serializable
 data class AudioEnd(val type: String = Protocol.TYPE_AUDIO_END)

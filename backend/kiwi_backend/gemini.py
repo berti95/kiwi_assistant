@@ -48,12 +48,20 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
-            # Multi-turn voice sessions on Gemini Live are known to get
-            # stuck after the first response (see python-genai #1657 and
-            # cookbook #977 — official Vertex AI best-practices workaround
-            # is to enable session resumption + sliding-window context
-            # compression so the session state is regenerable and audio
-            # tokens (~25 per second) don't accumulate.
+            # Manual activity detection: the tablet sends explicit
+            # activity_start / activity_end markers (driven by the
+            # user's tap) so Gemini doesn't have to guess turn
+            # boundaries. The automatic VAD has a known bug where the
+            # session stops responding after the first turn (see
+            # python-genai #1657, cookbook #977); driving the markers
+            # ourselves sidesteps it entirely.
+            realtime_input_config=types.RealtimeInputConfig(
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    disabled=True,
+                ),
+            ),
+            # Keep the session resumable + the context bounded so a
+            # long conversation doesn't blow through the token budget.
             session_resumption=types.SessionResumptionConfig(),
             context_window_compression=types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow(),
@@ -89,6 +97,15 @@ async def _tablet_to_gemini(ws: WebSocket, gemini_session) -> None:
         message = await ws.receive_json()
         kind = message.get("type")
 
+        if kind == protocol.TYPE_ACTIVITY_START:
+            # User just tapped to start their turn. With manual activity
+            # detection this is the only way Gemini learns the user is
+            # speaking; without it Gemini sits silent and never responds.
+            await gemini_session.send_realtime_input(
+                activity_start=types.ActivityStart(),
+            )
+            continue
+
         if kind == protocol.TYPE_AUDIO_INPUT:
             data = message.get("data")
             if not data:
@@ -102,10 +119,13 @@ async def _tablet_to_gemini(ws: WebSocket, gemini_session) -> None:
             )
             continue
 
-        if kind == protocol.TYPE_AUDIO_END:
-            # Tablet says the user has stopped talking. Force a turn even
-            # if Gemini's VAD has not flipped yet.
-            await gemini_session.send_client_content(turn_complete=True)
+        if kind == protocol.TYPE_ACTIVITY_END or kind == protocol.TYPE_AUDIO_END:
+            # User tapped again to end their turn (activity.end is the
+            # canonical signal; audio.end is kept for compatibility with
+            # older clients).
+            await gemini_session.send_realtime_input(
+                activity_end=types.ActivityEnd(),
+            )
             continue
 
         if kind == protocol.TYPE_SESSION_END:

@@ -126,6 +126,16 @@ class KiwiSession(
         ws.send(json.encodeToString(AudioInput.serializer(), AudioInput(data = data)))
     }
 
+    fun sendActivityStart() {
+        val ws = webSocket ?: return
+        ws.send(json.encodeToString(ActivityStart.serializer(), ActivityStart()))
+    }
+
+    fun sendActivityEnd() {
+        val ws = webSocket ?: return
+        ws.send(json.encodeToString(ActivityEnd.serializer(), ActivityEnd()))
+    }
+
     fun sendAudioEnd() {
         val ws = webSocket ?: return
         ws.send(json.encodeToString(AudioEnd.serializer(), AudioEnd()))
