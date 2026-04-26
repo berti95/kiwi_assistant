@@ -10,7 +10,6 @@ import com.kiwi.assistant.network.KiwiSessionEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,12 +19,17 @@ import kotlinx.coroutines.launch
  * Orquesta la sesión completa de Kiwi:
  *   tap → conexión WebSocket → captura de micro → respuesta de audio.
  *
- * El flujo (V1, tap-to-activate):
- *   Idle  ── tap ──▶ Listening (captura activa, audio.input streaming)
- *   Listening ── tap ──▶ Processing (audio.end enviado, esperando respuesta)
- *   Processing ── audio.output / transcript ──▶ Responding
- *   Responding ── response.end ──▶ Idle
- *   Cualquier estado ── error / lifecycle stop ──▶ Idle (con limpieza)
+ * El flujo (V1, conversación continua):
+ *   Idle ── tap ──▶ Listening (captura activa, audio.input streaming)
+ *   Listening ── audio.output ──▶ Responding (Kiwi habla; captura sigue
+ *                                              activa por si interrumpes)
+ *   Responding ── response.end ──▶ Listening (próximo turno del usuario)
+ *   Cualquier estado activo ── tap ──▶ Idle (sesión cerrada)
+ *   Cualquier estado ── error ──▶ Error (con limpieza)
+ *
+ * Gemini Live se encarga del end-of-turn vía VAD: tú hablas, paras, él
+ * responde, vuelves a hablar, etc., todo dentro de una sola sesión
+ * WebSocket. Para cerrar tocas la pantalla.
  */
 class KiwiViewModel : ViewModel() {
 
@@ -40,9 +44,6 @@ class KiwiViewModel : ViewModel() {
     // FIFO con un único consumidor para garantizar orden de reproducción.
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
     private val playbackWorker: Job = viewModelScope.launch(Dispatchers.IO) {
-        // A throw here would otherwise complete the launch with a crash
-        // and the whole channel pipeline would silently die. Wrap each
-        // chunk independently and keep the worker alive across blips.
         for (chunk in playbackQueue) {
             try {
                 playback.play(chunk)
@@ -61,11 +62,11 @@ class KiwiViewModel : ViewModel() {
     fun onTap() {
         when (_state.value) {
             KiwiState.Idle -> startSession()
-            KiwiState.Listening -> finishUserTurn()
-            is KiwiState.Error -> _state.value = KiwiState.Idle
+            KiwiState.Listening,
             KiwiState.Processing,
             is KiwiState.Responding,
-            -> Unit
+            -> endSession()
+            is KiwiState.Error -> _state.value = KiwiState.Idle
         }
     }
 
@@ -93,28 +94,50 @@ class KiwiViewModel : ViewModel() {
     private fun handleEvent(event: KiwiSessionEvent) {
         when (event) {
             KiwiSessionEvent.SessionReady -> startCapture()
-            is KiwiSessionEvent.AudioOutput -> playbackQueue.trySend(event.pcm)
+
+            is KiwiSessionEvent.AudioOutput -> {
+                playbackQueue.trySend(event.pcm)
+                // First chunk of the assistant's reply: visually flip from
+                // Listening to Responding. We don't stop capture so the
+                // user can interrupt; Gemini Live handles barge-in.
+                if (_state.value is KiwiState.Listening) {
+                    _state.value = KiwiState.Responding(transcript = "")
+                }
+            }
+
             is KiwiSessionEvent.InputTranscript -> Unit
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
-            KiwiSessionEvent.ResponseEnd -> finishSession()
+
+            KiwiSessionEvent.ResponseEnd -> {
+                // Gemini finished THIS turn. The session stays open and
+                // capture keeps running so the user can follow up; we
+                // just bring the UI back to Listening.
+                if (_state.value !is KiwiState.Idle && _state.value !is KiwiState.Error) {
+                    _state.value = KiwiState.Listening
+                }
+            }
+
             is KiwiSessionEvent.Closed -> {
                 val current = _state.value
                 when {
                     current is KiwiState.Error -> Unit
                     current is KiwiState.Idle -> Unit
-                    current is KiwiState.Listening || current is KiwiState.Processing -> {
+                    else -> {
+                        // Server closed mid-session (cold start, timeout,
+                        // network blip…). Surface code+reason so we can
+                        // tell what happened.
                         val reason = event.reason.takeIf { it.isNotBlank() }
                         val msg = if (reason != null) {
-                            "Sesión cerrada antes de tiempo (code=${event.code}, ${reason})"
+                            "Sesión cerrada (code=${event.code}, ${reason})"
                         } else {
-                            "Sesión cerrada antes de tiempo (code=${event.code})"
+                            "Sesión cerrada (code=${event.code})"
                         }
                         _state.value = KiwiState.Error(msg)
                         cleanup()
                     }
-                    else -> finishSession()
                 }
             }
+
             is KiwiSessionEvent.Error -> {
                 _state.value = KiwiState.Error(event.message)
                 cleanup()
@@ -131,28 +154,15 @@ class KiwiViewModel : ViewModel() {
         }
     }
 
-    private fun finishUserTurn() {
-        capture.stop()
-        session?.sendAudioEnd()
-        _state.value = KiwiState.Processing
-    }
-
     private fun appendOutputTranscript(chunk: String) {
         val current = _state.value
         val previous = (current as? KiwiState.Responding)?.transcript ?: ""
         _state.value = KiwiState.Responding(transcript = previous + chunk)
     }
 
-    private fun finishSession() {
-        capture.stop()
-        viewModelScope.launch(Dispatchers.IO) {
-            // Drain the AudioTrack buffer before tearing it down.
-            delay(500)
-            playback.stop()
-            session?.close()
-            session = null
-            _state.value = KiwiState.Idle
-        }
+    private fun endSession() {
+        cleanup()
+        _state.value = KiwiState.Idle
     }
 
     private fun cleanup() {
