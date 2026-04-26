@@ -31,11 +31,37 @@ async def run_session(ws: WebSocket) -> None:
     await ws.send_json({"type": protocol.TYPE_SESSION_READY})
 
     if settings.gcp_project:
-        # Lazy import so local installs / tests without google-genai keep
-        # working in echo mode.
-        from . import gemini
+        # Anything that escapes the lazy import or the proxy itself would
+        # otherwise propagate up to Starlette and tear the socket down with
+        # no clean close frame, which the OkHttp client surfaces as a bare
+        # EOFException with no diagnostic value. Wrap both so the tablet
+        # always gets a typed error before disconnect.
+        try:
+            from . import gemini
+        except Exception as exc:
+            log.exception("failed to import gemini module")
+            await _safe_send(
+                ws,
+                {
+                    "type": protocol.TYPE_ERROR,
+                    "message": f"import gemini: {type(exc).__name__}: {exc}",
+                },
+            )
+            return
 
-        await gemini.proxy(ws, settings)
+        try:
+            await gemini.proxy(ws, settings)
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            log.exception("uncaught proxy error")
+            await _safe_send(
+                ws,
+                {
+                    "type": protocol.TYPE_ERROR,
+                    "message": f"proxy crashed: {type(exc).__name__}: {exc}",
+                },
+            )
         return
 
     await _run_echo_loop(ws)
@@ -123,3 +149,18 @@ def _parse(raw: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return message if isinstance(message, dict) else None
+
+
+async def _safe_send(ws: WebSocket, payload: dict) -> None:
+    """Best-effort send that swallows disconnects.
+
+    Used at the failure path where the socket may already be closing.
+    """
+    try:
+        await ws.send_json(payload)
+    except WebSocketDisconnect:
+        pass
+    except RuntimeError:
+        # Starlette raises RuntimeError if you try to send on a socket
+        # that has already been closed by the framework.
+        pass
