@@ -10,6 +10,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.kiwi.assistant.kiosk.KioskController
 import com.kiwi.assistant.ui.theme.KiwiTheme
@@ -36,6 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        hideSystemBars()
         kioskController = KioskController(this)
         brightnessManager = BrightnessManager(this)
         // Updater only allowed to install when the user is not in the
@@ -83,6 +87,30 @@ class MainActivity : ComponentActivity() {
     private fun stopUpdater() {
         updaterJob?.cancel()
         updaterJob = null
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Reapply on focus return: the system pulls the bars back in
+        // when something interrupts (notification shade, install
+        // dialog, permission prompt). Without this the tablet can
+        // settle in a state with the status bar permanently visible.
+        if (hasFocus) hideSystemBars()
+    }
+
+    /**
+     * Immersive mode: hide both the status bar and the navigation bar
+     * so the app fills the screen edge-to-edge. The user can swipe
+     * from any edge to bring them back temporarily, then they fade
+     * away again — that's the right escape hatch for a tablet that's
+     * meant to look like an appliance but isn't a hard-locked kiosk.
+     */
+    private fun hideSystemBars() {
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     private fun hasMicPermission(): Boolean =
