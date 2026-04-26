@@ -19,11 +19,12 @@ import kotlinx.coroutines.launch
  * Orquesta la sesión completa de Kiwi:
  *   tap → conexión WebSocket → captura de micro → respuesta de audio.
  *
- * El flujo (V1, conversación continua):
+ * El flujo (V1, conversación continua sin barge-in):
  *   Idle ── tap ──▶ Listening (captura activa, audio.input streaming)
- *   Listening ── audio.output ──▶ Responding (Kiwi habla; captura sigue
- *                                              activa por si interrumpes)
- *   Responding ── response.end ──▶ Listening (próximo turno del usuario)
+ *   Listening ── audio.output ──▶ Responding (captura PAUSADA mientras
+ *                                              Kiwi habla, así no se
+ *                                              auto-interrumpe por eco)
+ *   Responding ── response.end ──▶ Listening (captura reanudada)
  *   Cualquier estado activo ── tap ──▶ Idle (sesión cerrada)
  *   Cualquier estado ── error ──▶ Error (con limpieza)
  *
@@ -98,9 +99,13 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.AudioOutput -> {
                 playbackQueue.trySend(event.pcm)
                 // First chunk of the assistant's reply: visually flip from
-                // Listening to Responding. We don't stop capture so the
-                // user can interrupt; Gemini Live handles barge-in.
+                // Listening to Responding AND stop the mic capture so the
+                // tablet speakers don't bleed Kiwi's own voice back into
+                // the WebSocket. Without this, Gemini Live's VAD picks up
+                // its own audio, decides the user has started talking
+                // again, and interrupts the in-flight response.
                 if (_state.value is KiwiState.Listening) {
+                    capture.stop()
                     _state.value = KiwiState.Responding(transcript = "")
                 }
             }
@@ -109,11 +114,12 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
             KiwiSessionEvent.ResponseEnd -> {
-                // Gemini finished THIS turn. The session stays open and
-                // capture keeps running so the user can follow up; we
-                // just bring the UI back to Listening.
+                // Gemini finished THIS turn. The session stays open; we
+                // re-arm the mic and bring the UI back to Listening so
+                // the user can follow up immediately.
                 if (_state.value !is KiwiState.Idle && _state.value !is KiwiState.Error) {
                     _state.value = KiwiState.Listening
+                    startCapture()
                 }
             }
 
