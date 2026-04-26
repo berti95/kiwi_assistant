@@ -133,6 +133,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // Just for Icons.Default.Close on the close-conversation button.
+    // Core (≈100 KB), not extended (multi-MB), keeps the APK small.
+    implementation(libs.androidx.compose.material.icons.core)
 
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)

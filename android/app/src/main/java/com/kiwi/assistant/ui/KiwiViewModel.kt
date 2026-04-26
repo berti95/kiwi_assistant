@@ -98,10 +98,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Long press anywhere → close the conversation entirely. */
-    fun onLongPress() {
+    /**
+     * Public end-conversation entry point. Used by both the close
+     * button and the long-press gesture; safe to call in any state
+     * (no-op when already Idle).
+     */
+    fun onEndSession() {
         if (_state.value !is KiwiState.Idle) endSession()
     }
+
+    /** Long press anywhere → close the conversation entirely. */
+    fun onLongPress() = onEndSession()
 
     private fun openSession() {
         if (!permissionGranted) {

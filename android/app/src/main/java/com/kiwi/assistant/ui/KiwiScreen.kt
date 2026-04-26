@@ -7,6 +7,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,7 +38,9 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val interactionSource = remember { MutableInteractionSource() }
 
     // Single tap drives the state machine; long-press anywhere ends the
-    // whole conversation and returns to the clock.
+    // whole conversation. The visible close button (top-left, only
+    // shown while a session is active) is the discoverable equivalent
+    // of the long-press, for users who don't know about the gesture.
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -55,6 +62,27 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 kiwiTranscript = s.kiwiTranscript,
             )
             is KiwiState.Error -> ErrorScreen(message = s.message)
+        }
+
+        // Close button: only meaningful while a session is active. Hidden
+        // in Idle (clock — already "closed") and Error (a tap there
+        // already returns to Idle, no separate close needed).
+        val sessionActive = state !is KiwiState.Idle && state !is KiwiState.Error
+        if (sessionActive) {
+            IconButton(
+                onClick = viewModel::onEndSession,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .size(56.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar conversación",
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(32.dp),
+                )
+            }
         }
 
         // Discreet version badge so we can tell at a glance which release
