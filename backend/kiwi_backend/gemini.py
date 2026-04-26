@@ -48,16 +48,6 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
-            # Default activity handling lets fresh user audio interrupt
-            # the model's own reply. Combined with imperfect echo
-            # cancellation on the tablet, that means the assistant cuts
-            # itself off mid-sentence and then loses session context for
-            # the next turn. NO_INTERRUPTION keeps Gemini's VAD for
-            # end-of-turn detection but prevents new audio from aborting
-            # the in-flight response.
-            realtime_input_config=types.RealtimeInputConfig(
-                activity_handling=types.ActivityHandling.NO_INTERRUPTION,
-            ),
         )
 
         async with client.aio.live.connect(
