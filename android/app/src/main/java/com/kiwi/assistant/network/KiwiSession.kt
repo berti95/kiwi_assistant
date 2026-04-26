@@ -97,7 +97,11 @@ class KiwiSession(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "WebSocket failure", t)
-                onEvent(KiwiSessionEvent.Error(t.message ?: "WebSocket failure"))
+                val cls = t::class.simpleName ?: "Throwable"
+                val msg = t.message?.takeIf { it.isNotBlank() }
+                val http = response?.let { " HTTP ${it.code}" } ?: ""
+                val composed = if (msg != null) "$cls: $msg$http" else "$cls$http"
+                onEvent(KiwiSessionEvent.Error(composed))
             }
         })
     }
