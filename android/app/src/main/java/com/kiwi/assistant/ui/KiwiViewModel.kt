@@ -55,9 +55,9 @@ class KiwiViewModel : ViewModel() {
         when (_state.value) {
             KiwiState.Idle -> startSession()
             KiwiState.Listening -> finishUserTurn()
+            is KiwiState.Error -> _state.value = KiwiState.Idle
             KiwiState.Processing,
             is KiwiState.Responding,
-            is KiwiState.Error,
             -> Unit
         }
     }
@@ -91,8 +91,21 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
             KiwiSessionEvent.ResponseEnd -> finishSession()
             is KiwiSessionEvent.Closed -> {
-                if (_state.value !is KiwiState.Error && _state.value !is KiwiState.Idle) {
-                    finishSession()
+                val current = _state.value
+                when {
+                    current is KiwiState.Error -> Unit
+                    current is KiwiState.Idle -> Unit
+                    current is KiwiState.Listening || current is KiwiState.Processing -> {
+                        val reason = event.reason.takeIf { it.isNotBlank() }
+                        val msg = if (reason != null) {
+                            "Sesión cerrada antes de tiempo (code=${event.code}, ${reason})"
+                        } else {
+                            "Sesión cerrada antes de tiempo (code=${event.code})"
+                        }
+                        _state.value = KiwiState.Error(msg)
+                        cleanup()
+                    }
+                    else -> finishSession()
                 }
             }
             is KiwiSessionEvent.Error -> {
