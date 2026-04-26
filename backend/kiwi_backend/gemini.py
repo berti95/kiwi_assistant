@@ -93,14 +93,16 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
 
 async def _tablet_to_gemini(ws: WebSocket, gemini_session) -> None:
     """Forward audio chunks and turn boundaries from the tablet to Gemini."""
+    turn_index = 0
+    audio_chunks_this_turn = 0
     while True:
         message = await ws.receive_json()
         kind = message.get("type")
 
         if kind == protocol.TYPE_ACTIVITY_START:
-            # User just tapped to start their turn. With manual activity
-            # detection this is the only way Gemini learns the user is
-            # speaking; without it Gemini sits silent and never responds.
+            turn_index += 1
+            audio_chunks_this_turn = 0
+            log.info("turn %d: activity_start received from tablet", turn_index)
             await gemini_session.send_realtime_input(
                 activity_start=types.ActivityStart(),
             )
@@ -114,31 +116,43 @@ async def _tablet_to_gemini(ws: WebSocket, gemini_session) -> None:
                 pcm = base64.b64decode(data)
             except (ValueError, TypeError):
                 continue
+            audio_chunks_this_turn += 1
             await gemini_session.send_realtime_input(
                 media=types.Blob(data=pcm, mime_type="audio/pcm;rate=16000"),
             )
             continue
 
         if kind == protocol.TYPE_ACTIVITY_END or kind == protocol.TYPE_AUDIO_END:
-            # User tapped again to end their turn (activity.end is the
-            # canonical signal; audio.end is kept for compatibility with
-            # older clients).
+            log.info(
+                "turn %d: activity_end after %d audio chunks (~%d ms)",
+                turn_index,
+                audio_chunks_this_turn,
+                audio_chunks_this_turn * 50,
+            )
             await gemini_session.send_realtime_input(
                 activity_end=types.ActivityEnd(),
             )
             continue
 
         if kind == protocol.TYPE_SESSION_END:
+            log.info("session.end received from tablet after %d turns", turn_index)
             return
 
 
 async def _gemini_to_tablet(gemini_session, ws: WebSocket) -> None:
     """Forward audio + transcripts from Gemini to the tablet."""
+    response_index = 0
+    audio_bytes_this_response = 0
+    output_text_this_response = ""
     async for response in gemini_session.receive():
         # Audio chunks arrive on the convenience `data` attribute when the
         # model's turn includes inline audio.
         audio = getattr(response, "data", None)
         if audio:
+            if audio_bytes_this_response == 0:
+                response_index += 1
+                log.info("response %d: first audio chunk from Gemini", response_index)
+            audio_bytes_this_response += len(audio)
             await _safe_send(
                 ws,
                 {
@@ -153,6 +167,7 @@ async def _gemini_to_tablet(gemini_session, ws: WebSocket) -> None:
 
         input_tx = getattr(sc, "input_transcription", None)
         if input_tx is not None and getattr(input_tx, "text", None):
+            log.info("response %d: input transcript chunk: %r", response_index, input_tx.text)
             await _safe_send(
                 ws,
                 {"type": protocol.TYPE_TRANSCRIPT_INPUT, "text": input_tx.text},
@@ -160,12 +175,21 @@ async def _gemini_to_tablet(gemini_session, ws: WebSocket) -> None:
 
         output_tx = getattr(sc, "output_transcription", None)
         if output_tx is not None and getattr(output_tx, "text", None):
+            output_text_this_response += output_tx.text
             await _safe_send(
                 ws,
                 {"type": protocol.TYPE_TRANSCRIPT_OUTPUT, "text": output_tx.text},
             )
 
         if getattr(sc, "turn_complete", False):
+            log.info(
+                "response %d: turn_complete (audio=%d bytes, text=%r)",
+                response_index,
+                audio_bytes_this_response,
+                output_text_this_response,
+            )
+            audio_bytes_this_response = 0
+            output_text_this_response = ""
             await _safe_send(ws, {"type": protocol.TYPE_RESPONSE_END})
 
 

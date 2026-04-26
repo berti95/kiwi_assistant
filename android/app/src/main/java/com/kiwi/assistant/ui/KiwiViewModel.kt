@@ -93,6 +93,7 @@ class KiwiViewModel : ViewModel() {
             return
         }
 
+        android.util.Log.i(TAG, "openSession: connecting…")
         playback.start()
         val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
         session = s
@@ -105,6 +106,7 @@ class KiwiViewModel : ViewModel() {
     }
 
     private fun startUserTurn() {
+        android.util.Log.i(TAG, "startUserTurn: sending activity_start")
         session?.sendActivityStart()
         val ok = capture.start(viewModelScope) { chunk -> session?.sendAudio(chunk) }
         if (!ok) {
@@ -116,6 +118,7 @@ class KiwiViewModel : ViewModel() {
     }
 
     private fun endUserTurn() {
+        android.util.Log.i(TAG, "endUserTurn: stopping capture + sending activity_end")
         capture.stop()
         session?.sendActivityEnd()
         _state.value = KiwiState.Processing
@@ -123,12 +126,13 @@ class KiwiViewModel : ViewModel() {
 
     private fun handleEvent(event: KiwiSessionEvent) {
         when (event) {
-            KiwiSessionEvent.SessionReady -> Unit
+            KiwiSessionEvent.SessionReady -> android.util.Log.i(TAG, "session.ready")
 
             is KiwiSessionEvent.AudioOutput -> {
                 pendingPlaybackChunks.incrementAndGet()
                 playbackQueue.trySend(event.pcm)
                 if (_state.value is KiwiState.Processing) {
+                    android.util.Log.i(TAG, "first audio chunk → Responding")
                     _state.value = KiwiState.Responding(transcript = "")
                 }
             }
@@ -136,7 +140,10 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.InputTranscript -> Unit
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
-            KiwiSessionEvent.ResponseEnd -> waitForAudioAndGoStandby()
+            KiwiSessionEvent.ResponseEnd -> {
+                android.util.Log.i(TAG, "response.end → drain → Standby")
+                waitForAudioAndGoStandby()
+            }
 
             is KiwiSessionEvent.Closed -> {
                 val current = _state.value
@@ -201,5 +208,9 @@ class KiwiViewModel : ViewModel() {
         playbackQueue.close()
         playbackWorker.cancel()
         super.onCleared()
+    }
+
+    private companion object {
+        const val TAG = "KiwiViewModel"
     }
 }
