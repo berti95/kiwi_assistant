@@ -48,6 +48,16 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            # Multi-turn voice sessions on Gemini Live are known to get
+            # stuck after the first response (see python-genai #1657 and
+            # cookbook #977 — official Vertex AI best-practices workaround
+            # is to enable session resumption + sliding-window context
+            # compression so the session state is regenerable and audio
+            # tokens (~25 per second) don't accumulate.
+            session_resumption=types.SessionResumptionConfig(),
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
         )
 
         async with client.aio.live.connect(
