@@ -140,6 +140,11 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.android.vad.silero)
+    // The Silero VAD AAR pulls onnxruntime-android in transitively but
+    // declares it as runtime scope, so the wake-word code that calls
+    // OrtEnvironment / OnnxTensor directly needs it as a real
+    // compile-time dependency too.
+    implementation(libs.onnxruntime.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
