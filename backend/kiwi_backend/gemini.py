@@ -26,30 +26,30 @@ log = logging.getLogger(__name__)
 
 async def proxy(ws: WebSocket, settings: Settings) -> None:
     """Run the tablet ↔ Gemini Live proxy until either side disconnects."""
-    client = genai.Client(
-        vertexai=True,
-        project=settings.gcp_project,
-        location=settings.gcp_location,
-    )
-
-    config = types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        speech_config=types.SpeechConfig(
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=settings.gemini_voice,
-                ),
-            ),
-            language_code="es-ES",
-        ),
-        system_instruction=types.Content(
-            parts=[types.Part(text=settings.gemini_system_prompt)],
-        ),
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
-
     try:
+        client = genai.Client(
+            vertexai=True,
+            project=settings.gcp_project,
+            location=settings.gcp_location,
+        )
+
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=settings.gemini_voice,
+                    ),
+                ),
+                language_code="es-ES",
+            ),
+            system_instruction=types.Content(
+                parts=[types.Part(text=settings.gemini_system_prompt)],
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+
         async with client.aio.live.connect(
             model=settings.gemini_model,
             config=config,
@@ -62,11 +62,14 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
         log.info("tablet disconnected")
     except Exception as exc:
         # Surface the failure to the tablet so the UI can render a useful
-        # error instead of a silent disconnect.
+        # error instead of a silent disconnect / EOF.
         log.exception("Gemini Live error")
         await _safe_send(
             ws,
-            {"type": protocol.TYPE_ERROR, "message": f"Gemini Live error: {exc}"},
+            {
+                "type": protocol.TYPE_ERROR,
+                "message": f"{type(exc).__name__}: {exc}",
+            },
         )
 
 
