@@ -49,8 +49,11 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             is KiwiState.Idle -> IdleScreen()
             is KiwiState.Standby -> StandbyScreen()
             is KiwiState.Listening -> ListeningScreen()
-            is KiwiState.Processing -> ProcessingScreen()
-            is KiwiState.Responding -> RespondingScreen(transcript = s.transcript)
+            is KiwiState.Processing -> ProcessingScreen(userTranscript = s.userTranscript)
+            is KiwiState.Responding -> RespondingScreen(
+                userTranscript = s.userTranscript,
+                kiwiTranscript = s.kiwiTranscript,
+            )
             is KiwiState.Error -> ErrorScreen(message = s.message)
         }
 

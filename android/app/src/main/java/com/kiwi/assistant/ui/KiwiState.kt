@@ -10,11 +10,21 @@ sealed interface KiwiState {
     /** Capturando audio del usuario (entre activity.start y activity.end). */
     data object Listening : KiwiState
 
-    /** Audio del usuario enviado, esperando primera respuesta de Gemini. */
-    data object Processing : KiwiState
+    /**
+     * Audio del usuario enviado, esperando primera respuesta de Gemini.
+     *
+     * `userTranscript` se va llenando con la transcripción de lo que el
+     * usuario acaba de decir (Gemini suele entregarla antes del primer
+     * audio chunk de respuesta), para que la UI pueda mostrarla y el
+     * usuario sepa si Kiwi le entendió.
+     */
+    data class Processing(val userTranscript: String = "") : KiwiState
 
     /** Gemini está respondiendo; se muestra el transcript acumulado. */
-    data class Responding(val transcript: String) : KiwiState
+    data class Responding(
+        val userTranscript: String,
+        val kiwiTranscript: String,
+    ) : KiwiState
 
     data class Error(val message: String) : KiwiState
 }

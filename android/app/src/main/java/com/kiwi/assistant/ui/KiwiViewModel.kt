@@ -69,7 +69,7 @@ class KiwiViewModel : ViewModel() {
             KiwiState.Idle -> openSession()
             KiwiState.Standby -> startUserTurn()
             KiwiState.Listening -> endUserTurn()
-            KiwiState.Processing,
+            is KiwiState.Processing,
             is KiwiState.Responding,
             -> Unit
             is KiwiState.Error -> _state.value = KiwiState.Idle
@@ -121,7 +121,7 @@ class KiwiViewModel : ViewModel() {
         android.util.Log.i(TAG, "endUserTurn: stopping capture + sending activity_end")
         capture.stop()
         session?.sendActivityEnd()
-        _state.value = KiwiState.Processing
+        _state.value = KiwiState.Processing()
     }
 
     private fun handleEvent(event: KiwiSessionEvent) {
@@ -131,13 +131,19 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.AudioOutput -> {
                 pendingPlaybackChunks.incrementAndGet()
                 playbackQueue.trySend(event.pcm)
-                if (_state.value is KiwiState.Processing) {
+                val current = _state.value
+                if (current is KiwiState.Processing) {
                     android.util.Log.i(TAG, "first audio chunk → Responding")
-                    _state.value = KiwiState.Responding(transcript = "")
+                    // Carry the user transcript over so the UI keeps
+                    // showing what Kiwi heard while it answers.
+                    _state.value = KiwiState.Responding(
+                        userTranscript = current.userTranscript,
+                        kiwiTranscript = "",
+                    )
                 }
             }
 
-            is KiwiSessionEvent.InputTranscript -> Unit
+            is KiwiSessionEvent.InputTranscript -> appendInputTranscript(event.text)
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
             KiwiSessionEvent.ResponseEnd -> {
@@ -170,10 +176,38 @@ class KiwiViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Append a fragment of the **user's** transcript (what Gemini heard).
+     * Updates whichever state currently holds it (Processing or
+     * Responding, in case Gemini's input transcription arrives after
+     * the first audio chunk).
+     */
+    private fun appendInputTranscript(chunk: String) {
+        val updated = when (val current = _state.value) {
+            is KiwiState.Processing ->
+                current.copy(userTranscript = current.userTranscript + chunk)
+            is KiwiState.Responding ->
+                current.copy(userTranscript = current.userTranscript + chunk)
+            else -> return
+        }
+        _state.value = updated
+    }
+
     private fun appendOutputTranscript(chunk: String) {
-        val current = _state.value
-        val previous = (current as? KiwiState.Responding)?.transcript ?: ""
-        _state.value = KiwiState.Responding(transcript = previous + chunk)
+        val updated = when (val current = _state.value) {
+            is KiwiState.Responding ->
+                current.copy(kiwiTranscript = current.kiwiTranscript + chunk)
+            // Defensive: in theory we always see the first audio chunk
+            // (which moves us to Responding) before any output transcript,
+            // but if Gemini ever ships text first we still want to show it.
+            is KiwiState.Processing ->
+                KiwiState.Responding(
+                    userTranscript = current.userTranscript,
+                    kiwiTranscript = chunk,
+                )
+            else -> return
+        }
+        _state.value = updated
     }
 
     /**
