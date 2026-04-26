@@ -53,7 +53,16 @@ class KiwiSession(
         .readTimeout(0, TimeUnit.MILLISECONDS) // unbounded for streaming
         .build()
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        // kotlinx.serialization omits properties whose value equals their
+        // declared default. The wire-protocol DTOs encode the message
+        // discriminator as `val type: String = Protocol.TYPE_*`, so without
+        // this flag every outbound frame would ship without its `type`
+        // field and the backend would close the socket with code 4001
+        // (CLOSE_EXPECTED_SESSION_START) on the very first message.
+        encodeDefaults = true
+    }
     private var webSocket: WebSocket? = null
 
     fun connect(onEvent: (KiwiSessionEvent) -> Unit) {
