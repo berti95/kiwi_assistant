@@ -62,6 +62,17 @@ class WakeWordDetector(context: Context) : AutoCloseable {
     private val melBuffer = ArrayDeque<FloatArray>()  // each entry = 32 mel bins
     private val embeddingBuffer = ArrayDeque<FloatArray>()  // each = 96 floats
 
+    /**
+     * How many embeddings to keep around. We never look further back
+     * than [wakewordWindow] when building the wake-word input, so the
+     * cap is `wakewordWindow + EMBEDDING_BUFFER_HEADROOM`. Hard-coding a
+     * smaller absolute cap (the previous behaviour) silently broke any
+     * future ``.onnx`` whose window happened to exceed it — e.g. a
+     * custom model trained on a longer phrase.
+     */
+    private val embeddingBufferCap: Int =
+        wakewordWindow + EMBEDDING_BUFFER_HEADROOM
+
     @Volatile
     var lastScore: Float = 0f
         private set
@@ -94,7 +105,7 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         while (melBuffer.size >= MEL_WINDOW) {
             val embedding = runEmbedding()
             embeddingBuffer.addLast(embedding)
-            while (embeddingBuffer.size > EMBEDDING_BUFFER_MAX) embeddingBuffer.removeFirst()
+            while (embeddingBuffer.size > embeddingBufferCap) embeddingBuffer.removeFirst()
             repeat(EMBEDDING_HOP) { melBuffer.removeFirst() }
             newEmbeddings = true
         }
@@ -191,6 +202,9 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         const val EMBEDDING_HOP = 8
         const val EMBEDDING_DIM = 96
         const val MEL_BUFFER_MAX = 200
-        const val EMBEDDING_BUFFER_MAX = 32
+        // A few embeddings of headroom on top of the model's own
+        // window — keeps memory bounded while still surviving a small
+        // burst of mel frames produced from a single feed() call.
+        const val EMBEDDING_BUFFER_HEADROOM = 8
     }
 }

@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -102,32 +103,44 @@ class WakeWordListener(
                         aboveThreshold += 1
                         if (aboveThreshold >= debounceFrames) {
                             Log.i(TAG, "Wake word DETECTED (score=$score)")
+                            // Release the mic + ONNX sessions BEFORE
+                            // notifying the caller so the session
+                            // capture path can immediately acquire the
+                            // AudioRecord without racing us. After this
+                            // point the listener is effectively stopped
+                            // even if the caller doesn't explicitly
+                            // call stop().
+                            releaseRecorderAndDetector()
                             // Fire on the main thread so the
                             // ViewModel can mutate state safely.
                             withContext(Dispatchers.Main) {
                                 if (!stopRequested) onDetected()
                             }
-                            // Stop ourselves — the ViewModel will
-                            // restart us once the session ends.
                             break
                         }
                     } else {
                         aboveThreshold = 0
                     }
                 }
+            } catch (e: CancellationException) {
+                // Normal shutdown via stop() (or via the caller's
+                // viewModelScope being cancelled). Re-throw so the
+                // coroutine machinery can settle the parent job.
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Wake-word loop crashed", e)
             } finally {
+                // Idempotent: if we hit detection above, this is a no-op.
+                releaseRecorderAndDetector()
                 Log.i(TAG, "Wake-word loop exiting")
             }
         }
         return true
     }
 
-    fun stop() {
-        stopRequested = true
-        job?.cancel()
-        job = null
+    /** Release mic + ONNX sessions if they're still around. Idempotent. */
+    @Synchronized
+    private fun releaseRecorderAndDetector() {
         recorder?.let {
             runCatching { it.stop() }
             it.release()
@@ -135,6 +148,18 @@ class WakeWordListener(
         recorder = null
         detector?.let { runCatching { it.close() } }
         detector = null
+    }
+
+    fun stop() {
+        stopRequested = true
+        job?.cancel()
+        job = null
+        // Defensive cleanup: in the normal flow the coroutine releases
+        // the recorder and detector itself, but if an external caller
+        // (the ViewModel's onCleared, an error path, or a tap-to-open
+        // before any detection) gets here first we still need to
+        // tear them down.
+        releaseRecorderAndDetector()
     }
 
     private companion object {
