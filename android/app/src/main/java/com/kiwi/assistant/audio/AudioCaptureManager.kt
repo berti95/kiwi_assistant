@@ -26,9 +26,19 @@ class AudioCaptureManager {
     private var job: Job? = null
     private var recorder: AudioRecord? = null
 
+    // AudioRecord.read() is a blocking native call that doesn't respect
+    // coroutine cancellation. If stop() fires while a read() is mid-flight
+    // the coroutine still ships that final buffer to onChunk before the
+    // loop notices recordingState changed — that ~50 ms of audio leaks to
+    // Gemini Live AFTER we asked the mic to shut up, which is enough to
+    // confuse VAD on the next turn. The flag short-circuits onChunk so a
+    // late read() is silently dropped instead.
+    @Volatile private var stopRequested = false
+
     @SuppressLint("MissingPermission")
     fun start(scope: CoroutineScope, onChunk: (ByteArray) -> Unit): Boolean {
         if (job?.isActive == true) return true
+        stopRequested = false
 
         val minBuffer = AudioRecord.getMinBufferSize(
             SAMPLE_RATE_HZ,
@@ -58,9 +68,12 @@ class AudioCaptureManager {
         rec.startRecording()
         job = scope.launch(Dispatchers.IO) {
             val buffer = ByteArray(CHUNK_BYTES)
-            while (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+            while (
+                !stopRequested &&
+                rec.recordingState == AudioRecord.RECORDSTATE_RECORDING
+            ) {
                 val read = rec.read(buffer, 0, buffer.size)
-                if (read > 0) {
+                if (read > 0 && !stopRequested) {
                     onChunk(buffer.copyOf(read))
                 }
             }
@@ -69,6 +82,7 @@ class AudioCaptureManager {
     }
 
     fun stop() {
+        stopRequested = true
         job?.cancel()
         job = null
         recorder?.let {

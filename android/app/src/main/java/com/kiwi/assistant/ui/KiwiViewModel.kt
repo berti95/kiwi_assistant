@@ -180,10 +180,12 @@ class KiwiViewModel : ViewModel() {
                 delay(50)
             }
             // AudioTrack's internal buffer is sized for ~1 s of PCM
-            // (MIN_BUFFER_BYTES = 48 000); 800 ms is enough for it to
-            // finish playing whatever was already written without an
-            // unnecessarily long silent gap before the user can speak.
-            delay(800)
+            // (MIN_BUFFER_BYTES = 48 000). Wait long enough that the
+            // very last sample written has actually played out of the
+            // speaker; otherwise the speaker tail bleeds into the mic
+            // we are about to re-open and Gemini's VAD never sees a
+            // clean silence to mark the start of the next user turn.
+            delay(1500)
             if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return@launch
             _state.value = KiwiState.Listening
             startCapture()
