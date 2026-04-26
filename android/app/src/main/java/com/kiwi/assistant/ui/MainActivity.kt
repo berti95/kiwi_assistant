@@ -38,7 +38,12 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         kioskController = KioskController(this)
         brightnessManager = BrightnessManager(this)
-        autoUpdater = AutoUpdater(applicationContext)
+        // Updater only allowed to install when the user is not in the
+        // middle of a Kiwi session. Otherwise Android force-stops the app
+        // mid-response to apply the new APK.
+        autoUpdater = AutoUpdater(applicationContext) {
+            viewModel.state.value is KiwiState.Idle
+        }
 
         viewModel.setMicrophonePermission(hasMicPermission())
         if (!hasMicPermission()) requestMic.launch(Manifest.permission.RECORD_AUDIO)

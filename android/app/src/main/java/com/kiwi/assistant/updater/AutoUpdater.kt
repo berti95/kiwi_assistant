@@ -20,11 +20,19 @@ import okhttp3.Request
  * el APK más reciente cuando hay versión nueva, y lo instala silenciosamente
  * usando los privilegios de Device Owner.
  *
+ * `canInstall` actúa como compuerta: cada paso disruptivo (descarga e
+ * instalación) la consulta y aborta si devuelve false. Sin esta compuerta
+ * la instalación ocurre cuando llega, lo que en una sesión activa de Kiwi
+ * mata la app a mitad de una respuesta de Gemini.
+ *
  * En desarrollo (sin Device Owner) la instalación silenciosa falla y el
  * sistema muestra el diálogo de instalación normal — útil para probar el
  * pipeline sin haber configurado la tablet como dispositivo dedicado.
  */
-class AutoUpdater(private val context: Context) {
+class AutoUpdater(
+    private val context: Context,
+    private val canInstall: () -> Boolean = { true },
+) {
 
     private val http = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
@@ -32,6 +40,10 @@ class AutoUpdater(private val context: Context) {
     /** Single-shot check. Returns true if an install was attempted. */
     suspend fun runOnce(): Boolean = withContext(Dispatchers.IO) {
         if (BuildConfig.CLOUD_RUN_URL.isEmpty() || BuildConfig.KIWI_API_KEY.isEmpty()) {
+            return@withContext false
+        }
+        if (!canInstall()) {
+            Log.i(TAG, "skipping update check: app is in an active session")
             return@withContext false
         }
 
@@ -50,6 +62,13 @@ class AutoUpdater(private val context: Context) {
 
         Log.i(TAG, "update available: ${info.versionName} (${info.versionCode})")
         val apkFile = downloadApk(info.apkUrl, info.versionCode) ?: return@withContext false
+
+        // Re-check the gate: the user may have started a session while the
+        // APK was downloading. Defer the install to the next polling cycle.
+        if (!canInstall()) {
+            Log.i(TAG, "session started during download; deferring install")
+            return@withContext false
+        }
         runCatching { installSilently(apkFile) }
             .onFailure { Log.w(TAG, "install failed", it) }
         true
