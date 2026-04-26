@@ -7,6 +7,7 @@ import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.audio.AudioCaptureManager
 import com.kiwi.assistant.audio.AudioPlaybackManager
 import com.kiwi.assistant.audio.SpeechActivityDetector
+import com.kiwi.assistant.audio.WakeWordListener
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import java.util.concurrent.atomic.AtomicInteger
@@ -61,6 +62,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         SpeechActivityDetector(application)
     }
     private val detector: SpeechActivityDetector get() = detectorLazy.value
+    // Wake-word listener (openWakeWord, "hey jarvis"). Owns the mic
+    // continuously while the app is in Idle, releases it for the
+    // session capture path the moment a wake word lands or the user
+    // taps to start manually. Only one AudioRecord can be active per
+    // process for the same source, so the start/stop dance has to be
+    // disciplined — see openSession() / endSession() for the choreography.
+    private val wakeWordListener = WakeWordListener(application)
     private var session: KiwiSession? = null
 
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
@@ -81,7 +89,52 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private var permissionGranted = false
 
     fun setMicrophonePermission(granted: Boolean) {
+        val wasGranted = permissionGranted
         permissionGranted = granted
+        // If permission has just been granted while we were sitting on
+        // the clock, light up the wake-word listener so the user can
+        // start talking right away. If it just got revoked, drop the
+        // listener (it'd fail to read anyway).
+        if (granted && !wasGranted && _state.value is KiwiState.Idle) {
+            startWakeWordListener()
+        } else if (!granted && wasGranted) {
+            wakeWordListener.stop()
+        }
+    }
+
+    /**
+     * Hand to call from the Activity once everything is wired and the
+     * permission has been (re)checked, so the wake-word listener fires
+     * up the first time the app comes to the foreground.
+     */
+    fun ensureWakeWordListening() {
+        if (permissionGranted && _state.value is KiwiState.Idle) {
+            startWakeWordListener()
+        }
+    }
+
+    /**
+     * Drop the mic when the activity backgrounds. Without this the
+     * AudioRecord stays open in the wake-word loop and burns the
+     * battery while nothing's actually listening.
+     */
+    fun releaseMicForBackground() {
+        wakeWordListener.stop()
+    }
+
+    private fun startWakeWordListener() {
+        val started = wakeWordListener.start(viewModelScope) {
+            android.util.Log.i(TAG, "wake word fired → opening session")
+            // Release the mic before openSession spins up its own
+            // capture. start()/stop() on the listener is synchronous
+            // enough that this is safe to do back-to-back here on the
+            // main thread.
+            wakeWordListener.stop()
+            openSession()
+        }
+        if (!started) {
+            android.util.Log.w(TAG, "wake-word listener failed to start")
+        }
     }
 
     fun onTap() {
@@ -94,7 +147,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             is KiwiState.Processing,
             is KiwiState.Responding,
             -> Unit
-            is KiwiState.Error -> _state.value = KiwiState.Idle
+            is KiwiState.Error -> {
+                _state.value = KiwiState.Idle
+                // Recovering from an error returns us to the clock —
+                // re-arm the wake-word listener so the user can call
+                // Kiwi again without tapping.
+                startWakeWordListener()
+            }
         }
     }
 
@@ -123,6 +182,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         android.util.Log.i(TAG, "openSession: connecting…")
+        // Manual taps may arrive while the wake-word listener is still
+        // holding the mic (e.g. user taps the screen instead of saying
+        // "hey jarvis"). Always stop it before we open the session
+        // capture, otherwise the second AudioRecord will fail to
+        // initialise.
+        wakeWordListener.stop()
         playback.start()
         val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
         session = s
@@ -308,6 +373,9 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun endSession() {
         cleanup()
         _state.value = KiwiState.Idle
+        // Returning to the clock — re-arm the wake-word listener so
+        // the next "hey jarvis" wakes Kiwi up again.
+        startWakeWordListener()
     }
 
     private fun cleanup() {
@@ -319,6 +387,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         cleanup()
+        wakeWordListener.stop()
         playbackQueue.close()
         playbackWorker.cancel()
         if (detectorLazy.isInitialized()) {

@@ -64,11 +64,19 @@ class MainActivity : ComponentActivity() {
         kioskController.enableKiosk()
         brightnessManager.start()
         viewModel.setMicrophonePermission(hasMicPermission())
+        // Belt-and-braces: setMicrophonePermission already starts the
+        // wake-word listener when permission flips from false to true,
+        // but if the app was force-stopped or the listener crashed,
+        // calling ensureWakeWordListening() on every resume guarantees
+        // that returning to the clock leaves the mic open for "hey
+        // jarvis".
+        viewModel.ensureWakeWordListening()
         startUpdater()
     }
 
     override fun onPause() {
         brightnessManager.stop()
+        viewModel.releaseMicForBackground()
         stopUpdater()
         super.onPause()
     }
