@@ -22,22 +22,23 @@ import kotlinx.coroutines.launch
 /**
  * Orquesta la sesión completa de Kiwi.
  *
- * Flujo (V2, un tap = un borde de turno; sin paso intermedio de
- * "Toca para hablar"):
+ * Flujo (V3, sin botones para hablar — VAD cierra los turnos solo,
+ * como hacen LiveKit / Pipecat / OpenAI Realtime):
  *
- *   Idle ── tap ──▶ Connecting       (abre WebSocket)
- *   Connecting ── session.ready ──▶ Listening  (auto: activity.start + captura)
- *   Listening ── tap ──▶ Processing  (activity.end, captura off)
+ *   Idle ── tap ──▶ Connecting        (abre WebSocket)
+ *   Connecting ── session.ready ──▶ Listening   (auto: activity.start + captura)
+ *   Listening ── silencio post-habla ──▶ Processing  (auto: activity.end)
  *   Processing ── audio.output ──▶ Responding
  *   Responding ── response.end + drain ──▶ Listening  (auto: siguiente turno)
+ *   Listening ── tap sin haber hablado ──▶ Listening  (turn.cancel + reset)
  *   Cualquier estado activo ── long-press ──▶ Idle (sesión cerrada)
  *   Cualquier estado ── error ──▶ Error (con limpieza)
  *
- * El primer tap abre la sesión y abre el micro en cuanto el server
- * confirma; los taps siguientes solo cierran el turno actual. El micro
- * vuelve a abrirse solo después de que Kiwi termine de hablar, así que
- * para una conversación normal solo hace falta 1 tap por turno (al
- * acabar de hablar). Long-press cierra la sesión entera.
+ * El usuario solo toca dos veces durante una conversación normal: una
+ * para abrir y una larga para cerrar. Mientras tanto Silero VAD
+ * decide cuándo el usuario terminó de hablar (silencio de
+ * SILENCE_END_OF_TURN_MS tras voz detectada). Si toca sin haber
+ * hablado, mandamos turn.cancel y rearmamos el micro silenciosamente.
  *
  * Manual activity detection (server-side) sortea el bug multi-turn de
  * Vertex Live API y va emparejado con la rotación per-turn de la
@@ -141,10 +142,22 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         session?.sendActivityStart()
         val ok = capture.start(viewModelScope) { chunk ->
             session?.sendAudio(chunk)
-            // Run VAD in parallel with sending so that, when the user
-            // taps to end the turn, we already know whether they
-            // actually said anything.
+            // Run VAD in parallel with sending so we can both decide
+            // (when the user stops talking) that the turn is over and
+            // (when the user taps without speaking) that there's
+            // nothing to send to Gemini.
             detector.feed(chunk)
+            if (detector.isEndOfTurn(SILENCE_END_OF_TURN_MS)) {
+                viewModelScope.launch(Dispatchers.Main) {
+                    // Re-check on the main thread to avoid double-firing
+                    // if several chunks land before endUserTurn() actually
+                    // stops the capture coroutine.
+                    if (_state.value is KiwiState.Listening) {
+                        android.util.Log.i(TAG, "auto end-of-turn (silence detected)")
+                        endUserTurn()
+                    }
+                }
+            }
         }
         if (!ok) {
             _state.value = KiwiState.Error("No se pudo iniciar la captura de audio.")
@@ -309,5 +322,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "KiwiViewModel"
+
+        // How long the user has to be silent (after Silero stopped
+        // returning isSpeech=true) before we auto-close the turn.
+        // Silero already smooths over ~300 ms internally, so the
+        // perceived silence-to-Kiwi-replies delay is ~300 ms longer
+        // than this. 800 ms here ⇒ feels like ~1.1 s of pause, in line
+        // with what conversational voice agents (LiveKit, Pipecat)
+        // ship by default.
+        const val SILENCE_END_OF_TURN_MS = 800L
     }
 }

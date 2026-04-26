@@ -52,11 +52,21 @@ class SpeechActivityDetector(context: Context) : AutoCloseable {
     var userSpoke: Boolean = false
         private set
 
+    /**
+     * Wall-clock timestamp (ms) of the last frame Silero classified as
+     * speech. Combined with [userSpoke], this lets the ViewModel decide
+     * the user has finished their turn after a configurable silence
+     * threshold — see [isEndOfTurn].
+     */
+    @Volatile
+    private var lastSpeechMs: Long = 0
+
     /** Drop any pending audio and reset the per-turn flag. */
     @Synchronized
     fun reset() {
         buffered = 0
         userSpoke = false
+        lastSpeechMs = 0
     }
 
     /**
@@ -75,22 +85,39 @@ class SpeechActivityDetector(context: Context) : AutoCloseable {
             offset += toCopy
 
             if (buffered == frameBytes) {
-                if (!userSpoke) {
-                    try {
-                        if (vad.isSpeech(buffer)) {
-                            userSpoke = true
-                        }
-                    } catch (e: Exception) {
-                        // Don't let a VAD glitch kill capture; just log
-                        // and keep going. Worst case userSpoke stays
-                        // false and we drop a turn that would've gone
-                        // through anyway.
-                        Log.w(TAG, "Silero VAD failed on frame", e)
+                try {
+                    if (vad.isSpeech(buffer)) {
+                        userSpoke = true
+                        lastSpeechMs = System.currentTimeMillis()
                     }
+                } catch (e: Exception) {
+                    // Don't let a VAD glitch kill capture; just log
+                    // and keep going. Worst case userSpoke stays
+                    // false and we drop a turn that would've gone
+                    // through anyway.
+                    Log.w(TAG, "Silero VAD failed on frame", e)
                 }
                 buffered = 0
             }
         }
+    }
+
+    /**
+     * True if the user has spoken at some point during the current
+     * turn AND has been silent for at least [silenceThresholdMs] since
+     * the last detected speech frame. Use this to auto-end the turn
+     * the way mainstream voice agents do, instead of forcing the user
+     * to tap a stop button.
+     *
+     * Silero already smooths short pauses internally (its
+     * `silenceDurationMs` parameter, 300 ms in our config), so the
+     * effective end-of-turn delay perceived by the user is roughly
+     * [silenceThresholdMs] + 300 ms.
+     */
+    fun isEndOfTurn(silenceThresholdMs: Long): Boolean {
+        if (!userSpoke) return false
+        val sinceLast = System.currentTimeMillis() - lastSpeechMs
+        return sinceLast >= silenceThresholdMs
     }
 
     override fun close() {
