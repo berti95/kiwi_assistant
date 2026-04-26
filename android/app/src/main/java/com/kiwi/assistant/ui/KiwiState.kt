@@ -4,8 +4,12 @@ sealed interface KiwiState {
     /** Reloj. Sin sesión abierta. */
     data object Idle : KiwiState
 
-    /** Sesión Gemini abierta, esperando que el usuario toque para hablar. */
-    data object Standby : KiwiState
+    /**
+     * WebSocket abriendo (entre `openSession` y `session.ready`). Estado
+     * transitorio: en cuanto el server confirma, el ViewModel arranca el
+     * primer turno automáticamente — el usuario no toca nada aquí.
+     */
+    data object Connecting : KiwiState
 
     /** Capturando audio del usuario (entre activity.start y activity.end). */
     data object Listening : KiwiState

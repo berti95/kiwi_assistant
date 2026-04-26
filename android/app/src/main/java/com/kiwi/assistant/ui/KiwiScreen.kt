@@ -19,12 +19,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.ui.screens.ConnectingScreen
 import com.kiwi.assistant.ui.screens.ErrorScreen
 import com.kiwi.assistant.ui.screens.IdleScreen
 import com.kiwi.assistant.ui.screens.ListeningScreen
 import com.kiwi.assistant.ui.screens.ProcessingScreen
 import com.kiwi.assistant.ui.screens.RespondingScreen
-import com.kiwi.assistant.ui.screens.StandbyScreen
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -47,7 +47,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     ) {
         when (val s = state) {
             is KiwiState.Idle -> IdleScreen()
-            is KiwiState.Standby -> StandbyScreen()
+            is KiwiState.Connecting -> ConnectingScreen()
             is KiwiState.Listening -> ListeningScreen()
             is KiwiState.Processing -> ProcessingScreen(userTranscript = s.userTranscript)
             is KiwiState.Responding -> RespondingScreen(

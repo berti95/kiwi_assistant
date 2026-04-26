@@ -20,19 +20,26 @@ import kotlinx.coroutines.launch
 /**
  * Orquesta la sesión completa de Kiwi.
  *
- * Flujo (V1, manual tap-to-talk dentro de la misma sesión Gemini):
+ * Flujo (V2, un tap = un borde de turno; sin paso intermedio de
+ * "Toca para hablar"):
  *
- *   Idle ── tap ──▶ Standby           (abre WebSocket, sesión Gemini lista)
- *   Standby ── tap ──▶ Listening      (activity.start, captura on)
- *   Listening ── tap ──▶ Processing   (activity.end, captura off)
+ *   Idle ── tap ──▶ Connecting       (abre WebSocket)
+ *   Connecting ── session.ready ──▶ Listening  (auto: activity.start + captura)
+ *   Listening ── tap ──▶ Processing  (activity.end, captura off)
  *   Processing ── audio.output ──▶ Responding
- *   Responding ── response.end ──▶ Standby (siguiente turno)
+ *   Responding ── response.end + drain ──▶ Listening  (auto: siguiente turno)
  *   Cualquier estado activo ── long-press ──▶ Idle (sesión cerrada)
  *   Cualquier estado ── error ──▶ Error (con limpieza)
  *
- * Manual activity detection sortea el bug del VAD automático de Gemini Live
- * que deja la sesión muda tras el primer turno (python-genai #1657,
- * cookbook #977). Cada turno tiene bordes explícitos via tap.
+ * El primer tap abre la sesión y abre el micro en cuanto el server
+ * confirma; los taps siguientes solo cierran el turno actual. El micro
+ * vuelve a abrirse solo después de que Kiwi termine de hablar, así que
+ * para una conversación normal solo hace falta 1 tap por turno (al
+ * acabar de hablar). Long-press cierra la sesión entera.
+ *
+ * Manual activity detection (server-side) sortea el bug multi-turn de
+ * Vertex Live API y va emparejado con la rotación per-turn de la
+ * sesión Gemini que hace el backend.
  */
 class KiwiViewModel : ViewModel() {
 
@@ -67,7 +74,9 @@ class KiwiViewModel : ViewModel() {
     fun onTap() {
         when (_state.value) {
             KiwiState.Idle -> openSession()
-            KiwiState.Standby -> startUserTurn()
+            // While the WS handshake is in flight a tap would race with
+            // the auto-start that fires on session.ready, so swallow it.
+            KiwiState.Connecting -> Unit
             KiwiState.Listening -> endUserTurn()
             is KiwiState.Processing,
             is KiwiState.Responding,
@@ -97,14 +106,23 @@ class KiwiViewModel : ViewModel() {
         playback.start()
         val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
         session = s
-        // Show Standby right away; SessionReady is just confirmation that
-        // the backend handshake succeeded, no UI change needed.
-        _state.value = KiwiState.Standby
+        // Wait for session.ready before opening the mic — sending
+        // activity_start while the WS is still mid-handshake would
+        // queue it before session.start in OkHttp's outbound buffer
+        // and the server would close the socket on us.
+        _state.value = KiwiState.Connecting
         s.connect { event ->
             viewModelScope.launch(Dispatchers.Main) { handleEvent(event) }
         }
     }
 
+    /**
+     * Send activity_start and start capturing. Used both right after
+     * session.ready (first turn) and after response.end + audio drain
+     * (subsequent turns). Caller is responsible for ensuring the
+     * WebSocket is open and the previous capture (if any) has been
+     * stopped already.
+     */
     private fun startUserTurn() {
         android.util.Log.i(TAG, "startUserTurn: sending activity_start")
         session?.sendActivityStart()
@@ -126,7 +144,15 @@ class KiwiViewModel : ViewModel() {
 
     private fun handleEvent(event: KiwiSessionEvent) {
         when (event) {
-            KiwiSessionEvent.SessionReady -> android.util.Log.i(TAG, "session.ready")
+            KiwiSessionEvent.SessionReady -> {
+                android.util.Log.i(TAG, "session.ready → auto-starting first turn")
+                // Long-press during the handshake, or an error, may have
+                // already closed the session — only auto-start if we're
+                // still in the Connecting state we set in openSession.
+                if (_state.value is KiwiState.Connecting) {
+                    startUserTurn()
+                }
+            }
 
             is KiwiSessionEvent.AudioOutput -> {
                 pendingPlaybackChunks.incrementAndGet()
@@ -147,8 +173,8 @@ class KiwiViewModel : ViewModel() {
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
             KiwiSessionEvent.ResponseEnd -> {
-                android.util.Log.i(TAG, "response.end → drain → Standby")
-                waitForAudioAndGoStandby()
+                android.util.Log.i(TAG, "response.end → drain → next turn")
+                waitForAudioAndStartNextTurn()
             }
 
             is KiwiSessionEvent.Closed -> {
@@ -211,17 +237,20 @@ class KiwiViewModel : ViewModel() {
     }
 
     /**
-     * Wait for AudioTrack to actually finish playing the response before
-     * showing Standby — otherwise the UI says "ready for next turn" while
-     * Kiwi is still mid-sentence.
+     * Wait for AudioTrack to actually finish playing the response, then
+     * auto-start the next turn — otherwise we'd reopen the mic while
+     * Kiwi is still mid-sentence and capture our own playback as input.
+     * The 800 ms padding accounts for AudioTrack's internal buffer.
      */
-    private fun waitForAudioAndGoStandby() {
+    private fun waitForAudioAndStartNextTurn() {
         if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return
         viewModelScope.launch(Dispatchers.Main) {
             while (pendingPlaybackChunks.get() > 0) delay(50)
-            delay(800)  // AudioTrack internal buffer drain
+            delay(800)
+            // The user may have long-pressed during the drain; bail if
+            // the session is already gone.
             if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return@launch
-            _state.value = KiwiState.Standby
+            startUserTurn()
         }
     }
 
