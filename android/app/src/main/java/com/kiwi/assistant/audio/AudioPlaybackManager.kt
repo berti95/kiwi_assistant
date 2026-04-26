@@ -57,7 +57,13 @@ class AudioPlaybackManager {
             start()
             track ?: return
         }
-        current.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+        runCatching {
+            current.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
+        }.onFailure {
+            Log.w(TAG, "AudioTrack.write failed; recreating", it)
+            runCatching { current.release() }
+            track = null
+        }
     }
 
     /** Drains the buffer and releases the underlying AudioTrack. */
@@ -66,7 +72,7 @@ class AudioPlaybackManager {
             runCatching {
                 it.stop()
                 it.release()
-            }
+            }.onFailure { e -> Log.w(TAG, "AudioTrack stop/release failed", e) }
         }
         track = null
     }

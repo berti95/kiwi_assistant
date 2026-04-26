@@ -40,8 +40,15 @@ class KiwiViewModel : ViewModel() {
     // FIFO con un único consumidor para garantizar orden de reproducción.
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
     private val playbackWorker: Job = viewModelScope.launch(Dispatchers.IO) {
+        // A throw here would otherwise complete the launch with a crash
+        // and the whole channel pipeline would silently die. Wrap each
+        // chunk independently and keep the worker alive across blips.
         for (chunk in playbackQueue) {
-            playback.play(chunk)
+            try {
+                playback.play(chunk)
+            } catch (e: Exception) {
+                android.util.Log.w("KiwiViewModel", "playback chunk failed", e)
+            }
         }
     }
 
