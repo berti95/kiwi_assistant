@@ -65,6 +65,12 @@ class KiwiSession(
     }
     private var webSocket: WebSocket? = null
 
+    // Set when we initiate the close so a subsequent onFailure (typically
+    // EOFException because the server doesn't always send a clean close
+    // frame after we send session.end) doesn't bubble up as an error to
+    // the UI on top of an otherwise successful interaction.
+    @Volatile private var closedByClient = false
+
     fun connect(onEvent: (KiwiSessionEvent) -> Unit) {
         if (baseUrl.isEmpty() || apiKey.isEmpty()) {
             onEvent(KiwiSessionEvent.Error("CLOUD_RUN_URL or KIWI_API_KEY missing"))
@@ -96,6 +102,14 @@ class KiwiSession(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (closedByClient) {
+                    // We initiated the close; OkHttp doesn't always see a
+                    // clean close frame back so this surfaces as
+                    // EOFException. Treat it as the normal close it is.
+                    Log.i(TAG, "WebSocket failure after client close: ${t::class.simpleName}")
+                    onEvent(KiwiSessionEvent.Closed(1000, "closed by client"))
+                    return
+                }
                 Log.w(TAG, "WebSocket failure", t)
                 val cls = t::class.simpleName ?: "Throwable"
                 val msg = t.message?.takeIf { it.isNotBlank() }
@@ -119,6 +133,7 @@ class KiwiSession(
 
     fun close() {
         val ws = webSocket ?: return
+        closedByClient = true
         ws.send(json.encodeToString(SessionEnd.serializer(), SessionEnd()))
         ws.close(1000, "client requested")
         webSocket = null
