@@ -17,6 +17,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // gkonovalov/android-vad publishes via JitPack — needed for the
+        // Silero VAD wrapper used by SpeechActivityDetector.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

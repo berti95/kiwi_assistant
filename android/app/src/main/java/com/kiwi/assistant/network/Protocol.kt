@@ -14,6 +14,7 @@ object Protocol {
     const val TYPE_ACTIVITY_START = "activity.start"
     const val TYPE_AUDIO_INPUT = "audio.input"
     const val TYPE_ACTIVITY_END = "activity.end"
+    const val TYPE_TURN_CANCEL = "turn.cancel"
     const val TYPE_AUDIO_END = "audio.end"
     const val TYPE_SESSION_END = "session.end"
 
@@ -40,6 +41,9 @@ data class AudioInput(val type: String = Protocol.TYPE_AUDIO_INPUT, val data: St
 
 @Serializable
 data class ActivityEnd(val type: String = Protocol.TYPE_ACTIVITY_END)
+
+@Serializable
+data class TurnCancel(val type: String = Protocol.TYPE_TURN_CANCEL)
 
 @Serializable
 data class AudioEnd(val type: String = Protocol.TYPE_AUDIO_END)

@@ -39,6 +39,16 @@ class _SessionEndError(Exception):
     """Tablet asked us to close the whole session, mid-turn."""
 
 
+class _TurnCancelledError(Exception):
+    """Tablet asked us to abandon the current turn (no speech detected).
+
+    Raised inside ``_run_one_turn`` so the outer ``async with
+    client.aio.live.connect`` block exits and the upstream Gemini Live
+    session is closed without producing a response, and so the proxy
+    loop knows to skip the history append for this turn.
+    """
+
+
 async def proxy(ws: WebSocket, settings: Settings) -> None:
     """Run the tablet ↔ Gemini Live proxy until either side disconnects."""
     history: list[dict[str, str]] = []
@@ -84,6 +94,11 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                     history.append(
                         {"user": user_text.strip(), "kiwi": kiwi_text.strip()},
                     )
+            except _TurnCancelledError:
+                log.info("turn %d: cancelled by tablet (no speech)", turn_index)
+                # Drop the upstream session, keep the WebSocket open,
+                # and loop back to wait for the next activity_start.
+                continue
             except _SessionEndError:
                 log.info(
                     "session.end received mid-turn after %d turns",
@@ -193,6 +208,13 @@ async def _run_one_turn(
                     activity_end=types.ActivityEnd(),
                 )
                 return
+            elif kind == protocol.TYPE_TURN_CANCEL:
+                log.info(
+                    "turn %d: cancel requested after %d audio chunks",
+                    turn_index,
+                    audio_chunks_in,
+                )
+                raise _TurnCancelledError()
             elif kind == protocol.TYPE_SESSION_END:
                 raise _SessionEndError()
 

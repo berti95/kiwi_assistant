@@ -28,6 +28,7 @@ TYPE_SESSION_START = "session.start"
 TYPE_ACTIVITY_START = "activity.start"
 TYPE_AUDIO_INPUT = "audio.input"
 TYPE_ACTIVITY_END = "activity.end"
+TYPE_TURN_CANCEL = "turn.cancel"
 TYPE_AUDIO_END = "audio.end"
 TYPE_SESSION_END = "session.end"
 

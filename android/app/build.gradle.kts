@@ -136,6 +136,7 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.android.vad.silero)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

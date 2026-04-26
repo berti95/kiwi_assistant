@@ -1,10 +1,12 @@
 package com.kiwi.assistant.ui
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.audio.AudioCaptureManager
 import com.kiwi.assistant.audio.AudioPlaybackManager
+import com.kiwi.assistant.audio.SpeechActivityDetector
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,13 +43,23 @@ import kotlinx.coroutines.launch
  * Vertex Live API y va emparejado con la rotación per-turn de la
  * sesión Gemini que hace el backend.
  */
-class KiwiViewModel : ViewModel() {
+class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow<KiwiState>(KiwiState.Idle)
     val state: StateFlow<KiwiState> = _state.asStateFlow()
 
     private val capture = AudioCaptureManager()
     private val playback = AudioPlaybackManager()
+    // Silero VAD wrapper. The constructor loads an ONNX model from the
+    // APK so we defer it until the user actually starts a session;
+    // most of the time the app is just showing the clock and doesn't
+    // need it. Holding the Lazy directly (rather than `by lazy`) lets
+    // onCleared check isInitialized() before forcing it open just to
+    // close it.
+    private val detectorLazy: Lazy<SpeechActivityDetector> = lazy {
+        SpeechActivityDetector(application)
+    }
+    private val detector: SpeechActivityDetector get() = detectorLazy.value
     private var session: KiwiSession? = null
 
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
@@ -125,8 +137,15 @@ class KiwiViewModel : ViewModel() {
      */
     private fun startUserTurn() {
         android.util.Log.i(TAG, "startUserTurn: sending activity_start")
+        detector.reset()
         session?.sendActivityStart()
-        val ok = capture.start(viewModelScope) { chunk -> session?.sendAudio(chunk) }
+        val ok = capture.start(viewModelScope) { chunk ->
+            session?.sendAudio(chunk)
+            // Run VAD in parallel with sending so that, when the user
+            // taps to end the turn, we already know whether they
+            // actually said anything.
+            detector.feed(chunk)
+        }
         if (!ok) {
             _state.value = KiwiState.Error("No se pudo iniciar la captura de audio.")
             cleanup()
@@ -136,6 +155,18 @@ class KiwiViewModel : ViewModel() {
     }
 
     private fun endUserTurn() {
+        if (!detector.userSpoke) {
+            // The user tapped to end without ever crossing the speech
+            // threshold (mainstream voice agents discard these turns
+            // rather than feeding silence to the model). Tell the
+            // server to drop the upstream Gemini session for this
+            // turn, then silently re-arm the mic.
+            android.util.Log.i(TAG, "endUserTurn: no speech, cancelling turn")
+            capture.stop()
+            session?.sendTurnCancel()
+            startUserTurn()
+            return
+        }
         android.util.Log.i(TAG, "endUserTurn: stopping capture + sending activity_end")
         capture.stop()
         session?.sendActivityEnd()
@@ -270,6 +301,9 @@ class KiwiViewModel : ViewModel() {
         cleanup()
         playbackQueue.close()
         playbackWorker.cancel()
+        if (detectorLazy.isInitialized()) {
+            runCatching { detectorLazy.value.close() }
+        }
         super.onCleared()
     }
 
