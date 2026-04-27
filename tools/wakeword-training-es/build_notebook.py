@@ -210,7 +210,8 @@ CELLS: list[dict] = [
         """
         # Para evitar tener que invocar `piper` por CLI (que es más lento)
         # cargamos los modelos directamente con piper_tts.
-        from piper.voice import PiperVoice
+        # piper-tts >=1.4 expone PiperVoice + SynthesisConfig en el package raíz.
+        from piper import PiperVoice, SynthesisConfig
 
         # Cargar las voces en memoria.
         loaded = []
@@ -227,8 +228,8 @@ CELLS: list[dict] = [
     code(
         """
         # Generar N_SAMPLES + N_SAMPLES_VAL .wav files de la frase objetivo.
-        # Cada llamada a synthesize() varía length_scale y noise_w para que
-        # cada muestra sea ligeramente distinta.
+        # Cada llamada a synthesize_wav() varía length_scale y noise_w_scale
+        # via SynthesisConfig para que cada muestra sea ligeramente distinta.
         import io
         import wave
         import random
@@ -239,24 +240,23 @@ CELLS: list[dict] = [
         TOTAL = N_SAMPLES + N_SAMPLES_VAL
 
         def synth_one(voice, text: str, out_path: Path) -> None:
-            length_scale = rng.uniform(0.85, 1.20)   # velocidad
-            noise_scale = rng.uniform(0.50, 0.75)    # variabilidad de pronunciación
-            noise_w = rng.uniform(0.50, 0.85)         # variabilidad de cadencia
+            cfg = SynthesisConfig(
+                length_scale=rng.uniform(0.85, 1.20),    # velocidad
+                noise_scale=rng.uniform(0.50, 0.75),      # variabilidad de pronunciación
+                noise_w_scale=rng.uniform(0.50, 0.85),    # variabilidad de cadencia
+            )
+            # Sintetizamos a un buffer en memoria — synthesize_wav() ya pone
+            # el formato (16-bit mono al sample-rate del modelo).
             buf = io.BytesIO()
             with wave.open(buf, "wb") as wf:
-                voice.synthesize(
-                    text,
-                    wf,
-                    length_scale=length_scale,
-                    noise_scale=noise_scale,
-                    noise_w=noise_w,
-                )
+                voice.synthesize_wav(text, wf, syn_config=cfg)
             buf.seek(0)
             with wave.open(buf, "rb") as wf_in:
                 rate = wf_in.getframerate()
                 frames = wf_in.readframes(wf_in.getnframes())
             audio = np.frombuffer(frames, dtype=np.int16)
-            # Resample to 16 kHz if Piper rendered at a different rate.
+            # Resample to 16 kHz if Piper rendered at a different rate
+            # (las voces "high" salen a 22 kHz, las "medium"/"low" a 16 kHz).
             if rate != 16000:
                 ratio = 16000 / rate
                 new_len = int(len(audio) * ratio)
