@@ -201,6 +201,17 @@ CELLS: list[dict] = [
     ),
     code(
         """
+        # openWakeWord >=0.6 dejó de empaquetar los modelos .onnx (mel,
+        # embedding, silero VAD) y los descarga bajo demanda. train.py los
+        # carga al arrancar, así que los descargamos primero — si no, peta
+        # con NO_SUCHFILE.
+        import openwakeword.utils
+        openwakeword.utils.download_models()
+        print("\\n✓ Modelos runtime de openWakeWord descargados")
+        """
+    ),
+    code(
+        """
         import os
         import sys
         import shutil
