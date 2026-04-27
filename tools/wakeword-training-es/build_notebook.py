@@ -116,12 +116,13 @@ CELLS: list[dict] = [
             "hola kiwi",
             "hey kiwi",
             "oye kiwi",
+            "eh kiwi",
         ]
 
         # Cuántas muestras POSITIVAS generar en TOTAL (repartidas entre
         # las variantes). ~800 por variante es un buen punto de partida.
-        N_SAMPLES = 2500
-        N_SAMPLES_VAL = 600
+        N_SAMPLES = 3200
+        N_SAMPLES_VAL = 800
 
         # Pasos de entrenamiento. 10000 está bien para empezar.
         TRAINING_STEPS = 10000
