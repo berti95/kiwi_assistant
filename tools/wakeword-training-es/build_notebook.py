@@ -11,10 +11,32 @@ Run from this directory:
     python build_notebook.py
 """
 import json
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 
 HERE = Path(__file__).parent
+
+
+def _current_git_commit() -> str:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=HERE,
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+NOTEBOOK_VERSION = (
+    f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} · {_current_git_commit()}"
+)
 
 
 def md(*lines: str) -> dict:
@@ -41,7 +63,7 @@ def _with_newlines(lines: tuple[str, ...]) -> str:
 
 CELLS: list[dict] = [
     md(
-        """
+        f"""
         # Kiwi — Entrena tu propia palabra de activación en español
 
         Este notebook entrena un modelo de wake-word para
@@ -61,6 +83,21 @@ CELLS: list[dict] = [
 
         **Salida**: un fichero `<frase>.onnx` (~1 MB) que sustituye al actual
         `hey_jarvis.onnx` en `android/app/src/main/assets/wakeword/`.
+
+        ---
+
+        > 📌 **Versión del notebook**: `{NOTEBOOK_VERSION}` —
+        > si Colab te carga otra cosa, no estás en la última. Recarga la
+        > página (o ábrela en pestaña de incógnito).
+        """
+    ),
+    code(
+        f"""
+        # Sanity check: imprime la versión del notebook al lanzarlo. Si lo que
+        # ves aquí no coincide con la última versión del repo en
+        # github.com/berti95/kiwi_assistant/commits/, Colab te ha cacheado una
+        # versión vieja — recarga la página antes de seguir.
+        print("📌 Notebook version: {NOTEBOOK_VERSION}")
         """
     ),
     md(
