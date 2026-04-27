@@ -143,7 +143,10 @@ CELLS: list[dict] = [
         # openWakeWord — usamos su training pipeline tal cual.
         !git clone https://github.com/dscripka/openwakeword
         !pip install -q -e ./openwakeword
-        !pip install -q webrtcvad piper-phonemize
+        # webrtcvad-wheels (no webrtcvad) — el paquete original requiere
+        # compilar contra cabeceras de Python y a veces falla silenciosamente
+        # en Colab con -q; las wheels son drop-in (mismo nombre de módulo).
+        !pip install -q webrtcvad-wheels piper-phonemize
 
         # Dependencias del training script.
         !pip install -q mutagen==1.47.0 torchinfo==1.8.0 torchmetrics==1.2.0
