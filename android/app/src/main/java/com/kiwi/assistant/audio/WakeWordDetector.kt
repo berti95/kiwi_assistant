@@ -11,9 +11,12 @@ import java.nio.FloatBuffer
 /**
  * Three-stage openWakeWord inference pipeline (mel → embedding → keyword).
  *
- * Mirrors the reference Python implementation
- * (dscripka/openWakeWord) so dropping in any pre-trained ``.onnx``
- * works without code changes:
+ * The classifier currently bundled is ``hola_kiwi.onnx``, trained in
+ * Colab via ``tools/wakeword-training-es/`` (Piper TTS Spanish voices
+ * for positives + the standard openWakeWord negatives + augmentation).
+ * Mirrors the reference Python implementation (dscripka/openWakeWord)
+ * so dropping in any other pre-trained ``.onnx`` (and updating the
+ * ``loadAsset`` call below) works without code changes:
  *
  *   1. **Mel spectrogram** model converts a chunk of raw 16 kHz PCM
  *      audio into 32-band mel feature frames. We normalise in place
@@ -40,7 +43,7 @@ class WakeWordDetector(context: Context) : AutoCloseable {
     private val embeddingSession: OrtSession =
         env.createSession(loadAsset(context, "wakeword/embedding_model.onnx"))
     private val wakewordSession: OrtSession =
-        env.createSession(loadAsset(context, "wakeword/hey_jarvis.onnx"))
+        env.createSession(loadAsset(context, "wakeword/hola_kiwi.onnx"))
 
     private val melInputName: String = melSession.inputNames.first()
     private val embeddingInputName: String = embeddingSession.inputNames.first()
