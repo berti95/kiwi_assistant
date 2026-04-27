@@ -408,35 +408,34 @@ CELLS: list[dict] = [
             !wget -q -O piper-sample-generator/models/en_US-libritts_r-medium.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt'
 
         # train.py hace `from generate_samples import generate_samples`,
-        # buscando el módulo en el PYTHONPATH. piper-sample-generator no
-        # se instala como paquete, así que tenemos que apuntar al
-        # directorio clonado a mano para los tres pasos de entrenamiento
-        # que vienen abajo.
+        # esperando que el módulo esté en el PYTHONPATH.
+        # piper-sample-generator no se instala como paquete y os.environ no
+        # siempre llega al sub-shell de Colab fiable, así que pasamos
+        # PYTHONPATH directamente en línea en cada uno de los tres comandos
+        # de entrenamiento más abajo (PSG_DIR se interpola con sintaxis
+        # {var} de los magics).
         PSG_DIR = str(ROOT / "piper-sample-generator")
-        os.environ["PYTHONPATH"] = (
-            f"{PSG_DIR}:{os.environ.get('PYTHONPATH', '')}".rstrip(":")
-        )
-        print("PYTHONPATH:", os.environ["PYTHONPATH"])
+        print("piper-sample-generator at:", PSG_DIR)
         """
     ),
     code(
         """
         # 1) Generate adversarial negatives (en inglés). El script ve que
         # los positivos ya existen y los respeta.
-        !{sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --generate_clips
+        !PYTHONPATH={PSG_DIR} {sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --generate_clips
         """
     ),
     code(
         """
         # 2) Augmentar las muestras con ruido y RIRs.
-        !{sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --augment_clips
+        !PYTHONPATH={PSG_DIR} {sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --augment_clips
         """
     ),
     code(
         """
         # 3) Entrenar el modelo. Esto es lo más largo — 10 a 30 minutos
         # según GPU.
-        !{sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --train_model
+        !PYTHONPATH={PSG_DIR} {sys.executable} openwakeword/openwakeword/train.py --training_config my_model.yaml --train_model
         """
     ),
     md(
