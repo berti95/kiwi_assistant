@@ -406,6 +406,17 @@ CELLS: list[dict] = [
         if not (ROOT / "piper-sample-generator").exists():
             !git clone -q https://github.com/rhasspy/piper-sample-generator
             !wget -q -O piper-sample-generator/models/en_US-libritts_r-medium.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt'
+
+        # train.py hace `from generate_samples import generate_samples`,
+        # buscando el módulo en el PYTHONPATH. piper-sample-generator no
+        # se instala como paquete, así que tenemos que apuntar al
+        # directorio clonado a mano para los tres pasos de entrenamiento
+        # que vienen abajo.
+        PSG_DIR = str(ROOT / "piper-sample-generator")
+        os.environ["PYTHONPATH"] = (
+            f"{PSG_DIR}:{os.environ.get('PYTHONPATH', '')}".rstrip(":")
+        )
+        print("PYTHONPATH:", os.environ["PYTHONPATH"])
         """
     ),
     code(
