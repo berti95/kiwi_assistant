@@ -57,7 +57,7 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         val shape = (info?.info as? TensorInfo)?.shape
             ?: longArrayOf(1, 16, EMBEDDING_DIM.toLong())
         shape.getOrNull(1)?.toInt()?.takeIf { it > 0 } ?: 16
-    }
+    }.also { Log.i(TAG, "Wake-word model window: $it embeddings") }
 
     private val melBuffer = ArrayDeque<FloatArray>()  // each entry = 32 mel bins
     private val embeddingBuffer = ArrayDeque<FloatArray>()  // each = 96 floats
@@ -121,6 +121,16 @@ class WakeWordDetector(context: Context) : AutoCloseable {
     }
 
     // ---- ONNX helpers --------------------------------------------------
+    //
+    // We read outputs via OnnxTensor.floatBuffer (a flat view of the
+    // tensor data) rather than .value (which builds a Java multi-dim
+    // array via reflection). Two reasons:
+    //   1. Robustness — the shape varies between openWakeWord model
+    //      builds (the embedding model is sometimes (1, 96), sometimes
+    //      (1, 1, 1, 96)). A fixed `as Array<...>` cast would
+    //      ClassCastException; reading the buffer flat handles either.
+    //   2. Slightly less garbage per inference because the multi-dim
+    //      array allocation is skipped.
 
     private fun runMelspectrogram(audio: FloatArray): List<FloatArray> {
         val tensor = OnnxTensor.createTensor(
@@ -130,10 +140,18 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         )
         return tensor.use {
             melSession.run(mapOf(melInputName to it)).use { result ->
-                // Output shape is (1, frames, 32).
-                @Suppress("UNCHECKED_CAST")
-                val arr = result[0].value as Array<Array<FloatArray>>
-                arr[0].map { row -> row.copyOf() }
+                val out = result[0] as OnnxTensor
+                // Output shape is (1, frames, 32). Read the frame
+                // count from the tensor's actual shape so the model
+                // is allowed to choose how many frames to emit.
+                val shape = out.info.shape
+                val frames = (shape.getOrNull(shape.size - 2) ?: 0L).toInt()
+                if (frames <= 0) return@use emptyList()
+                val flat = FloatArray(frames * MEL_BINS)
+                out.floatBuffer.get(flat)
+                List(frames) { f ->
+                    FloatArray(MEL_BINS) { b -> flat[f * MEL_BINS + b] }
+                }
             }
         }
     }
@@ -154,9 +172,13 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         )
         return tensor.use {
             embeddingSession.run(mapOf(embeddingInputName to it)).use { result ->
-                @Suppress("UNCHECKED_CAST")
-                val arr = result[0].value as Array<FloatArray>
-                arr[0].copyOf()
+                val out = result[0] as OnnxTensor
+                // Output is 96 floats per batch element, possibly
+                // wrapped in unit dimensions. Reading the flat buffer
+                // gives us 96 floats regardless of shape.
+                val embedding = FloatArray(EMBEDDING_DIM)
+                out.floatBuffer.get(embedding)
+                embedding
             }
         }
     }
@@ -175,9 +197,16 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         )
         return tensor.use {
             wakewordSession.run(mapOf(wakewordInputName to it)).use { result ->
-                @Suppress("UNCHECKED_CAST")
-                val arr = result[0].value as Array<FloatArray>
-                arr[0][0]
+                val out = result[0] as OnnxTensor
+                val buffer = out.floatBuffer
+                // openWakeWord wake-word models output a single
+                // probability — but some derivative trainers ship
+                // 2-class logits instead, with the positive-class
+                // probability at index 1. Take the last element so
+                // either layout works.
+                val outputs = FloatArray(buffer.remaining())
+                buffer.get(outputs)
+                outputs.last()
             }
         }
     }
