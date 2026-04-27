@@ -463,7 +463,10 @@ CELLS: list[dict] = [
 
         if not psg_root.exists():
             !git clone -q https://github.com/dscripka/piper-sample-generator
-            !wget -q -O piper-sample-generator/models/en_US-libritts_r-medium.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt'
+            # El fork de dscripka espera el modelo "en-us-libritts-high.pt"
+            # del release v1.0.0 (no el "en_US-libritts_r-medium.pt" del
+            # v2.0.0 que usa el upstream rhasspy reestructurado).
+            !wget -q -O piper-sample-generator/models/en-us-libritts-high.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v1.0.0/en-us-libritts-high.pt'
 
         PSG_DIR = str(psg_root)
         # Sanity check.
