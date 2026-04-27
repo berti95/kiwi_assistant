@@ -113,7 +113,12 @@ CELLS: list[dict] = [
         !pip install -q speechbrain==0.5.14 audiomentations==0.33.0
         !pip install -q torch-audiomentations==0.11.0 acoustics==0.2.6
         !pip install -q tensorflow==2.15.1 onnx_tf==1.10.0
-        !pip install -q pronouncing datasets deep_phonemizer==0.0.19
+        !pip install -q pronouncing deep_phonemizer==0.0.19
+
+        # HuggingFace datasets pinned to <4.0 — la 4.x devuelve
+        # torchcodec.decoders.AudioDecoder en vez de dict, lo que rompe el
+        # bucle de descarga de RIRs (row["audio"]["path"]).
+        !pip install -q "datasets<4.0"
 
         # Piper TTS regular (no el "sample-generator" que solo soporta inglés).
         !pip install -q piper-tts
