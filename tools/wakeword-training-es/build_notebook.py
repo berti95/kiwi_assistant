@@ -402,19 +402,19 @@ CELLS: list[dict] = [
     code(
         """
         # Necesitamos piper-sample-generator solo para los adversariales en
-        # inglés (que actúan como negativos).
+        # inglés (que actúan como negativos). El upstream rhasspy/ se
+        # reestructuró y ya no expone `generate_samples.py` en la raíz —
+        # train.py de openWakeWord sigue esperando la estructura vieja, así
+        # que clonamos el fork de dscripka (el propio autor de openWakeWord)
+        # que mantiene `generate_samples.py` accesible directamente.
         if not (ROOT / "piper-sample-generator").exists():
-            !git clone -q https://github.com/rhasspy/piper-sample-generator
+            !git clone -q https://github.com/dscripka/piper-sample-generator
             !wget -q -O piper-sample-generator/models/en_US-libritts_r-medium.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt'
 
-        # train.py hace `from generate_samples import generate_samples`,
-        # esperando que el módulo esté en el PYTHONPATH.
-        # piper-sample-generator no se instala como paquete y os.environ no
-        # siempre llega al sub-shell de Colab fiable, así que pasamos
-        # PYTHONPATH directamente en línea en cada uno de los tres comandos
-        # de entrenamiento más abajo (PSG_DIR se interpola con sintaxis
-        # {var} de los magics).
         PSG_DIR = str(ROOT / "piper-sample-generator")
+        # Sanity check.
+        assert (ROOT / "piper-sample-generator/generate_samples.py").exists(), \\
+            "generate_samples.py missing — wrong piper-sample-generator fork?"
         print("piper-sample-generator at:", PSG_DIR)
         """
     ),
