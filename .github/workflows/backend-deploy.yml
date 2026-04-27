@@ -70,7 +70,7 @@ jobs:
             --max-instances=2 \
             --timeout=3600 \
             --session-affinity \
-            --concurrency=80 \
+            --concurrency=4 \
             --update-env-vars="GCP_PROJECT=${GCP_PROJECT},GCP_LOCATION=${GCP_REGION}" \
             --set-secrets="KIWI_API_KEY=KIWI_API_KEY:latest"
 
