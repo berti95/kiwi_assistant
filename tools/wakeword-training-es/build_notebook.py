@@ -146,7 +146,12 @@ CELLS: list[dict] = [
         # webrtcvad-wheels (no webrtcvad) — el paquete original requiere
         # compilar contra cabeceras de Python y a veces falla silenciosamente
         # en Colab con -q; las wheels son drop-in (mismo nombre de módulo).
-        !pip install -q webrtcvad-wheels piper-phonemize
+        # Usamos {sys.executable} -m pip para garantizar que se instala en
+        # el mismo Python que el kernel, y --force-reinstall por si Colab
+        # tenía una versión rota cacheada.
+        import sys
+        !{sys.executable} -m pip install --quiet --force-reinstall --no-deps webrtcvad-wheels
+        !pip install -q piper-phonemize
         # espeak-phonemizer — usado por generate_samples.py (fork dscripka).
         # Necesita libespeak-ng a nivel de sistema para funcionar.
         !apt-get install -y -qq espeak-ng libespeak-ng-dev > /dev/null
@@ -173,6 +178,25 @@ CELLS: list[dict] = [
 
         # Piper TTS regular (no el "sample-generator" que solo soporta inglés).
         !pip install -q piper-tts
+        """
+    ),
+    code(
+        """
+        # Sanity check: verifica que las dependencias críticas están
+        # importables ANTES de gastar 30 min descargando datasets. Si esta
+        # celda explota, el pip install -q de la celda anterior falló
+        # silenciosamente — relanza esa celda quitándole el -q para ver
+        # el error real.
+        import importlib
+        for mod in ("webrtcvad", "espeak_phonemizer", "piper", "datasets",
+                    "torch_audiomentations"):
+            try:
+                importlib.import_module(mod)
+                print(f"✓ {mod}")
+            except Exception as e:
+                print(f"✗ {mod}: {type(e).__name__}: {e}")
+                raise
+        print("\\n✓ Todas las dependencias OK")
         """
     ),
     code(
