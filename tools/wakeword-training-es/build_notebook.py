@@ -107,15 +107,21 @@ CELLS: list[dict] = [
     ),
     code(
         """
-        # ⬇️  Cambia esto a la frase que quieras como wake word.
-        # Recomendaciones: 3–5 sílabas, vocales claras, sin sonidos parecidos a
-        # palabras comunes ("hola", "café", "jarvis" en inglés son malas).
-        TARGET_PHRASE = "hola kiwi"
+        # ⬇️  Cambia esto a las frases que quieras como wake word.
+        # Puedes poner una sola ("hola kiwi") o varias variantes —
+        # el modelo aprende a disparar con cualquiera. Recomendado:
+        # 3-5 sílabas, vocales claras, sin sonidos parecidos a palabras
+        # comunes ("hola", "café", "jarvis" en inglés son malas).
+        TARGET_PHRASES = [
+            "hola kiwi",
+            "hey kiwi",
+            "oye kiwi",
+        ]
 
-        # Cuántas muestras generar. Más = mejor modelo, más tiempo.
-        # 2000 es razonable para un primer intento.
-        N_SAMPLES = 2000
-        N_SAMPLES_VAL = 500
+        # Cuántas muestras POSITIVAS generar en TOTAL (repartidas entre
+        # las variantes). ~800 por variante es un buen punto de partida.
+        N_SAMPLES = 2500
+        N_SAMPLES_VAL = 600
 
         # Pasos de entrenamiento. 10000 está bien para empezar.
         TRAINING_STEPS = 10000
@@ -125,8 +131,16 @@ CELLS: list[dict] = [
         TARGET_ACCURACY = 0.6
         TARGET_RECALL = 0.25
 
-        MODEL_NAME = TARGET_PHRASE.replace(" ", "_").lower()
-        print(f"→ Frase objetivo: '{TARGET_PHRASE}'")
+        # Nombre del fichero .onnx final. Si tienes una sola frase usamos
+        # ésa; si hay varias, las concatenamos para que sea reconocible.
+        MODEL_NAME = (
+            TARGET_PHRASES[0].replace(" ", "_").lower()
+            if len(TARGET_PHRASES) == 1
+            else f"{TARGET_PHRASES[0].split()[-1].lower()}_variants"
+        )
+        print(f"→ Frases objetivo ({len(TARGET_PHRASES)}):")
+        for p in TARGET_PHRASES:
+            print(f"    • {p}")
         print(f"→ Modelo se llamará: {MODEL_NAME}.onnx")
         """
     ),
@@ -361,12 +375,16 @@ CELLS: list[dict] = [
 
         import scipy.signal  # late import so the resample helper is available
 
-        print(f"Generando {TOTAL} muestras de '{TARGET_PHRASE}'…")
+        print(f"Generando {TOTAL} muestras repartidas entre {len(TARGET_PHRASES)} frases…")
+        # Iteramos en orden round-robin (voz, frase) para que cada
+        # combinación esté bien representada en el set de entrenamiento.
         for i in tqdm(range(TOTAL)):
-            name, voice = loaded[i % len(loaded)]
+            voice_name, voice = loaded[i % len(loaded)]
+            phrase = TARGET_PHRASES[i % len(TARGET_PHRASES)]
+            phrase_slug = phrase.replace(" ", "_").lower()
             target_dir = POSITIVE_TRAIN if i < N_SAMPLES else POSITIVE_TEST
-            out_path = target_dir / f"{MODEL_NAME}_{name}_{i:05d}.wav"
-            synth_one(voice, TARGET_PHRASE, out_path)
+            out_path = target_dir / f"{phrase_slug}_{voice_name}_{i:05d}.wav"
+            synth_one(voice, phrase, out_path)
 
         print("\\nMuestras positivas generadas:")
         print(f"  Train: {len(list(POSITIVE_TRAIN.glob('*.wav')))}")
@@ -451,7 +469,9 @@ CELLS: list[dict] = [
         config_path = ROOT / "openwakeword/examples/custom_model.yml"
         config = yaml.safe_load(config_path.read_text())
 
-        config["target_phrase"] = [TARGET_PHRASE]
+        # target_phrase es una lista — openWakeWord trata cualquier
+        # elemento como positivo y genera adversariales para cada uno.
+        config["target_phrase"] = list(TARGET_PHRASES)
         config["model_name"] = MODEL_NAME
         config["n_samples"] = N_SAMPLES
         config["n_samples_val"] = N_SAMPLES_VAL
