@@ -147,6 +147,10 @@ CELLS: list[dict] = [
         # compilar contra cabeceras de Python y a veces falla silenciosamente
         # en Colab con -q; las wheels son drop-in (mismo nombre de módulo).
         !pip install -q webrtcvad-wheels piper-phonemize
+        # espeak-phonemizer — usado por generate_samples.py (fork dscripka).
+        # Necesita libespeak-ng a nivel de sistema para funcionar.
+        !apt-get install -y -qq espeak-ng libespeak-ng-dev > /dev/null
+        !pip install -q espeak-phonemizer
 
         # Dependencias del training script.
         !pip install -q mutagen==1.47.0 torchinfo==1.8.0 torchmetrics==1.2.0
