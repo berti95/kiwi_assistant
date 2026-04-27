@@ -503,6 +503,13 @@ CELLS: list[dict] = [
             # v2.0.0 que usa el upstream rhasspy reestructurado).
             !wget -q -O piper-sample-generator/models/en-us-libritts-high.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v1.0.0/en-us-libritts-high.pt'
 
+            # PyTorch 2.6+ cambió el default de torch.load a weights_only=True
+            # por seguridad, lo que rompe la carga del checkpoint libritts
+            # (que pickle objetos de piper_train.vits.models.SynthesizerTrn).
+            # generate_samples.py llama torch.load(model_path) sin pasar
+            # weights_only — lo añadimos via sed para forzar False.
+            !sed -i 's/torch\\.load(model_path)/torch.load(model_path, weights_only=False)/' piper-sample-generator/generate_samples.py
+
         PSG_DIR = str(psg_root)
         # Sanity check.
         assert psg_marker.exists(), \\
