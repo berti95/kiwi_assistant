@@ -111,7 +111,14 @@ CELLS: list[dict] = [
         # Dependencias del training script.
         !pip install -q mutagen==1.47.0 torchinfo==1.8.0 torchmetrics==1.2.0
         !pip install -q speechbrain==0.5.14 audiomentations==0.33.0
-        !pip install -q torch-audiomentations==0.11.0 acoustics==0.2.6
+        # torch-audiomentations 0.11.0 (la versión que pinea el notebook
+        # oficial de openWakeWord) llama a torchaudio.set_audio_backend(),
+        # que se eliminó en torchaudio 2.2+. La 0.11.1 es la primera
+        # release que quitó esa llamada — bumpeamos a 0.11.1 para que el
+        # `import torch_audiomentations` no falle dentro de openwakeword/
+        # data.py.
+        !pip install -q torch-audiomentations==0.11.1
+        !pip install -q acoustics==0.2.6
         !pip install -q tensorflow==2.15.1 onnx_tf==1.10.0
         !pip install -q pronouncing deep_phonemizer==0.0.19
 
