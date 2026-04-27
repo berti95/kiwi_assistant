@@ -444,13 +444,23 @@ CELLS: list[dict] = [
         # train.py de openWakeWord sigue esperando la estructura vieja, así
         # que clonamos el fork de dscripka (el propio autor de openWakeWord)
         # que mantiene `generate_samples.py` accesible directamente.
-        if not (ROOT / "piper-sample-generator").exists():
+        psg_root = ROOT / "piper-sample-generator"
+        psg_marker = psg_root / "generate_samples.py"
+
+        # Si la carpeta existe pero no tiene generate_samples.py es porque
+        # un intento anterior clonó el fork incorrecto (rhasspy/, que ya no
+        # tiene ese fichero en la raíz). Borra y vuelve a clonar el bueno.
+        if psg_root.exists() and not psg_marker.exists():
+            print("⚠️  piper-sample-generator existente sin generate_samples.py — re-clonando…")
+            !rm -rf {psg_root}
+
+        if not psg_root.exists():
             !git clone -q https://github.com/dscripka/piper-sample-generator
             !wget -q -O piper-sample-generator/models/en_US-libritts_r-medium.pt 'https://github.com/rhasspy/piper-sample-generator/releases/download/v2.0.0/en_US-libritts_r-medium.pt'
 
-        PSG_DIR = str(ROOT / "piper-sample-generator")
+        PSG_DIR = str(psg_root)
         # Sanity check.
-        assert (ROOT / "piper-sample-generator/generate_samples.py").exists(), \\
+        assert psg_marker.exists(), \\
             "generate_samples.py missing — wrong piper-sample-generator fork?"
         print("piper-sample-generator at:", PSG_DIR)
         """
