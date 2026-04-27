@@ -88,6 +88,8 @@ class WakeWordListener(
         job = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(CHUNK_SAMPLES)
             var aboveThreshold = 0
+            var peakScore = 0f
+            var lastPeakLogMs = System.currentTimeMillis()
             try {
                 while (
                     !stopRequested &&
@@ -98,6 +100,19 @@ class WakeWordListener(
 
                     val score = det.feed(buffer.copyOf(read))
                     if (score == null) continue
+
+                    if (score > peakScore) peakScore = score
+                    // Log the peak score every PEAK_LOG_INTERVAL_MS so
+                    // we can tell whether the model is producing
+                    // anything sensible even when the threshold isn't
+                    // being crossed — the alternative is per-frame
+                    // logging which is way too chatty.
+                    val now = System.currentTimeMillis()
+                    if (now - lastPeakLogMs >= PEAK_LOG_INTERVAL_MS) {
+                        Log.i(TAG, "peak score in last ${(now - lastPeakLogMs) / 1000}s: $peakScore")
+                        peakScore = 0f
+                        lastPeakLogMs = now
+                    }
 
                     if (score >= threshold) {
                         aboveThreshold += 1
@@ -177,5 +192,10 @@ class WakeWordListener(
         // avoid spurious triggers. 2 × 80 ms = 160 ms of sustained
         // detection — short enough to feel snappy.
         const val DEFAULT_DEBOUNCE_FRAMES = 2
+        // How often to summarise the peak wake-word score in the log
+        // when no detection has fired. Useful for tuning the threshold
+        // and for sanity-checking that the model is producing scores
+        // at all.
+        const val PEAK_LOG_INTERVAL_MS = 5_000L
     }
 }
