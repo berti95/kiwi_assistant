@@ -169,6 +169,11 @@ CELLS: list[dict] = [
         !pip install -q torch-audiomentations==0.11.1
         !pip install -q acoustics==0.2.6
         !pip install -q tensorflow==2.15.1 onnx_tf==1.10.0
+        # onnxscript es requerido por torch.onnx.export en PyTorch 2.5+
+        # (la API nueva basada en dynamo). Sin él, train.py muere al
+        # final del entrenamiento — justo después de gastar 15 min de
+        # GPU — al exportar el .onnx.
+        !pip install -q onnxscript
         !pip install -q pronouncing deep_phonemizer==0.0.19
 
         # HuggingFace datasets pinned to <4.0 — la 4.x devuelve
