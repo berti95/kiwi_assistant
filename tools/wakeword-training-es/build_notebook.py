@@ -231,7 +231,8 @@ CELLS: list[dict] = [
         # bien en sys.path el `import openwakeword.utils` revienta. wget
         # directo a la release v0.5.1 (que es de donde la utility
         # descargaría también) es bulletproof.
-        models_dir = ROOT / "openwakeword/openwakeword/resources/models"
+        from pathlib import Path
+        models_dir = Path("/content/openwakeword/openwakeword/resources/models")
         models_dir.mkdir(parents=True, exist_ok=True)
         for fname in ("melspectrogram.onnx", "embedding_model.onnx", "silero_vad.onnx"):
             target = models_dir / fname
