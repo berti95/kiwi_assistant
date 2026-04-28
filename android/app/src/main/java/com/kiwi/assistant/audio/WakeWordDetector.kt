@@ -11,9 +11,14 @@ import java.nio.FloatBuffer
 /**
  * Three-stage openWakeWord inference pipeline (mel → embedding → keyword).
  *
- * The classifier currently bundled is ``hola_kiwi.onnx``, trained in
- * Colab via ``tools/wakeword-training-es/`` (Piper TTS Spanish voices
- * for positives + the standard openWakeWord negatives + augmentation).
+ * The classifier currently bundled is ``kiwi_variants.onnx``, trained
+ * in Colab via ``tools/wakeword-training-es/`` (Piper TTS Spanish
+ * voices for positives + the standard openWakeWord negatives +
+ * augmentation). It fires on any of:
+ *   • "hola kiwi"
+ *   • "hey kiwi"
+ *   • "oye kiwi"
+ *   • "eh kiwi"
  * Mirrors the reference Python implementation (dscripka/openWakeWord)
  * so dropping in any other pre-trained ``.onnx`` (and updating the
  * ``loadAsset`` call below) works without code changes:
@@ -43,7 +48,7 @@ class WakeWordDetector(context: Context) : AutoCloseable {
     private val embeddingSession: OrtSession =
         env.createSession(loadAsset(context, "wakeword/embedding_model.onnx"))
     private val wakewordSession: OrtSession =
-        env.createSession(loadAsset(context, "wakeword/hola_kiwi.onnx"))
+        env.createSession(loadAsset(context, "wakeword/kiwi_variants.onnx"))
 
     private val melInputName: String = melSession.inputNames.first()
     private val embeddingInputName: String = embeddingSession.inputNames.first()
