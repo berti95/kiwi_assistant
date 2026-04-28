@@ -225,9 +225,21 @@ CELLS: list[dict] = [
         # embedding, silero VAD) y los descarga bajo demanda. train.py los
         # carga al arrancar, así que los descargamos primero — si no, peta
         # con NO_SUCHFILE.
-        import openwakeword.utils
-        openwakeword.utils.download_models()
-        print("\\n✓ Modelos runtime de openWakeWord descargados")
+        #
+        # No usamos openwakeword.utils.download_models() porque en sesiones
+        # de Colab donde el `pip install -e ./openwakeword` no se reflejó
+        # bien en sys.path el `import openwakeword.utils` revienta. wget
+        # directo a la release v0.5.1 (que es de donde la utility
+        # descargaría también) es bulletproof.
+        models_dir = ROOT / "openwakeword/openwakeword/resources/models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        for fname in ("melspectrogram.onnx", "embedding_model.onnx", "silero_vad.onnx"):
+            target = models_dir / fname
+            if not target.exists():
+                url = f"https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/{fname}"
+                !wget -q -O {target} {url}
+        print("\\nModelos runtime descargados:")
+        !ls -la {models_dir}
         """
     ),
     code(
@@ -565,19 +577,26 @@ CELLS: list[dict] = [
     ),
     md(
         """
-        ## 8. Recoger el .onnx y descargarlo
+        ## 8. Consolidar a un único `.onnx` self-contained y descargarlo
 
-        El script guarda el modelo en `models/<MODEL_NAME>/`. Lo copiamos a
-        un sitio fácil y lo descargamos.
+        El script guarda el modelo en `models/<MODEL_NAME>/`. PyTorch 2.5+
+        exporta los pesos en un fichero `.onnx.data` separado por defecto —
+        para Android necesitamos un único `.onnx` con todo dentro, así que
+        lo consolidamos aquí antes de bajarlo.
         """
     ),
     code(
         """
+        # PyTorch 2.5+ exporta a ONNX en formato \"con datos externos\" cuando
+        # los pesos son medianos: el .onnx final solo contiene el grafo
+        # (~13 KB) y los pesos van en un fichero `.onnx.data` separado.
+        # Para Android necesitamos un único fichero self-contained — lo
+        # consolidamos aquí mismo.
+        import onnx
         from google.colab import files
 
         out = OUTPUT_DIR / MODEL_NAME / f"{MODEL_NAME}.onnx"
         if not out.exists():
-            # A veces se guarda en otro nombre. Buscamos.
             candidates = list(OUTPUT_DIR.rglob("*.onnx"))
             print("Modelos ONNX encontrados:")
             for c in candidates:
@@ -587,9 +606,18 @@ CELLS: list[dict] = [
             else:
                 raise FileNotFoundError("No se encontró ningún .onnx — revisa los logs anteriores.")
 
-        target = ROOT / f"{MODEL_NAME}.onnx"
-        shutil.copy(out, target)
-        print(f"✓ Modelo final: {target}  ({target.stat().st_size / 1024:.1f} KB)")
+        # Carga con load_external_data=True para meter los pesos en memoria,
+        # luego guarda con save_as_external_data=False para que todo quede
+        # dentro del propio .onnx.
+        model = onnx.load(str(out), load_external_data=True)
+        target = ROOT / f"{MODEL_NAME}_inline.onnx"
+        onnx.save(model, str(target), save_as_external_data=False)
+        size_kb = target.stat().st_size / 1024
+        print(f"✓ Modelo self-contained: {target}  ({size_kb:.1f} KB)")
+        if size_kb < 50:
+            print("⚠️  Tamaño sospechosamente pequeño — los pesos quizá no se "
+                  "consolidaron. Comprueba que no haya .onnx.data en la misma "
+                  "carpeta que el .onnx original.")
         files.download(str(target))
         """
     ),
