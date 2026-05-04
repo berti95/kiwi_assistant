@@ -47,8 +47,17 @@ import kotlinx.coroutines.launch
  */
 class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _state = MutableStateFlow<KiwiState>(KiwiState.Idle)
-    val state: StateFlow<KiwiState> = _state.asStateFlow()
+    private val _pipeline = MutableStateFlow<PipelineState>(PipelineState.Idle)
+    val pipeline: StateFlow<PipelineState> = _pipeline.asStateFlow()
+
+    // What's currently on the canvas. Defaults to the clock; later
+    // fases (Calendar, NowPlaying, VideoPlayer, BrowseYT) will mutate
+    // this from tool callbacks. It's exposed independently of
+    // [pipeline] so a Kiwi conversation can run as an overlay on top
+    // of whatever the user is looking at — the tablet keeps showing
+    // the calendar / album art / video while Gemini answers.
+    private val _scene = MutableStateFlow<Scene>(Scene.Idle)
+    val scene: StateFlow<Scene> = _scene.asStateFlow()
 
     private val capture = AudioCaptureManager()
     private val playback = AudioPlaybackManager()
@@ -95,7 +104,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // the clock, light up the wake-word listener so the user can
         // start talking right away. If it just got revoked, drop the
         // listener (it'd fail to read anyway).
-        if (granted && !wasGranted && _state.value is KiwiState.Idle) {
+        if (granted && !wasGranted && _pipeline.value is PipelineState.Idle) {
             startWakeWordListener()
         } else if (!granted && wasGranted) {
             wakeWordListener.stop()
@@ -108,7 +117,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * up the first time the app comes to the foreground.
      */
     fun ensureWakeWordListening() {
-        if (permissionGranted && _state.value is KiwiState.Idle) {
+        if (permissionGranted && _pipeline.value is PipelineState.Idle) {
             startWakeWordListener()
         }
     }
@@ -138,17 +147,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onTap() {
-        when (_state.value) {
-            KiwiState.Idle -> openSession()
+        when (_pipeline.value) {
+            PipelineState.Idle -> openSession()
             // While the WS handshake is in flight a tap would race with
             // the auto-start that fires on session.ready, so swallow it.
-            KiwiState.Connecting -> Unit
-            KiwiState.Listening -> endUserTurn()
-            is KiwiState.Processing,
-            is KiwiState.Responding,
+            PipelineState.Connecting -> Unit
+            PipelineState.Listening -> endUserTurn()
+            is PipelineState.Processing,
+            is PipelineState.Responding,
             -> Unit
-            is KiwiState.Error -> {
-                _state.value = KiwiState.Idle
+            is PipelineState.Error -> {
+                _pipeline.value = PipelineState.Idle
                 // Recovering from an error returns us to the clock —
                 // re-arm the wake-word listener so the user can call
                 // Kiwi again without tapping.
@@ -163,7 +172,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * (no-op when already Idle).
      */
     fun onEndSession() {
-        if (_state.value !is KiwiState.Idle) endSession()
+        if (_pipeline.value !is PipelineState.Idle) endSession()
     }
 
     /** Long press anywhere → close the conversation entirely. */
@@ -171,11 +180,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun openSession() {
         if (!permissionGranted) {
-            _state.value = KiwiState.Error("Concede permiso de micrófono para usar Kiwi.")
+            _pipeline.value = PipelineState.Error("Concede permiso de micrófono para usar Kiwi.")
             return
         }
         if (BuildConfig.CLOUD_RUN_URL.isEmpty() || BuildConfig.KIWI_API_KEY.isEmpty()) {
-            _state.value = KiwiState.Error(
+            _pipeline.value = PipelineState.Error(
                 "Configura CLOUD_RUN_URL y KIWI_API_KEY en local.properties.",
             )
             return
@@ -195,7 +204,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // activity_start while the WS is still mid-handshake would
         // queue it before session.start in OkHttp's outbound buffer
         // and the server would close the socket on us.
-        _state.value = KiwiState.Connecting
+        _pipeline.value = PipelineState.Connecting
         s.connect { event ->
             viewModelScope.launch(Dispatchers.Main) { handleEvent(event) }
         }
@@ -224,7 +233,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                     // Re-check on the main thread to avoid double-firing
                     // if several chunks land before endUserTurn() actually
                     // stops the capture coroutine.
-                    if (_state.value is KiwiState.Listening) {
+                    if (_pipeline.value is PipelineState.Listening) {
                         android.util.Log.i(TAG, "auto end-of-turn (silence detected)")
                         endUserTurn()
                     }
@@ -232,11 +241,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (!ok) {
-            _state.value = KiwiState.Error("No se pudo iniciar la captura de audio.")
+            _pipeline.value = PipelineState.Error("No se pudo iniciar la captura de audio.")
             cleanup()
             return
         }
-        _state.value = KiwiState.Listening
+        _pipeline.value = PipelineState.Listening
     }
 
     private fun endUserTurn() {
@@ -255,7 +264,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         android.util.Log.i(TAG, "endUserTurn: stopping capture + sending activity_end")
         capture.stop()
         session?.sendActivityEnd()
-        _state.value = KiwiState.Processing()
+        _pipeline.value = PipelineState.Processing()
     }
 
     private fun handleEvent(event: KiwiSessionEvent) {
@@ -265,7 +274,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 // Long-press during the handshake, or an error, may have
                 // already closed the session — only auto-start if we're
                 // still in the Connecting state we set in openSession.
-                if (_state.value is KiwiState.Connecting) {
+                if (_pipeline.value is PipelineState.Connecting) {
                     startUserTurn()
                 }
             }
@@ -273,12 +282,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             is KiwiSessionEvent.AudioOutput -> {
                 pendingPlaybackChunks.incrementAndGet()
                 playbackQueue.trySend(event.pcm)
-                val current = _state.value
-                if (current is KiwiState.Processing) {
+                val current = _pipeline.value
+                if (current is PipelineState.Processing) {
                     android.util.Log.i(TAG, "first audio chunk → Responding")
                     // Carry the user transcript over so the UI keeps
                     // showing what Kiwi heard while it answers.
-                    _state.value = KiwiState.Responding(
+                    _pipeline.value = PipelineState.Responding(
                         userTranscript = current.userTranscript,
                         kiwiTranscript = "",
                     )
@@ -294,10 +303,10 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             is KiwiSessionEvent.Closed -> {
-                val current = _state.value
+                val current = _pipeline.value
                 when {
-                    current is KiwiState.Error -> Unit
-                    current is KiwiState.Idle -> Unit
+                    current is PipelineState.Error -> Unit
+                    current is PipelineState.Idle -> Unit
                     else -> {
                         val reason = event.reason.takeIf { it.isNotBlank() }
                         val msg = if (reason != null) {
@@ -305,14 +314,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             "Sesión cerrada (code=${event.code})"
                         }
-                        _state.value = KiwiState.Error(msg)
+                        _pipeline.value = PipelineState.Error(msg)
                         cleanup()
                     }
                 }
             }
 
             is KiwiSessionEvent.Error -> {
-                _state.value = KiwiState.Error(event.message)
+                _pipeline.value = PipelineState.Error(event.message)
                 cleanup()
             }
         }
@@ -325,31 +334,31 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * the first audio chunk).
      */
     private fun appendInputTranscript(chunk: String) {
-        val updated = when (val current = _state.value) {
-            is KiwiState.Processing ->
+        val updated = when (val current = _pipeline.value) {
+            is PipelineState.Processing ->
                 current.copy(userTranscript = current.userTranscript + chunk)
-            is KiwiState.Responding ->
+            is PipelineState.Responding ->
                 current.copy(userTranscript = current.userTranscript + chunk)
             else -> return
         }
-        _state.value = updated
+        _pipeline.value = updated
     }
 
     private fun appendOutputTranscript(chunk: String) {
-        val updated = when (val current = _state.value) {
-            is KiwiState.Responding ->
+        val updated = when (val current = _pipeline.value) {
+            is PipelineState.Responding ->
                 current.copy(kiwiTranscript = current.kiwiTranscript + chunk)
             // Defensive: in theory we always see the first audio chunk
             // (which moves us to Responding) before any output transcript,
             // but if Gemini ever ships text first we still want to show it.
-            is KiwiState.Processing ->
-                KiwiState.Responding(
+            is PipelineState.Processing ->
+                PipelineState.Responding(
                     userTranscript = current.userTranscript,
                     kiwiTranscript = chunk,
                 )
             else -> return
         }
-        _state.value = updated
+        _pipeline.value = updated
     }
 
     /**
@@ -359,20 +368,20 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * The 800 ms padding accounts for AudioTrack's internal buffer.
      */
     private fun waitForAudioAndStartNextTurn() {
-        if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return
+        if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return
         viewModelScope.launch(Dispatchers.Main) {
             while (pendingPlaybackChunks.get() > 0) delay(50)
             delay(800)
             // The user may have long-pressed during the drain; bail if
             // the session is already gone.
-            if (_state.value is KiwiState.Idle || _state.value is KiwiState.Error) return@launch
+            if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return@launch
             startUserTurn()
         }
     }
 
     private fun endSession() {
         cleanup()
-        _state.value = KiwiState.Idle
+        _pipeline.value = PipelineState.Idle
         // Returning to the clock — re-arm the wake-word listener so
         // the next "hey jarvis" wakes Kiwi up again.
         startWakeWordListener()

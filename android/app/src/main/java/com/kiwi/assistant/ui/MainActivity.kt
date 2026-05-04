@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
         // middle of a Kiwi session. Otherwise Android force-stops the app
         // mid-response to apply the new APK.
         autoUpdater = AutoUpdater(applicationContext) {
-            viewModel.state.value is KiwiState.Idle
+            viewModel.pipeline.value is PipelineState.Idle
         }
 
         viewModel.setMicrophonePermission(hasMicPermission())

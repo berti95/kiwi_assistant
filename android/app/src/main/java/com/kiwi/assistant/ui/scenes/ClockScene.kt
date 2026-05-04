@@ -1,4 +1,4 @@
-package com.kiwi.assistant.ui.screens
+package com.kiwi.assistant.ui.scenes
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -18,18 +18,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val SPANISH = Locale("es", "ES")
 private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 private val DATE_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", SPANISH)
 
+/**
+ * Default scene — a big clock and the date. What the tablet shows
+ * when nothing else is going on. Renders as the base layer of the
+ * router; the pipeline overlay (Listening / Responding / …) sits on
+ * top of this when a conversation is active.
+ */
 @Composable
-fun IdleScreen() {
+fun ClockScene() {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
 
     LaunchedEffect(Unit) {
