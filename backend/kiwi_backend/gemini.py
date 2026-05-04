@@ -245,7 +245,7 @@ async def _run_one_turn(
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call is not None:
-                await _handle_tool_call(gemini_session, tool_call, turn_index)
+                await _handle_tool_call(ws, gemini_session, tool_call, turn_index)
 
             sc = getattr(response, "server_content", None)
             if sc is None:
@@ -287,23 +287,41 @@ async def _run_one_turn(
     return "".join(user_text_parts), "".join(kiwi_text_parts)
 
 
-async def _handle_tool_call(gemini_session, tool_call, turn_index: int) -> None:
+async def _handle_tool_call(
+    ws: WebSocket,
+    gemini_session,
+    tool_call,
+    turn_index: int,
+) -> None:
     """Run each requested tool and ship the responses back to Gemini.
 
     Gemini batches function calls into a single ``tool_call`` event
     even when only one is requested, so we always iterate. The dispatch
     is sequential — the built-ins are fast and there's almost never
     more than one in flight, so parallelising would be premature.
+
+    Tools that produce a UI scene (calendar listing, now-playing card,
+    …) push it to the tablet via ``scene_sink`` BEFORE the tool's
+    response is returned to Gemini, so the screen update lands at the
+    same time Kiwi starts speaking.
     """
     function_calls = list(getattr(tool_call, "function_calls", None) or [])
     if not function_calls:
         return
+
+    async def scene_sink(scene: dict) -> None:
+        log.info("turn %d: scene push type=%r", turn_index, scene.get("type"))
+        await _safe_send(
+            ws,
+            {"type": protocol.TYPE_SCENE_SET, "scene": scene},
+        )
+
     responses: list[types.FunctionResponse] = []
     for fc in function_calls:
         name = fc.name or ""
         args = dict(fc.args or {})
         log.info("turn %d: tool call %r args=%r", turn_index, name, args)
-        result = await tools.dispatch(name, args)
+        result = await tools.dispatch(name, args, on_scene=scene_sink)
         log.info("turn %d: tool %r result=%r", turn_index, name, result)
         responses.append(
             types.FunctionResponse(id=fc.id, name=name, response=result),

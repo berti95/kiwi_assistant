@@ -15,6 +15,7 @@ Server → client
     transcript.input {"type": "transcript.input",  "text": "..."}
     transcript.output{"type": "transcript.output", "text": "..."}
     response.end     {"type": "response.end"}
+    scene.set        {"type": "scene.set", "scene": {...}}
     error            {"type": "error", "message": "..."}
 
 WebSocket close codes used for auth/protocol errors:
@@ -38,6 +39,7 @@ TYPE_AUDIO_OUTPUT = "audio.output"
 TYPE_TRANSCRIPT_INPUT = "transcript.input"
 TYPE_TRANSCRIPT_OUTPUT = "transcript.output"
 TYPE_RESPONSE_END = "response.end"
+TYPE_SCENE_SET = "scene.set"
 TYPE_ERROR = "error"
 
 # Close codes.

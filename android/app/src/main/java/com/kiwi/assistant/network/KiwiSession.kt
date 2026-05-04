@@ -3,8 +3,10 @@ package com.kiwi.assistant.network
 import android.util.Base64
 import android.util.Log
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
@@ -13,6 +15,8 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
+import com.kiwi.assistant.ui.CalendarEvent
+import com.kiwi.assistant.ui.Scene
 
 /**
  * High-level event surfaced to the ViewModel.
@@ -30,6 +34,12 @@ sealed interface KiwiSessionEvent {
     data class InputTranscript(val text: String) : KiwiSessionEvent
     data class OutputTranscript(val text: String) : KiwiSessionEvent
     data object ResponseEnd : KiwiSessionEvent
+    /**
+     * Backend asked the tablet to switch to a new scene as a side
+     * effect of a tool call (calendar listing, now-playing, …).
+     * Carries the parsed [Scene] ready for the ViewModel to set.
+     */
+    data class SceneSet(val scene: Scene) : KiwiSessionEvent
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
     data class Error(val message: String) : KiwiSessionEvent
 }
@@ -175,6 +185,13 @@ class KiwiSession(
                 obj.string("text")?.let { onEvent(KiwiSessionEvent.OutputTranscript(it)) }
             }
             Protocol.TYPE_RESPONSE_END -> onEvent(KiwiSessionEvent.ResponseEnd)
+            Protocol.TYPE_SCENE_SET -> {
+                val sceneObj = (obj["scene"] as? JsonObject) ?: run {
+                    Log.w(TAG, "scene.set without scene payload")
+                    return
+                }
+                parseScene(sceneObj)?.let { onEvent(KiwiSessionEvent.SceneSet(it)) }
+            }
             Protocol.TYPE_ERROR -> {
                 val msg = obj.string("message") ?: "unknown error"
                 onEvent(KiwiSessionEvent.Error(msg))
@@ -185,6 +202,40 @@ class KiwiSession(
 
     private fun JsonObject.string(key: String): String? =
         (get(key) as? JsonPrimitive)?.contentOrNull
+
+    /**
+     * Parse a scene payload into the matching [Scene] variant.
+     *
+     * Returns null on unknown / malformed scenes so the existing
+     * scene on screen stays untouched (better than crashing the
+     * connection over a typo on the backend side).
+     */
+    private fun parseScene(scene: JsonObject): Scene? {
+        return when (scene.string("type")) {
+            "calendar" -> parseCalendarScene(scene)
+            else -> {
+                Log.w(TAG, "Unknown scene type: ${scene.string("type")}")
+                null
+            }
+        }
+    }
+
+    private fun parseCalendarScene(scene: JsonObject): Scene.Calendar {
+        val period = scene.string("period") ?: "today"
+        val rawEvents = scene["events"] as? JsonArray ?: emptyList()
+        val events = rawEvents.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            CalendarEvent(
+                title = obj.string("title") ?: "(sin título)",
+                startsAt = obj.string("starts_at") ?: return@mapNotNull null,
+                endsAt = obj.string("ends_at") ?: return@mapNotNull null,
+                location = obj.string("location"),
+                allDay = (obj["all_day"] as? JsonPrimitive)
+                    ?.booleanOrNull ?: false,
+            )
+        }
+        return Scene.Calendar(period = period, events = events)
+    }
 
     private companion object {
         const val TAG = "KiwiSession"

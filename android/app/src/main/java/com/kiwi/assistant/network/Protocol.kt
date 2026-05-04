@@ -23,6 +23,7 @@ object Protocol {
     const val TYPE_TRANSCRIPT_INPUT = "transcript.input"
     const val TYPE_TRANSCRIPT_OUTPUT = "transcript.output"
     const val TYPE_RESPONSE_END = "response.end"
+    const val TYPE_SCENE_SET = "scene.set"
     const val TYPE_ERROR = "error"
 
     const val CLOSE_EXPECTED_SESSION_START = 4001

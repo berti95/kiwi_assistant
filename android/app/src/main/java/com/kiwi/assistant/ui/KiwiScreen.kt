@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.ClockScene
 import com.kiwi.assistant.ui.screens.ConnectingScreen
 import com.kiwi.assistant.ui.screens.ErrorScreen
@@ -115,6 +116,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
 private fun SceneLayer(scene: Scene) {
     when (scene) {
         Scene.Idle -> ClockScene()
+        is Scene.Calendar -> CalendarScene(scene)
     }
 }
 

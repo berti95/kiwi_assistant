@@ -158,8 +158,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             -> Unit
             is PipelineState.Error -> {
                 _pipeline.value = PipelineState.Idle
-                // Recovering from an error returns us to the clock —
-                // re-arm the wake-word listener so the user can call
+                // Wipe whatever scene a previous turn pushed too —
+                // recovering from an error returns the tablet to the
+                // clock, not to a stale calendar/now-playing view.
+                _scene.value = Scene.Idle
+                // Re-arm the wake-word listener so the user can call
                 // Kiwi again without tapping.
                 startWakeWordListener()
             }
@@ -297,6 +300,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             is KiwiSessionEvent.InputTranscript -> appendInputTranscript(event.text)
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
+            is KiwiSessionEvent.SceneSet -> {
+                android.util.Log.i(TAG, "scene.set → ${event.scene::class.simpleName}")
+                _scene.value = event.scene
+            }
+
             KiwiSessionEvent.ResponseEnd -> {
                 android.util.Log.i(TAG, "response.end → drain → next turn")
                 waitForAudioAndStartNextTurn()
@@ -382,8 +390,15 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun endSession() {
         cleanup()
         _pipeline.value = PipelineState.Idle
-        // Returning to the clock — re-arm the wake-word listener so
-        // the next "hey jarvis" wakes Kiwi up again.
+        // Closing the conversation goes back to the clock by default —
+        // any scene a tool pushed during the session (calendar, now-
+        // playing, …) is meant to be conversation-scoped, not a
+        // permanent pinned view. If we ever want sticky scenes (Spotify
+        // keeps playing after the conversation ends, say) we'll need a
+        // separate "playback active" flag to suppress this reset.
+        _scene.value = Scene.Idle
+        // Re-arm the wake-word listener so the next "hey jarvis" wakes
+        // Kiwi up again.
         startWakeWordListener()
     }
 
