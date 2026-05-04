@@ -48,5 +48,6 @@ env/
 google-services.json
 service-account*.json
 gha-creds-*.json
+client_secret*.json
 .env
 .env.local
