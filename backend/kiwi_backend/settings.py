@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # for testing; production deploys must always set this.
     kiwi_api_key: str = ""
 
+    # Dev-only token gating GET /api/logs/recent (the in-memory recent-log
+    # poll endpoint used for remote debugging). Empty (default) keeps the
+    # endpoint closed — set this to a long random string in any deploy
+    # where the developer wants to poll logs from outside Cloud Logging.
+    dev_logs_token: str = ""
+
     # Vertex AI configuration. The backend uses Application Default
     # Credentials provided by the Cloud Run service account, so no API key
     # is required. When `gcp_project` is empty the WebSocket session falls

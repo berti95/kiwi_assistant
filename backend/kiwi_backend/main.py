@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
+from . import log_buffer
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -14,6 +15,11 @@ from .settings import settings
 # Cloud Logging without affecting noisy third-party libs.
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("kiwi_backend").setLevel(logging.INFO)
+
+# Mirror every kiwi_backend.* log record into an in-memory ring buffer so
+# the developer can poll recent lines via GET /api/logs/recent without
+# fetching from Cloud Logging.
+log_buffer.install_handler()
 
 # Dedicated logger for tablet-shipped lines so we can grep them out
 # from the rest of the backend traffic when debugging.
@@ -85,6 +91,35 @@ async def post_logs(
         tablet_log.info(line)
 
     return {"received": len(batch.entries)}
+
+
+@app.get("/api/logs/recent")
+async def get_recent_logs(
+    token: str = "",
+    since: int = 0,
+    limit: int = 500,
+) -> dict[str, object]:
+    """Return the latest log lines kept in memory.
+
+    Auth: a separate ``DEV_LOGS_TOKEN`` env var (NOT the tablet's API
+    key — different scope). Closed by default: an empty token in the
+    settings means every request gets 403, so a forgotten production
+    deploy doesn't accidentally expose the buffer.
+
+    Pagination: pass back the ``next_since`` cursor from the previous
+    response to receive only entries that are newer than what you've
+    already seen. ``since=0`` returns the oldest still-buffered entry.
+    """
+    expected = settings.dev_logs_token
+    if not expected or token != expected:
+        raise HTTPException(status_code=403, detail="invalid dev token")
+    capped_limit = max(1, min(limit, log_buffer.CAPACITY))
+    entries, cursor = log_buffer.snapshot_since(since, capped_limit)
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "next_since": cursor,
+    }
 
 
 @app.websocket("/ws/session")
