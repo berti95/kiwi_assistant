@@ -29,7 +29,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
 
-from . import protocol
+from . import protocol, tools
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -153,6 +153,10 @@ def _build_config(
         ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
+        # Function-calling: Gemini composes the registered tools itself
+        # whenever the user asks for something that needs one (the time,
+        # the weather one day, calendar events, …). Empty list = audio-only.
+        tools=tools.gemini_tools(),
         # Manual activity detection: the tablet drives turn boundaries
         # via tap. Each Gemini Live session here only ever handles ONE
         # turn so there's no multi-turn VAD edge case to trip on.
@@ -239,6 +243,10 @@ async def _run_one_turn(
                     },
                 )
 
+            tool_call = getattr(response, "tool_call", None)
+            if tool_call is not None:
+                await _handle_tool_call(gemini_session, tool_call, turn_index)
+
             sc = getattr(response, "server_content", None)
             if sc is None:
                 continue
@@ -277,6 +285,30 @@ async def _run_one_turn(
 
     await asyncio.gather(tablet_to_gemini(), gemini_to_tablet())
     return "".join(user_text_parts), "".join(kiwi_text_parts)
+
+
+async def _handle_tool_call(gemini_session, tool_call, turn_index: int) -> None:
+    """Run each requested tool and ship the responses back to Gemini.
+
+    Gemini batches function calls into a single ``tool_call`` event
+    even when only one is requested, so we always iterate. The dispatch
+    is sequential — the built-ins are fast and there's almost never
+    more than one in flight, so parallelising would be premature.
+    """
+    function_calls = list(getattr(tool_call, "function_calls", None) or [])
+    if not function_calls:
+        return
+    responses: list[types.FunctionResponse] = []
+    for fc in function_calls:
+        name = fc.name or ""
+        args = dict(fc.args or {})
+        log.info("turn %d: tool call %r args=%r", turn_index, name, args)
+        result = await tools.dispatch(name, args)
+        log.info("turn %d: tool %r result=%r", turn_index, name, result)
+        responses.append(
+            types.FunctionResponse(id=fc.id, name=name, response=result),
+        )
+    await gemini_session.send_tool_response(function_responses=responses)
 
 
 async def _safe_send(ws: WebSocket, payload: dict) -> None:
