@@ -1,7 +1,7 @@
 package com.kiwi.assistant.network
 
 import android.util.Base64
-import android.util.Log
+import com.kiwi.assistant.log.KLog
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -116,11 +116,11 @@ class KiwiSession(
                     // We initiated the close; OkHttp doesn't always see a
                     // clean close frame back so this surfaces as
                     // EOFException. Treat it as the normal close it is.
-                    Log.i(TAG, "WebSocket failure after client close: ${t::class.simpleName}")
+                    KLog.i(TAG, "WebSocket failure after client close: ${t::class.simpleName}")
                     onEvent(KiwiSessionEvent.Closed(1000, "closed by client"))
                     return
                 }
-                Log.w(TAG, "WebSocket failure", t)
+                KLog.w(TAG, "WebSocket failure", t)
                 val cls = t::class.simpleName ?: "Throwable"
                 val msg = t.message?.takeIf { it.isNotBlank() }
                 val http = response?.let { " HTTP ${it.code}" } ?: ""
@@ -187,7 +187,7 @@ class KiwiSession(
             Protocol.TYPE_RESPONSE_END -> onEvent(KiwiSessionEvent.ResponseEnd)
             Protocol.TYPE_SCENE_SET -> {
                 val sceneObj = (obj["scene"] as? JsonObject) ?: run {
-                    Log.w(TAG, "scene.set without scene payload")
+                    KLog.w(TAG, "scene.set without scene payload")
                     return
                 }
                 parseScene(sceneObj)?.let { onEvent(KiwiSessionEvent.SceneSet(it)) }
@@ -196,7 +196,7 @@ class KiwiSession(
                 val msg = obj.string("message") ?: "unknown error"
                 onEvent(KiwiSessionEvent.Error(msg))
             }
-            else -> Log.w(TAG, "Unknown message type: ${obj.string("type")}")
+            else -> KLog.w(TAG, "Unknown message type: ${obj.string("type")}")
         }
     }
 
@@ -214,7 +214,7 @@ class KiwiSession(
         return when (scene.string("type")) {
             "calendar" -> parseCalendarScene(scene)
             else -> {
-                Log.w(TAG, "Unknown scene type: ${scene.string("type")}")
+                KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
             }
         }

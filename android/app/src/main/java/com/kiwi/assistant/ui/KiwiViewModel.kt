@@ -8,6 +8,7 @@ import com.kiwi.assistant.audio.AudioCaptureManager
 import com.kiwi.assistant.audio.AudioPlaybackManager
 import com.kiwi.assistant.audio.SpeechActivityDetector
 import com.kiwi.assistant.audio.WakeWordListener
+import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import java.util.concurrent.atomic.AtomicInteger
@@ -88,7 +89,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 playback.play(chunk)
             } catch (e: Exception) {
-                android.util.Log.w("KiwiViewModel", "playback chunk failed", e)
+                KLog.w("KiwiViewModel", "playback chunk failed", e)
             } finally {
                 pendingPlaybackChunks.decrementAndGet()
             }
@@ -133,7 +134,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startWakeWordListener() {
         val started = wakeWordListener.start(viewModelScope) {
-            android.util.Log.i(TAG, "wake word fired → opening session")
+            KLog.i(TAG, "wake word fired → opening session")
             // Release the mic before openSession spins up its own
             // capture. start()/stop() on the listener is synchronous
             // enough that this is safe to do back-to-back here on the
@@ -142,7 +143,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             openSession()
         }
         if (!started) {
-            android.util.Log.w(TAG, "wake-word listener failed to start")
+            KLog.w(TAG, "wake-word listener failed to start")
         }
     }
 
@@ -193,7 +194,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        android.util.Log.i(TAG, "openSession: connecting…")
+        KLog.i(TAG, "openSession: connecting…")
         // Manual taps may arrive while the wake-word listener is still
         // holding the mic (e.g. user taps the screen instead of saying
         // "hey jarvis"). Always stop it before we open the session
@@ -221,7 +222,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * stopped already.
      */
     private fun startUserTurn() {
-        android.util.Log.i(TAG, "startUserTurn: sending activity_start")
+        KLog.i(TAG, "startUserTurn: sending activity_start")
         detector.reset()
         session?.sendActivityStart()
         val ok = capture.start(viewModelScope) { chunk ->
@@ -237,7 +238,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                     // if several chunks land before endUserTurn() actually
                     // stops the capture coroutine.
                     if (_pipeline.value is PipelineState.Listening) {
-                        android.util.Log.i(TAG, "auto end-of-turn (silence detected)")
+                        KLog.i(TAG, "auto end-of-turn (silence detected)")
                         endUserTurn()
                     }
                 }
@@ -258,13 +259,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             // rather than feeding silence to the model). Tell the
             // server to drop the upstream Gemini session for this
             // turn, then silently re-arm the mic.
-            android.util.Log.i(TAG, "endUserTurn: no speech, cancelling turn")
+            KLog.i(TAG, "endUserTurn: no speech, cancelling turn")
             capture.stop()
             session?.sendTurnCancel()
             startUserTurn()
             return
         }
-        android.util.Log.i(TAG, "endUserTurn: stopping capture + sending activity_end")
+        KLog.i(TAG, "endUserTurn: stopping capture + sending activity_end")
         capture.stop()
         session?.sendActivityEnd()
         _pipeline.value = PipelineState.Processing()
@@ -273,7 +274,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun handleEvent(event: KiwiSessionEvent) {
         when (event) {
             KiwiSessionEvent.SessionReady -> {
-                android.util.Log.i(TAG, "session.ready → auto-starting first turn")
+                KLog.i(TAG, "session.ready → auto-starting first turn")
                 // Long-press during the handshake, or an error, may have
                 // already closed the session — only auto-start if we're
                 // still in the Connecting state we set in openSession.
@@ -287,7 +288,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 playbackQueue.trySend(event.pcm)
                 val current = _pipeline.value
                 if (current is PipelineState.Processing) {
-                    android.util.Log.i(TAG, "first audio chunk → Responding")
+                    KLog.i(TAG, "first audio chunk → Responding")
                     // Carry the user transcript over so the UI keeps
                     // showing what Kiwi heard while it answers.
                     _pipeline.value = PipelineState.Responding(
@@ -301,12 +302,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
 
             is KiwiSessionEvent.SceneSet -> {
-                android.util.Log.i(TAG, "scene.set → ${event.scene::class.simpleName}")
+                KLog.i(TAG, "scene.set → ${event.scene::class.simpleName}")
                 _scene.value = event.scene
             }
 
             KiwiSessionEvent.ResponseEnd -> {
-                android.util.Log.i(TAG, "response.end → drain → next turn")
+                KLog.i(TAG, "response.end → drain → next turn")
                 waitForAudioAndStartNextTurn()
             }
 

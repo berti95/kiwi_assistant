@@ -14,7 +14,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.kiosk.KioskController
+import com.kiwi.assistant.log.LogShipper
 import com.kiwi.assistant.ui.theme.KiwiTheme
 import com.kiwi.assistant.updater.AutoUpdater
 import com.kiwi.assistant.util.BrightnessManager
@@ -28,6 +30,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var autoUpdater: AutoUpdater
     private var updaterJob: Job? = null
     private val viewModel: KiwiViewModel by viewModels()
+    private val logShipper = LogShipper(
+        baseUrl = BuildConfig.CLOUD_RUN_URL,
+        apiKey = BuildConfig.KIWI_API_KEY,
+    )
 
     private val requestMic = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -51,6 +57,12 @@ class MainActivity : ComponentActivity() {
 
         viewModel.setMicrophonePermission(hasMicPermission())
         if (!hasMicPermission()) requestMic.launch(Manifest.permission.RECORD_AUDIO)
+
+        // Start shipping app logs to the backend so the developer can
+        // see what the tablet is doing without ADB. Outlives the
+        // session WebSocket — useful for debugging crashes that prevent
+        // a session from opening at all.
+        logShipper.start(lifecycleScope)
 
         setContent {
             KiwiTheme {
