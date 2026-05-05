@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # checks).
     gcp_project: str = ""
     gcp_location: str = "europe-west1"
-    gemini_model: str = "gemini-live-2.5-flash-native-audio"
+    gemini_model: str = "gemini-live-2.5-flash"
     gemini_voice: str = "Aoede"
     gemini_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
