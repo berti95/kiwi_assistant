@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # Defensive: secrets piped in via `echo $token | gcloud secrets
+        # create` on Windows PowerShell pick up a trailing CRLF. Strip
+        # whitespace from all string fields so an extra newline doesn't
+        # silently break auth comparisons.
+        str_strip_whitespace=True,
     )
 
     # Tablet ↔ backend shared secret. Empty in local dev means auth is open
