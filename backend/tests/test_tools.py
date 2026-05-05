@@ -660,3 +660,47 @@ def test_youtube_watch_later_errors_when_unconfigured(monkeypatch) -> None:
     result = _run(tools.dispatch("youtube_watch_later", None))
     assert "error" in result
     assert "not configured" in result["error"]
+
+
+def test_youtube_open_default_url() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("youtube_open", None, on_scene=sink))
+    assert result["opened"] == "https://m.youtube.com"
+    assert pushed == [{"type": "browse_youtube", "url": "https://m.youtube.com"}]
+
+
+def test_youtube_open_explicit_url_passes_through() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_open",
+            {"url": "https://m.youtube.com/feed/subscriptions"},
+            on_scene=sink,
+        ),
+    )
+    assert result["opened"] == "https://m.youtube.com/feed/subscriptions"
+    assert pushed[0]["url"] == "https://m.youtube.com/feed/subscriptions"
+
+
+def test_youtube_open_adds_https_when_missing() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_open",
+            {"url": "m.youtube.com/@somechannel"},
+            on_scene=sink,
+        ),
+    )
+    assert result["opened"] == "https://m.youtube.com/@somechannel"

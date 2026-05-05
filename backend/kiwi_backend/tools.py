@@ -752,6 +752,28 @@ async def _youtube_watch_later(max_results: int = 20) -> ToolResult:
     )
 
 
+def _youtube_open(url: str | None = None) -> ToolResult:
+    """Push the full-YouTube-web browser scene to the tablet.
+
+    Pure scene push — no API call. Used as a fallback when the user
+    asks for something we don't have a dedicated tool for (browsing
+    the home page, suscripciones, a specific channel page, …).
+
+    The user has to be signed in inside the WebView for personalised
+    content. Google blocks WebView-based sign-in, so the first sign-in
+    is unreliable and may need to happen via Chrome on the device.
+    Once cookies are persisted in the WebView they survive across
+    sessions.
+    """
+    target = (url or "https://m.youtube.com").strip()
+    if not target.startswith(("http://", "https://")):
+        target = "https://" + target
+    return ToolResult(
+        response={"opened": target},
+        scene={"type": "browse_youtube", "url": target},
+    )
+
+
 def _youtube_play(
     video_id: str,
     title: str = "",
@@ -877,6 +899,35 @@ register(
         },
     ),
     handler=_youtube_watch_later,
+)
+
+register(
+    name="youtube_open",
+    description=(
+        "Abre YouTube en pantalla completa para que el usuario navegue "
+        "manualmente con el dedo (suscripciones, recomendaciones, página "
+        "principal, un canal concreto, etc.). Llama a este tool SOLO "
+        "cuando no haya una tool específica que cubra la petición. Si el "
+        "usuario pide ver una playlist concreta usa "
+        "youtube_playlist_items; si pide 'ver más tarde' / 'pendientes' "
+        "usa youtube_watch_later; si pide buscar usa youtube_search; si "
+        "pide reproducir un video usa youtube_play. Acepta una URL "
+        "específica de youtube.com si la conversación lo justifica; en "
+        "otro caso abre la home móvil por defecto."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "url": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "URL específica de youtube.com a abrir, opcional. "
+                    "Por defecto la home móvil https://m.youtube.com."
+                ),
+            ),
+        },
+    ),
+    handler=_youtube_open,
 )
 
 register(

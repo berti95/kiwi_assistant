@@ -179,6 +179,24 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Exit the current scene back to the clock without touching any
+     * active conversation. Used by scene-internal exit affordances
+     * (e.g. the back arrow on [Scene.BrowseYouTube] when there's
+     * nothing left to go back to in the WebView's history).
+     *
+     * The wake-word listener is re-armed in case there isn't an
+     * active conversation either — symmetric with [closeConversation].
+     */
+    fun onExitScene() {
+        if (_scene.value !is Scene.Idle) {
+            _scene.value = Scene.Idle
+            if (_pipeline.value is PipelineState.Idle) {
+                startWakeWordListener()
+            }
+        }
+    }
+
+    /**
      * Stop the conversation but keep whatever scene the tablet is
      * currently showing on top (calendar, now-playing, …). The user
      * can keep reading what's on screen with the wake-word listener

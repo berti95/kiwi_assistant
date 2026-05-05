@@ -59,6 +59,14 @@ sealed interface Scene {
         val title: String,
         val channel: String,
     ) : Scene
+
+    /**
+     * Pantalla completa con el sitio web de YouTube (m.youtube.com)
+     * cargado en un WebView. Fallback para todo lo que no tengamos
+     * como tool específica: home, suscripciones, recomendaciones,
+     * canales sueltos. El usuario interactúa con el dedo.
+     */
+    data class BrowseYouTube(val url: String) : Scene
 }
 
 /** A YouTube video item, used in [Scene.VideoList]. */

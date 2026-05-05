@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.ClockScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
@@ -68,9 +69,9 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onLongClick = viewModel::onLongPress,
             ),
     ) {
-        // Base layer: the active scene. Clock for now; future fases
-        // add Calendar, NowPlaying, VideoPlayer, BrowseYT.
-        SceneLayer(scene)
+        // Base layer: the active scene (clock, calendar, video list,
+        // playback, browse). Each scene is full-screen.
+        SceneLayer(scene = scene, onExitScene = viewModel::onExitScene)
 
         // Overlay layer. Two modes:
         //
@@ -91,12 +92,13 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         }
 
         // Close button: only meaningful while a session is active. Hidden
-        // when the pipeline is at rest (Idle — already "closed") and on
-        // Error (a tap there already returns to Idle, no separate close
-        // needed).
+        // when the pipeline is at rest (Idle — already "closed"), on
+        // Error (a tap there already returns to Idle), and on the
+        // BrowseYouTube scene which has its own back arrow at the same
+        // anchor (top-start) and would otherwise stack on top of it.
         val sessionActive =
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
-        if (sessionActive) {
+        if (sessionActive && scene !is Scene.BrowseYouTube) {
             IconButton(
                 onClick = viewModel::onCloseConversation,
                 modifier = Modifier
@@ -129,13 +131,14 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
 }
 
 @Composable
-private fun SceneLayer(scene: Scene) {
+private fun SceneLayer(scene: Scene, onExitScene: () -> Unit) {
     when (scene) {
         Scene.Idle -> ClockScene()
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene)
+        is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
     }
 }
 

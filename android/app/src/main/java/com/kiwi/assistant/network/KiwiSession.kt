@@ -218,6 +218,7 @@ class KiwiSession(
             "video_list" -> parseVideoListScene(scene)
             "playlist_list" -> parsePlaylistListScene(scene)
             "video_player" -> parseVideoPlayerScene(scene)
+            "browse_youtube" -> parseBrowseYouTubeScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -282,6 +283,11 @@ class KiwiSession(
             title = scene.string("title") ?: "",
             channel = scene.string("channel") ?: "",
         )
+    }
+
+    private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
+        val url = scene.string("url") ?: return null
+        return Scene.BrowseYouTube(url = url)
     }
 
     private companion object {
