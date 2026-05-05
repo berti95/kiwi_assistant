@@ -324,7 +324,19 @@ async def _handle_tool_call(
         result = await tools.dispatch(name, args, on_scene=scene_sink)
         log.info("turn %d: tool %r result=%r", turn_index, name, result)
         responses.append(
-            types.FunctionResponse(id=fc.id, name=name, response=result),
+            types.FunctionResponse(
+                id=fc.id,
+                name=name,
+                response=result,
+                # Force the model to wake up and generate spoken output
+                # immediately after our function response. Without this,
+                # the native-audio Live model treats the tool return as
+                # SCHEDULING_UNSPECIFIED and ends the turn with zero
+                # audio bytes — i.e. the user hears nothing after the
+                # screen update. INTERRUPT is the closest "speak now"
+                # signal the SDK exposes.
+                scheduling=types.FunctionResponseScheduling.INTERRUPT,
+            ),
         )
     await gemini_session.send_tool_response(function_responses=responses)
 
