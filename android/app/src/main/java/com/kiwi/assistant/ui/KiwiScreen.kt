@@ -82,6 +82,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         } else {
             PipelineHud(
                 state = pipeline,
+                onClose = viewModel::onCloseConversation,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -94,7 +95,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
         if (sessionActive) {
             IconButton(
-                onClick = viewModel::onEndSession,
+                onClick = viewModel::onCloseConversation,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)

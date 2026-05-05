@@ -33,6 +33,8 @@ import java.util.Locale
 private val SPANISH = Locale("es", "ES")
 private val HEADER_DATE_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", SPANISH)
+private val SHORT_DATE_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEEE d", SPANISH)
 private val EVENT_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("HH:mm")
 
@@ -159,9 +161,10 @@ private fun emptyMessageFor(period: String): String = when (period) {
 private fun formatEventTime(event: CalendarEvent): String {
     if (event.allDay) {
         return runCatching {
-            val date = LocalDate.parse(event.startsAt)
-            "Todo el día · " + date.format(HEADER_DATE_FORMATTER)
-                .replaceFirstChar { it.titlecase(SPANISH) }
+            formatAllDay(
+                start = LocalDate.parse(event.startsAt),
+                endExclusive = LocalDate.parse(event.endsAt),
+            )
         }.getOrElse { "Todo el día" }
     }
     return runCatching {
@@ -178,3 +181,31 @@ private fun formatEventTime(event: CalendarEvent): String {
         }.getOrElse { event.startsAt }
     }
 }
+
+/**
+ * Render an all-day event's date slot.
+ *
+ * Google Calendar's all-day events use an EXCLUSIVE end date —
+ * "2026-05-08 → 2026-05-11" means the event spans May 8/9/10. We
+ * convert to the inclusive last day for display.
+ *
+ * Single-day → "Viernes 8 de mayo · Todo el día"
+ * Same-month range → "Del viernes 8 al domingo 10 de mayo · Todo el día"
+ * Cross-month range → "Del viernes 31 de octubre al lunes 3 de noviembre"
+ */
+private fun formatAllDay(start: LocalDate, endExclusive: LocalDate): String {
+    val endInclusive = endExclusive.minusDays(1).coerceAtLeast(start)
+    if (start == endInclusive) {
+        val day = start.format(HEADER_DATE_FORMATTER).titlecaseFirst()
+        return "$day · Todo el día"
+    }
+    val sameMonth = start.month == endInclusive.month && start.year == endInclusive.year
+    val startLabel =
+        if (sameMonth) start.format(SHORT_DATE_FORMATTER).titlecaseFirst()
+        else start.format(HEADER_DATE_FORMATTER).titlecaseFirst()
+    val endLabel = endInclusive.format(HEADER_DATE_FORMATTER).titlecaseFirst()
+    return "Del $startLabel al $endLabel · Todo el día"
+}
+
+private fun String.titlecaseFirst(): String =
+    replaceFirstChar { if (it.isLowerCase()) it.titlecase(SPANISH) else it.toString() }

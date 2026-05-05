@@ -16,11 +16,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,7 +48,11 @@ import androidx.compose.ui.unit.dp
  * no need for any indicator on top of the scene.
  */
 @Composable
-fun PipelineHud(state: PipelineState, modifier: Modifier = Modifier) {
+fun PipelineHud(
+    state: PipelineState,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     if (state is PipelineState.Idle) return
     if (state is PipelineState.Error) return  // handled fullscreen by router
 
@@ -61,12 +67,23 @@ fun PipelineHud(state: PipelineState, modifier: Modifier = Modifier) {
                 .widthIn(max = 720.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .background(Color.Black.copy(alpha = 0.78f))
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             HudLeading(state)
             HudCaption(state, modifier = Modifier.weight(1f, fill = false))
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Cerrar conversación",
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }

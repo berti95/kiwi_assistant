@@ -171,16 +171,28 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Public end-conversation entry point. Used by both the close
-     * button and the long-press gesture; safe to call in any state
+     * Stop the conversation but keep whatever scene the tablet is
+     * currently showing on top (calendar, now-playing, …). The user
+     * can keep reading what's on screen with the wake-word listener
+     * re-armed in the background.
+     *
+     * Used by the close (X) buttons. Safe to call in any state
      * (no-op when already Idle).
      */
-    fun onEndSession() {
-        if (_pipeline.value !is PipelineState.Idle) endSession()
+    fun onCloseConversation() {
+        if (_pipeline.value !is PipelineState.Idle) closeConversation(resetScene = false)
     }
 
-    /** Long press anywhere → close the conversation entirely. */
-    fun onLongPress() = onEndSession()
+    /**
+     * Full reset back to the home (clock) scene. Wired to long-press
+     * because the gesture is a strong "go home" affordance — it should
+     * wipe both the conversation and any scene the tablet is showing.
+     */
+    fun onLongPress() {
+        if (_pipeline.value !is PipelineState.Idle || _scene.value !is Scene.Idle) {
+            closeConversation(resetScene = true)
+        }
+    }
 
     private fun openSession() {
         if (!permissionGranted) {
@@ -388,18 +400,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun endSession() {
+    private fun closeConversation(resetScene: Boolean) {
         cleanup()
         _pipeline.value = PipelineState.Idle
-        // Closing the conversation goes back to the clock by default —
-        // any scene a tool pushed during the session (calendar, now-
-        // playing, …) is meant to be conversation-scoped, not a
-        // permanent pinned view. If we ever want sticky scenes (Spotify
-        // keeps playing after the conversation ends, say) we'll need a
-        // separate "playback active" flag to suppress this reset.
-        _scene.value = Scene.Idle
-        // Re-arm the wake-word listener so the next "hey jarvis" wakes
-        // Kiwi up again.
+        // The close-conversation X buttons keep the active scene
+        // (calendar / now-playing / …) so the user can keep reading
+        // what was on screen. Long-press wipes scene too — the
+        // gesture is the "go home" affordance.
+        if (resetScene) _scene.value = Scene.Idle
+        // Re-arm the wake-word listener regardless: with the pipeline
+        // closed, the user may still trigger Kiwi by saying the wake
+        // word with the calendar (or whatever) still on screen.
         startWakeWordListener()
     }
 
