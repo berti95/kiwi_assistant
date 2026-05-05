@@ -72,7 +72,7 @@ jobs:
             --session-affinity \
             --concurrency=4 \
             --update-env-vars="GCP_PROJECT=${GCP_PROJECT},GCP_LOCATION=${GCP_REGION}" \
-            --set-secrets="KIWI_API_KEY=KIWI_API_KEY:latest,KIWI_GOOGLE_CREDENTIALS=kiwi-google-credentials:latest"
+            --set-secrets="KIWI_API_KEY=KIWI_API_KEY:latest,KIWI_GOOGLE_CREDENTIALS=kiwi-google-credentials:latest,DEV_LOGS_TOKEN=kiwi-dev-logs-token:latest"
 
       - name: Allow public invocations
         # `gcloud run deploy --allow-unauthenticated` silently no-ops if the
