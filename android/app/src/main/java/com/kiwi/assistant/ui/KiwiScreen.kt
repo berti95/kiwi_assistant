@@ -69,10 +69,22 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         // add Calendar, NowPlaying, VideoPlayer, BrowseYT.
         SceneLayer(scene)
 
-        // Overlay layer: the audio pipeline. Idle = transparent (scene
-        // shows through). Everything else covers the full screen with
-        // the pipeline's UI.
-        PipelineOverlay(pipeline)
+        // Overlay layer. Two modes:
+        //
+        // 1. Scene is Idle (the clock) → fullscreen overlay covers
+        //    everything. Same UX as before scenes existed.
+        // 2. Scene is non-Idle (calendar, now-playing, …) → compact
+        //    HUD pinned at the bottom so the scene stays visible
+        //    while the user converses about it. Errors still take
+        //    over fullscreen — they're meant to interrupt.
+        if (scene is Scene.Idle || pipeline is PipelineState.Error) {
+            PipelineFullscreenOverlay(pipeline)
+        } else {
+            PipelineHud(
+                state = pipeline,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
 
         // Close button: only meaningful while a session is active. Hidden
         // when the pipeline is at rest (Idle — already "closed") and on
@@ -120,8 +132,13 @@ private fun SceneLayer(scene: Scene) {
     }
 }
 
+/**
+ * Full-screen pipeline overlay. Used when the active scene is the
+ * clock (or for errors regardless of scene), so we can take over the
+ * whole canvas with the conversation UX.
+ */
 @Composable
-private fun PipelineOverlay(state: PipelineState) {
+private fun PipelineFullscreenOverlay(state: PipelineState) {
     when (state) {
         // No overlay — the scene below shows through.
         PipelineState.Idle -> Unit

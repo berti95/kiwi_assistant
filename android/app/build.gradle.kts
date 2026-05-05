@@ -133,9 +133,12 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    // Just for Icons.Default.Close on the close-conversation button.
-    // Core (≈100 KB), not extended (multi-MB), keeps the APK small.
+    // Icons used across the pipeline HUD (mic, hourglass, voice…) and
+    // the close-conversation button. Extended adds a few MB to the
+    // APK but for a kiosk app that's fine, and we'll need more icons
+    // anyway as scenes (NowPlaying, VideoPlayer, …) come online.
     implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
