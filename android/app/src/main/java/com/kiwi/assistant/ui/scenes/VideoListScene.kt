@@ -13,7 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,8 +55,8 @@ fun VideoListScene(scene: Scene.VideoList) {
                 EmptyVideos()
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(scene.videos) { video ->
-                        VideoRow(video)
+                    itemsIndexed(scene.videos) { index, video ->
+                        VideoRow(position = index + 1, video = video)
                     }
                 }
             }
@@ -98,7 +99,7 @@ private fun EmptyVideos() {
 }
 
 @Composable
-private fun VideoRow(video: VideoItem) {
+private fun VideoRow(position: Int, video: VideoItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -107,6 +108,8 @@ private fun VideoRow(video: VideoItem) {
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        PositionBadge(position)
+        Spacer(Modifier.width(12.dp))
         Thumbnail(url = video.thumbnailUrl, duration = video.durationLabel)
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -128,6 +131,29 @@ private fun VideoRow(video: VideoItem) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Numbered chip on the left of each row so the user can visually
+ * count "1, 2, 3…" matching what they'd say to Kiwi ("pon el cuatro").
+ */
+@Composable
+private fun PositionBadge(position: Int) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.13f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = position.toString(),
+            color = Color.White.copy(alpha = 0.92f),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
     }
 }
 

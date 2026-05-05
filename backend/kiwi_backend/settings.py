@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     gemini_voice: str = "Aoede"
     gemini_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
+    # YouTube's own "Watch Later" (system playlist WL) is unreachable
+    # via Data API since 2016. We use a regular custom playlist as a
+    # stand-in: when the user says "ver más tarde" / "pendientes" /
+    # "videos guardados" etc., the youtube_watch_later tool reads
+    # this playlist instead. Override via env var to point Kiwi at a
+    # different playlist.
+    youtube_watch_later_playlist_id: str = (
+        "PLp9Klsh4vHGNILVgPJGsaK1JEm8BV7RIP"
+    )
+
     # Auto-update endpoint payload. The Android app polls /api/version and
     # compares against its BuildConfig.VERSION_CODE.
     app_version_code: int = 1

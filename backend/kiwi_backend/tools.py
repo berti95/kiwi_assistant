@@ -702,6 +702,56 @@ async def _youtube_playlist_items(
     )
 
 
+async def _youtube_watch_later(max_results: int = 20) -> ToolResult:
+    """Read the user's "ver más tarde" playlist.
+
+    YouTube's official Watch Later (system playlist ``WL``) hasn't
+    been API-accessible since 2016. The user maintains a regular
+    custom playlist (configured in settings) as a stand-in, and
+    this tool reads it without making Gemini guess the playlist's
+    name.
+    """
+    from .settings import settings as _settings
+
+    playlist_id = _settings.youtube_watch_later_playlist_id
+    if not playlist_id:
+        return ToolResult(
+            response={
+                "error": (
+                    "watch_later_playlist_id not configured. Set the "
+                    "YOUTUBE_WATCH_LATER_PLAYLIST_ID env var to the ID of "
+                    "your 'ver más tarde' playlist."
+                ),
+            },
+        )
+    capped = max(1, min(int(max_results), _YT_MAX_RESULTS_HARD_CAP))
+    try:
+        creds = google_auth.credentials()
+    except google_auth.GoogleAuthUnavailableError as exc:
+        return ToolResult(response={"error": str(exc)})
+    try:
+        videos = await asyncio.to_thread(
+            _youtube_playlist_items_blocking, creds, playlist_id, capped,
+        )
+    except HttpError as exc:
+        return ToolResult(
+            response={"error": f"youtube api error: {exc.status_code}"},
+        )
+    return ToolResult(
+        response={
+            "playlist_id": playlist_id,
+            "title": "Ver más tarde",
+            "count": len(videos),
+            "videos": videos,
+        },
+        scene={
+            "type": "video_list",
+            "title": "Ver más tarde",
+            "videos": videos,
+        },
+    )
+
+
 def _youtube_play(
     video_id: str,
     title: str = "",
@@ -803,6 +853,30 @@ register(
         },
     ),
     handler=_youtube_playlist_items,
+)
+
+register(
+    name="youtube_watch_later",
+    description=(
+        "Devuelve y muestra los videos guardados por el usuario para ver "
+        "más tarde. Llama a este tool SIEMPRE que el usuario diga 'ver "
+        "más tarde', 'pendientes', 'videos guardados', 'lo que tengo "
+        "para ver', o cualquier variante similar. Es un atajo a la "
+        "playlist personalizada que el usuario mantiene como sustituto "
+        "del 'Watch Later' nativo (que YouTube no expone por API). "
+        "Después de mostrar la lista, si el usuario dice 'pon el N' usa "
+        "youtube_play con el video_id correspondiente."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo de videos (1-25, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_youtube_watch_later,
 )
 
 register(

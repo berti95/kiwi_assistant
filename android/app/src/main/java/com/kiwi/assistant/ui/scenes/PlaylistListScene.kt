@@ -13,7 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -51,7 +52,9 @@ fun PlaylistListScene(scene: Scene.PlaylistList) {
                 EmptyPlaylists()
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(scene.playlists) { p -> PlaylistRow(p) }
+                    itemsIndexed(scene.playlists) { idx, p ->
+                        PlaylistRow(position = idx + 1, playlist = p)
+                    }
                 }
             }
         }
@@ -91,7 +94,7 @@ private fun EmptyPlaylists() {
 }
 
 @Composable
-private fun PlaylistRow(playlist: PlaylistItem) {
+private fun PlaylistRow(position: Int, playlist: PlaylistItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -100,6 +103,8 @@ private fun PlaylistRow(playlist: PlaylistItem) {
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        PositionBadge(position)
+        Spacer(Modifier.width(12.dp))
         Box(
             modifier = Modifier
                 .size(width = 140.dp, height = 80.dp)
@@ -132,5 +137,24 @@ private fun PlaylistRow(playlist: PlaylistItem) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
+    }
+}
+
+@Composable
+private fun PositionBadge(position: Int) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.13f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = position.toString(),
+            color = Color.White.copy(alpha = 0.92f),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
     }
 }

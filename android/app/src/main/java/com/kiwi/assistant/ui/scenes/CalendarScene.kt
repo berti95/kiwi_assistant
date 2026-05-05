@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,9 +59,7 @@ fun CalendarScene(scene: Scene.Calendar) {
             if (scene.events.isEmpty()) {
                 EmptyEvents(period = scene.period)
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(scene.events) { event -> EventRow(event) }
-                }
+                EventList(events = scene.events)
             }
         }
     }
@@ -81,6 +80,69 @@ private fun Header(period: String, count: Int) {
             color = Color.White.copy(alpha = 0.55f),
             style = MaterialTheme.typography.titleMedium,
         )
+    }
+}
+
+/**
+ * Render the events grouped by their start day with section
+ * headers ("Hoy", "Mañana", "Viernes 8 de mayo"…). For single-day
+ * periods (today/tomorrow) there's only one group, so the header
+ * is mostly redundant — kept anyway for visual consistency and
+ * because the period subtitle is meta ("Hoy · 3 eventos") while
+ * the day header is structural.
+ */
+@Composable
+private fun EventList(events: List<CalendarEvent>) {
+    val grouped = remember(events) {
+        // groupBy preserves insertion order in Kotlin's
+        // LinkedHashMap, and the backend already returns events
+        // sorted by startTime — so chronological ordering survives.
+        events.groupBy { dayKeyFor(it) }
+    }
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        grouped.forEach { (day, dayEvents) ->
+            item(key = "header-${day ?: "unknown"}") {
+                DaySectionHeader(day)
+            }
+            items(
+                items = dayEvents,
+                key = { it.startsAt + it.title },
+            ) { event ->
+                EventRow(event)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DaySectionHeader(day: LocalDate?) {
+    val text = day?.let { dayLabel(it) } ?: ""
+    if (text.isBlank()) return
+    Text(
+        text = text,
+        color = Color.White.copy(alpha = 0.7f),
+        style = MaterialTheme.typography.titleSmall.copy(
+            fontWeight = FontWeight.SemiBold,
+        ),
+        modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp),
+    )
+}
+
+private fun dayKeyFor(event: CalendarEvent): LocalDate? = runCatching {
+    if (event.allDay) {
+        LocalDate.parse(event.startsAt)
+    } else {
+        OffsetDateTime.parse(event.startsAt).toLocalDate()
+    }
+}.getOrNull()
+
+private fun dayLabel(day: LocalDate): String {
+    val today = LocalDate.now()
+    return when (day) {
+        today -> "Hoy"
+        today.plusDays(1) -> "Mañana"
+        today.minusDays(1) -> "Ayer"
+        else -> day.format(HEADER_DATE_FORMATTER).titlecaseFirst()
     }
 }
 

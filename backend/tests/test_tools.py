@@ -614,3 +614,49 @@ def test_youtube_play_strips_whitespace_around_video_id() -> None:
 def test_youtube_play_missing_video_id_errors() -> None:
     result = _run(tools.dispatch("youtube_play", {"video_id": ""}))
     assert "error" in result
+
+
+def test_youtube_watch_later_uses_configured_playlist(monkeypatch) -> None:
+    from kiwi_backend.settings import settings as live_settings
+
+    monkeypatch.setattr(
+        live_settings, "youtube_watch_later_playlist_id", "PL_test_wl",
+    )
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
+
+    captured: dict[str, str] = {}
+
+    def fake_items(creds, playlist_id, max_results):  # noqa: ARG001
+        captured["id"] = playlist_id
+        return [
+            {
+                "video_id": "v1",
+                "title": "Pendiente 1",
+                "channel": "C",
+                "thumbnail_url": None,
+                "duration": "10:00",
+            },
+        ]
+
+    monkeypatch.setattr(tools, "_youtube_playlist_items_blocking", fake_items)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("youtube_watch_later", None, on_scene=sink))
+    assert captured["id"] == "PL_test_wl"
+    assert result["title"] == "Ver más tarde"
+    assert result["count"] == 1
+    assert pushed[0]["type"] == "video_list"
+    assert pushed[0]["title"] == "Ver más tarde"
+
+
+def test_youtube_watch_later_errors_when_unconfigured(monkeypatch) -> None:
+    from kiwi_backend.settings import settings as live_settings
+
+    monkeypatch.setattr(live_settings, "youtube_watch_later_playlist_id", "")
+    result = _run(tools.dispatch("youtube_watch_later", None))
+    assert "error" in result
+    assert "not configured" in result["error"]
