@@ -16,13 +16,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,30 +60,37 @@ fun PipelineHud(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 24.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
                 .widthIn(max = 720.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .background(Color.Black.copy(alpha = 0.78f))
-                .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                .clip(RoundedCornerShape(36.dp))
+                .background(Color.Black.copy(alpha = 0.82f))
+                .padding(start = 24.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             HudLeading(state)
             HudCaption(state, modifier = Modifier.weight(1f, fill = false))
-            IconButton(
+            // Stop button — labelled because the user repeatedly missed
+            // the previous icon-only X. "Detener" + Mic-off makes it
+            // clear that tapping stops the listening.
+            FilledTonalButton(
                 onClick = onClose,
-                modifier = Modifier.size(40.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color.White.copy(alpha = 0.16f),
+                    contentColor = Color.White,
+                ),
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Cerrar conversación",
-                    tint = Color.White.copy(alpha = 0.7f),
+                    imageVector = Icons.Filled.MicOff,
+                    contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )
+                Spacer(Modifier.size(8.dp))
+                Text("Detener")
             }
         }
     }

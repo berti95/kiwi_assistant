@@ -81,6 +81,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private val wakeWordListener = WakeWordListener(application)
     private var session: KiwiSession? = null
 
+    /**
+     * Coroutine that auto-closes the conversation if the user goes
+     * silent for [NO_SPEECH_TIMEOUT_MS] in [PipelineState.Listening].
+     * Without it, Kiwi would keep streaming PCM to Gemini Live (and
+     * burning input-audio tokens) for as long as the mic stays open.
+     */
+    private var noSpeechTimeoutJob: Job? = null
+
     private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
     private val pendingPlaybackChunks = AtomicInteger(0)
 
@@ -262,9 +270,35 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         _pipeline.value = PipelineState.Listening
+        scheduleNoSpeechTimeout()
+    }
+
+    /**
+     * Arm the no-speech auto-close. Re-armed on every [startUserTurn]
+     * so the user always gets a fresh window after Kiwi finishes
+     * answering. Cancelled the moment the user actually says
+     * something (via [endUserTurn]) or the conversation closes.
+     */
+    private fun scheduleNoSpeechTimeout() {
+        noSpeechTimeoutJob?.cancel()
+        noSpeechTimeoutJob = viewModelScope.launch(Dispatchers.Main) {
+            delay(NO_SPEECH_TIMEOUT_MS)
+            // Only fire if we're still in Listening AND the user
+            // hasn't crossed the speech threshold — otherwise the VAD
+            // path is already going to handle the turn.
+            if (_pipeline.value is PipelineState.Listening && !detector.userSpoke) {
+                KLog.i(
+                    TAG,
+                    "no-speech timeout (${NO_SPEECH_TIMEOUT_MS}ms) — closing to stop billing",
+                )
+                session?.sendTurnCancel()
+                closeConversation(resetScene = false)
+            }
+        }
     }
 
     private fun endUserTurn() {
+        noSpeechTimeoutJob?.cancel()
         if (!detector.userSpoke) {
             // The user tapped to end without ever crossing the speech
             // threshold (mainstream voice agents discard these turns
@@ -401,6 +435,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun closeConversation(resetScene: Boolean) {
+        noSpeechTimeoutJob?.cancel()
         cleanup()
         _pipeline.value = PipelineState.Idle
         // The close-conversation X buttons keep the active scene
@@ -443,5 +478,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // with what conversational voice agents (LiveKit, Pipecat)
         // ship by default.
         const val SILENCE_END_OF_TURN_MS = 800L
+
+        // How long Listening can stay open WITHOUT any speech being
+        // detected before we auto-close the conversation. Listening
+        // streams PCM to Gemini Live continuously, so each second of
+        // open-mic-no-one-talking burns input audio tokens. 15s gives
+        // the user time to think after Kiwi answers; once they speak,
+        // the regular VAD path takes over and this timer is cancelled.
+        const val NO_SPEECH_TIMEOUT_MS = 15_000L
     }
 }
