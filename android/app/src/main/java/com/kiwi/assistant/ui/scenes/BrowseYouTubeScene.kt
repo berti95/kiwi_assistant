@@ -92,11 +92,15 @@ fun BrowseYouTubeScene(scene: Scene.BrowseYouTube, onExit: () -> Unit) {
                     setBackgroundColor(android.graphics.Color.BLACK)
                     // Persistent cookies across sessions — once the
                     // user is signed into YouTube here, we want it
-                    // to stay signed in next time.
-                    CookieManager.getInstance().apply {
-                        setAcceptCookie(true)
-                        setAcceptThirdPartyCookies(this@apply, true)
-                    }
+                    // to stay signed in next time. Avoid nesting
+                    // CookieManager.apply inside the WebView.apply
+                    // because `this@apply` inside the inner block
+                    // would point at the CookieManager, not at this
+                    // WebView (and setAcceptThirdPartyCookies needs
+                    // the WebView).
+                    val cookies = CookieManager.getInstance()
+                    cookies.setAcceptCookie(true)
+                    cookies.setAcceptThirdPartyCookies(this, true)
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView, newProgress: Int) {
                             progress = newProgress
