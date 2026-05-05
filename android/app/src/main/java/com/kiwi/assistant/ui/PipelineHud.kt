@@ -1,7 +1,7 @@
 package com.kiwi.assistant.ui
 
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -112,7 +111,7 @@ private fun HudCaption(state: PipelineState, modifier: Modifier) {
 @Composable
 private fun PulsingIcon(icon: ImageVector, tint: Color) {
     val transition = rememberInfiniteTransition(label = "hud-pulse")
-    val target by transition.animateFloatAsState(
+    val target by transition.animateFloat(
         initialValue = 0.55f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
