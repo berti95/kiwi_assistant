@@ -92,13 +92,24 @@ class _LogRingBuffer:
 _buffer = _LogRingBuffer()
 
 
+_FORMATTER = logging.Formatter()
+
+
 def append_record(record: logging.LogRecord) -> None:
-    """Append a stdlib ``LogRecord`` to the buffer."""
+    """Append a stdlib ``LogRecord`` to the buffer.
+
+    Includes the formatted exception traceback when present so
+    ``log.exception(...)`` calls aren't silently truncated to just
+    the headline message.
+    """
+    message = record.getMessage()
+    if record.exc_info:
+        message = f"{message}\n{_FORMATTER.formatException(record.exc_info)}"
     _buffer.append(
         ts_ms=int(record.created * 1000),
         level=record.levelname,
         logger=record.name,
-        message=record.getMessage(),
+        message=message,
     )
 
 
