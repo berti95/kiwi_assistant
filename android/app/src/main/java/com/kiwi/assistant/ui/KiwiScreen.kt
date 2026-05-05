@@ -25,6 +25,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.ClockScene
+import com.kiwi.assistant.ui.scenes.PlaylistListScene
+import com.kiwi.assistant.ui.scenes.VideoListScene
+import com.kiwi.assistant.ui.scenes.VideoPlayerScene
 import com.kiwi.assistant.ui.screens.ConnectingScreen
 import com.kiwi.assistant.ui.screens.ErrorScreen
 import com.kiwi.assistant.ui.screens.ListeningScreen
@@ -130,6 +133,9 @@ private fun SceneLayer(scene: Scene) {
     when (scene) {
         Scene.Idle -> ClockScene()
         is Scene.Calendar -> CalendarScene(scene)
+        is Scene.VideoList -> VideoListScene(scene)
+        is Scene.PlaylistList -> PlaylistListScene(scene)
+        is Scene.VideoPlayer -> VideoPlayerScene(scene)
     }
 }
 

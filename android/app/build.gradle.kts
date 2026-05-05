@@ -142,6 +142,9 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    // Async image loading for video / playlist thumbnails on the YouTube
+    // scenes. Disk + memory caching, drop-in AsyncImage composable.
+    implementation(libs.coil.compose)
     implementation(libs.android.vad.silero)
     // The Silero VAD AAR pulls onnxruntime-android in transitively but
     // declares it as runtime scope, so the wake-word code that calls

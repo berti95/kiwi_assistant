@@ -329,3 +329,288 @@ def test_calendar_list_events_event_dto_handles_all_day_and_no_summary() -> None
     assert dto["title"] == "(sin título)"
     assert dto["all_day"] is True
     assert dto["starts_at"] == "2026-05-04"
+
+
+# ---- youtube tools --------------------------------------------------
+
+
+def test_youtube_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in (
+        "youtube_search",
+        "youtube_my_playlists",
+        "youtube_playlist_items",
+        "youtube_play",
+    ):
+        assert n in names
+
+
+def test_parse_iso8601_duration_short_long_and_live() -> None:
+    assert tools._parse_iso8601_duration("PT4M13S") == "4:13"
+    assert tools._parse_iso8601_duration("PT1H2M5S") == "1:02:05"
+    assert tools._parse_iso8601_duration("PT45S") == "0:45"
+    assert tools._parse_iso8601_duration("P0D") is None  # live stream sentinel
+    assert tools._parse_iso8601_duration(None) is None
+    assert tools._parse_iso8601_duration("garbage") is None
+
+
+def test_youtube_thumbnail_picks_highest_available() -> None:
+    thumbs = {
+        "default": {"url": "low.jpg"},
+        "medium": {"url": "med.jpg"},
+        "high": {"url": "hi.jpg"},
+    }
+    assert tools._youtube_thumbnail(thumbs) == "hi.jpg"
+    # Fallback chain when high is missing
+    assert tools._youtube_thumbnail({"default": {"url": "low.jpg"}}) == "low.jpg"
+    assert tools._youtube_thumbnail({}) is None
+    assert tools._youtube_thumbnail(None) is None
+
+
+def test_resolve_playlist_id_prefers_exact_then_prefix_then_substring() -> None:
+    playlists = [
+        {"playlist_id": "p1", "title": "Música clásica"},
+        {"playlist_id": "p2", "title": "Para ver"},
+        {"playlist_id": "p3", "title": "Recetas para preparar"},
+    ]
+    # exact (case + accent insensitive)
+    assert tools._resolve_playlist_id(playlists, "música clásica") == "p1"
+    assert tools._resolve_playlist_id(playlists, "MUSICA CLASICA") == "p1"
+    # exact wins over prefix
+    assert tools._resolve_playlist_id(playlists, "Para ver") == "p2"
+    # prefix wins over substring when there are two matches
+    assert tools._resolve_playlist_id(playlists, "Recetas") == "p3"
+    # substring fallback
+    assert tools._resolve_playlist_id(playlists, "ver") == "p2"
+    # no match
+    assert tools._resolve_playlist_id(playlists, "no existe") is None
+    # empty needle
+    assert tools._resolve_playlist_id(playlists, "") is None
+
+
+def test_youtube_search_happy_path(monkeypatch) -> None:
+    fake_creds = object()
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: fake_creds)
+
+    def fake_search_blocking(creds, query, max_results):
+        assert creds is fake_creds
+        assert query == "paella"
+        assert max_results == 5
+        return [
+            {
+                "video_id": "abc123",
+                "title": "Cómo hacer paella",
+                "channel": "Cocina Española",
+                "thumbnail_url": "https://img/abc.jpg",
+                "duration": "4:13",
+            },
+        ]
+
+    monkeypatch.setattr(tools, "_youtube_search_blocking", fake_search_blocking)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_search",
+            {"query": "paella", "max_results": 5},
+            on_scene=sink,
+        ),
+    )
+    assert result["count"] == 1
+    assert result["videos"][0]["video_id"] == "abc123"
+    # Scene shape matches what the tablet expects.
+    assert len(pushed) == 1
+    assert pushed[0]["type"] == "video_list"
+    assert pushed[0]["title"] == '"paella"'
+    assert pushed[0]["videos"] == result["videos"]
+
+
+def test_youtube_search_caps_max_results() -> None:
+    captured: dict = {}
+
+    def fake_search_blocking(creds, query, max_results):  # noqa: ARG001
+        captured["max_results"] = max_results
+        return []
+
+    import pytest as _pt
+
+    monkeypatch = _pt.MonkeyPatch()
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
+    monkeypatch.setattr(tools, "_youtube_search_blocking", fake_search_blocking)
+    try:
+        _run(tools.dispatch("youtube_search", {"query": "x", "max_results": 999}))
+        assert captured["max_results"] == tools._YT_MAX_RESULTS_HARD_CAP
+    finally:
+        monkeypatch.undo()
+
+
+def test_youtube_search_missing_query_errors() -> None:
+    result = _run(tools.dispatch("youtube_search", {"query": ""}))
+    assert "error" in result
+
+
+def test_youtube_my_playlists_happy_path(monkeypatch) -> None:
+    fake_creds = object()
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: fake_creds)
+
+    def fake_blocking(creds, max_results):  # noqa: ARG001
+        return [
+            {
+                "playlist_id": "p1",
+                "title": "Para ver",
+                "item_count": 7,
+                "thumbnail_url": None,
+            },
+        ]
+
+    monkeypatch.setattr(tools, "_youtube_my_playlists_blocking", fake_blocking)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("youtube_my_playlists", None, on_scene=sink),
+    )
+    assert result["count"] == 1
+    assert result["playlists"][0]["title"] == "Para ver"
+    assert pushed[0]["type"] == "playlist_list"
+
+
+def test_youtube_playlist_items_by_id(monkeypatch) -> None:
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
+    monkeypatch.setattr(
+        tools, "_youtube_playlist_items_blocking",
+        lambda creds, playlist_id, max_results: [  # noqa: ARG005
+            {
+                "video_id": "v1",
+                "title": "Vid 1",
+                "channel": "Chan",
+                "thumbnail_url": None,
+                "duration": "3:10",
+            },
+        ],
+    )
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_playlist_items",
+            {"playlist_id": "PL_xxx"},
+            on_scene=sink,
+        ),
+    )
+    assert result["playlist_id"] == "PL_xxx"
+    assert result["count"] == 1
+    assert pushed[0]["type"] == "video_list"
+
+
+def test_youtube_playlist_items_by_name_resolves(monkeypatch) -> None:
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
+
+    def fake_my_playlists(creds, max_results):  # noqa: ARG001
+        return [
+            {
+                "playlist_id": "PL_para_ver",
+                "title": "Para ver",
+                "item_count": 3,
+                "thumbnail_url": None,
+            },
+            {
+                "playlist_id": "PL_otra",
+                "title": "Música",
+                "item_count": 12,
+                "thumbnail_url": None,
+            },
+        ]
+
+    captured_id: dict[str, str] = {}
+
+    def fake_items(creds, playlist_id, max_results):  # noqa: ARG001
+        captured_id["id"] = playlist_id
+        return []
+
+    monkeypatch.setattr(tools, "_youtube_my_playlists_blocking", fake_my_playlists)
+    monkeypatch.setattr(tools, "_youtube_playlist_items_blocking", fake_items)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_playlist_items",
+            {"playlist_name": "para ver"},
+        ),
+    )
+    assert captured_id["id"] == "PL_para_ver"
+    assert result["title"] == "Para ver"
+    assert result["count"] == 0
+
+
+def test_youtube_playlist_items_unknown_name_returns_error(monkeypatch) -> None:
+    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
+    monkeypatch.setattr(
+        tools, "_youtube_my_playlists_blocking",
+        lambda creds, max_results: [],  # noqa: ARG005
+    )
+    result = _run(
+        tools.dispatch(
+            "youtube_playlist_items",
+            {"playlist_name": "no existe"},
+        ),
+    )
+    assert "error" in result
+    assert "no playlist found" in result["error"]
+
+
+def test_youtube_playlist_items_missing_both_args_errors() -> None:
+    result = _run(tools.dispatch("youtube_playlist_items", {}))
+    assert "error" in result
+
+
+def test_youtube_play_pushes_video_player_scene() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "youtube_play",
+            {"video_id": "dQw4w9WgXcQ", "title": "Foo", "channel": "Bar"},
+            on_scene=sink,
+        ),
+    )
+    assert result["playing"] == "dQw4w9WgXcQ"
+    assert pushed == [{
+        "type": "video_player",
+        "video_id": "dQw4w9WgXcQ",
+        "title": "Foo",
+        "channel": "Bar",
+    }]
+
+
+def test_youtube_play_strips_whitespace_around_video_id() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    _run(
+        tools.dispatch(
+            "youtube_play",
+            {"video_id": "  abc123  "},
+            on_scene=sink,
+        ),
+    )
+    assert pushed[0]["video_id"] == "abc123"
+
+
+def test_youtube_play_missing_video_id_errors() -> None:
+    result = _run(tools.dispatch("youtube_play", {"video_id": ""}))
+    assert "error" in result

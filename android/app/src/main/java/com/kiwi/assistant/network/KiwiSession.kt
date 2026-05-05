@@ -16,7 +16,9 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 import com.kiwi.assistant.ui.CalendarEvent
+import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.VideoItem
 
 /**
  * High-level event surfaced to the ViewModel.
@@ -213,6 +215,9 @@ class KiwiSession(
     private fun parseScene(scene: JsonObject): Scene? {
         return when (scene.string("type")) {
             "calendar" -> parseCalendarScene(scene)
+            "video_list" -> parseVideoListScene(scene)
+            "playlist_list" -> parsePlaylistListScene(scene)
+            "video_player" -> parseVideoPlayerScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -235,6 +240,48 @@ class KiwiSession(
             )
         }
         return Scene.Calendar(period = period, events = events)
+    }
+
+    private fun parseVideoListScene(scene: JsonObject): Scene.VideoList {
+        val title = scene.string("title") ?: ""
+        val raw = scene["videos"] as? JsonArray ?: emptyList()
+        val videos = raw.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.string("video_id") ?: return@mapNotNull null
+            VideoItem(
+                videoId = id,
+                title = obj.string("title") ?: "(sin título)",
+                channel = obj.string("channel") ?: "",
+                durationLabel = obj.string("duration"),
+                thumbnailUrl = obj.string("thumbnail_url"),
+            )
+        }
+        return Scene.VideoList(title = title, videos = videos)
+    }
+
+    private fun parsePlaylistListScene(scene: JsonObject): Scene.PlaylistList {
+        val raw = scene["playlists"] as? JsonArray ?: emptyList()
+        val playlists = raw.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.string("playlist_id") ?: return@mapNotNull null
+            PlaylistItem(
+                playlistId = id,
+                title = obj.string("title") ?: "(sin título)",
+                itemCount = (obj["item_count"] as? JsonPrimitive)
+                    ?.contentOrNull?.toIntOrNull() ?: 0,
+                thumbnailUrl = obj.string("thumbnail_url"),
+            )
+        }
+        return Scene.PlaylistList(playlists = playlists)
+    }
+
+    private fun parseVideoPlayerScene(scene: JsonObject): Scene.VideoPlayer? {
+        val id = scene.string("video_id") ?: return null
+        return Scene.VideoPlayer(
+            videoId = id,
+            title = scene.string("title") ?: "",
+            channel = scene.string("channel") ?: "",
+        )
     }
 
     private companion object {
