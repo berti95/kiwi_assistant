@@ -1,11 +1,12 @@
 """WebSocket session handler.
 
-Two operating modes, picked at handshake time based on `settings.gcp_project`:
+Two operating modes, picked at handshake time based on
+``settings.gemini_api_key``:
 
-- Vertex AI Live (production): the handshake completes, and the rest of the
+- Gemini Live (production): the handshake completes, and the rest of the
   socket is handed off to `gemini.proxy()` which streams audio + transcripts
-  through the Gemini Live API.
-- Echo (local dev / tests / pre-Vertex sanity checks): the existing in-process
+  through the Google AI Studio Live API.
+- Echo (local dev / tests / pre-Live sanity checks): the existing in-process
   loop echoes audio.input back as audio.output and answers audio.end with
   placeholder transcripts. No external service is hit.
 """
@@ -30,7 +31,7 @@ async def run_session(ws: WebSocket) -> None:
 
     await ws.send_json({"type": protocol.TYPE_SESSION_READY})
 
-    if settings.gcp_project:
+    if settings.gemini_api_key:
         # Anything that escapes the lazy import or the proxy itself would
         # otherwise propagate up to Starlette and tear the socket down with
         # no clean close frame, which the OkHttp client surfaces as a bare

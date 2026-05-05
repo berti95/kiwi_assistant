@@ -53,11 +53,10 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
     """Run the tablet ↔ Gemini Live proxy until either side disconnects."""
     history: list[dict[str, str]] = []
     try:
-        client = genai.Client(
-            vertexai=True,
-            project=settings.gcp_project,
-            location=settings.gcp_location,
-        )
+        # Google AI Studio (not Vertex Live) — see settings.gemini_api_key
+        # for the rationale. The same google-genai SDK serves both; only
+        # the Client constructor differs.
+        client = genai.Client(api_key=settings.gemini_api_key)
         while True:
             # Wait for the user to tap-to-talk for the next turn.
             message = await ws.receive_json()

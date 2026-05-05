@@ -56,14 +56,17 @@ class Settings(BaseSettings):
     # where the developer wants to poll logs from outside Cloud Logging.
     dev_logs_token: str = ""
 
-    # Vertex AI configuration. The backend uses Application Default
-    # Credentials provided by the Cloud Run service account, so no API key
-    # is required. When `gcp_project` is empty the WebSocket session falls
-    # back to echo mode (useful for local dev / tests / pre-Vertex sanity
-    # checks).
+    # Gemini Live API configuration. We're on the AI Studio API rather
+    # than Vertex Live because the 3.1 Flash Live preview (which
+    # narrates reliably after function calls) is only published on AI
+    # Studio. When `gemini_api_key` is empty the WebSocket session
+    # falls back to echo mode (useful for local dev / tests). The
+    # existing `gcp_project` / `gcp_location` knobs stay around — they
+    # still gate other GCP-side helpers and Cloud Run sets them anyway.
+    gemini_api_key: str = ""
     gcp_project: str = ""
     gcp_location: str = "europe-west1"
-    gemini_model: str = "gemini-live-2.5-flash-native-audio"
+    gemini_model: str = "gemini-3.1-flash-live-preview"
     gemini_voice: str = "Aoede"
     gemini_system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
