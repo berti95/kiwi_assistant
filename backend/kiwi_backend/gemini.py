@@ -198,7 +198,7 @@ async def _run_one_turn(
                     continue
                 audio_chunks_in += 1
                 await gemini_session.send_realtime_input(
-                    media=types.Blob(data=pcm, mime_type="audio/pcm;rate=16000"),
+                    audio=types.Blob(data=pcm, mime_type="audio/pcm;rate=16000"),
                 )
             elif kind in (protocol.TYPE_ACTIVITY_END, protocol.TYPE_AUDIO_END):
                 log.info(
