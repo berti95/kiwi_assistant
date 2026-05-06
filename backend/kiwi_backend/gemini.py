@@ -34,6 +34,21 @@ from .settings import Settings
 
 log = logging.getLogger(__name__)
 
+# Hard upper bound on a single user→Kiwi exchange. The tablet's VAD
+# already closes turns at ~1.2 s of silence and Gemini Live wraps up
+# the response in seconds; anything past 3 minutes is a stuck Gemini
+# session or a tablet that's frozen mid-stream. We bail rather than
+# leave the upstream Live session billing in the background.
+_PER_TURN_HARD_TIMEOUT_S = 180
+
+# How long we wait between turns for the next ``activity_start`` from
+# the tablet. The tablet's own no-speech timeout is 15 s and a healthy
+# inter-turn drain is <5 s, so 120 s is a generous defence against a
+# zombie WebSocket (network drop without TCP-RST, app force-stopped
+# but socket lingering) keeping a Cloud Run instance + Gemini quota
+# alive for nothing.
+_BETWEEN_TURNS_IDLE_TIMEOUT_S = 120
+
 
 class _SessionEndError(Exception):
     """Tablet asked us to close the whole session, mid-turn."""
@@ -59,7 +74,26 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
         client = genai.Client(api_key=settings.gemini_api_key)
         while True:
             # Wait for the user to tap-to-talk for the next turn.
-            message = await ws.receive_json()
+            try:
+                message = await asyncio.wait_for(
+                    ws.receive_json(),
+                    timeout=_BETWEEN_TURNS_IDLE_TIMEOUT_S,
+                )
+            except TimeoutError:
+                log.warning(
+                    "WS idle for %ds between turns after %d turns — closing "
+                    "to stop Gemini billing on a zombie session",
+                    _BETWEEN_TURNS_IDLE_TIMEOUT_S,
+                    len(history),
+                )
+                await _safe_send(
+                    ws,
+                    {
+                        "type": protocol.TYPE_ERROR,
+                        "message": "idle timeout",
+                    },
+                )
+                return
             kind = message.get("type")
             if kind == protocol.TYPE_SESSION_END:
                 log.info(
@@ -87,8 +121,9 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                     await gemini_session.send_realtime_input(
                         activity_start=types.ActivityStart(),
                     )
-                    user_text, kiwi_text = await _run_one_turn(
-                        ws, gemini_session, turn_index,
+                    user_text, kiwi_text = await asyncio.wait_for(
+                        _run_one_turn(ws, gemini_session, turn_index),
+                        timeout=_PER_TURN_HARD_TIMEOUT_S,
                     )
                     history.append(
                         {"user": user_text.strip(), "kiwi": kiwi_text.strip()},
@@ -97,6 +132,23 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                 log.info("turn %d: cancelled by tablet (no speech)", turn_index)
                 # Drop the upstream session, keep the WebSocket open,
                 # and loop back to wait for the next activity_start.
+                continue
+            except TimeoutError:
+                log.warning(
+                    "turn %d: hit hard timeout (%ds) — closing upstream "
+                    "Gemini session and waiting for next turn",
+                    turn_index,
+                    _PER_TURN_HARD_TIMEOUT_S,
+                )
+                await _safe_send(
+                    ws,
+                    {
+                        "type": protocol.TYPE_ERROR,
+                        "message": "turn timeout",
+                    },
+                )
+                # The async-with around live.connect already closed
+                # the upstream session via the cancellation propagation.
                 continue
             except _SessionEndError:
                 log.info(

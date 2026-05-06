@@ -116,18 +116,19 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             )
         }
 
-        // Close button: only meaningful while a session is active.
-        // Hidden when the pipeline is at rest (Idle — already
-        // "closed"), on Error (a tap there already returns to Idle),
-        // and on scenes that ship their own top-start back arrow
-        // (BrowseYouTube, VideoPlayer) — would otherwise stack on top.
+        // Close button: visible whenever there's something non-Idle to
+        // close (a session, a non-Idle scene, or both). Tap = go home,
+        // i.e. close the conversation if active AND reset the scene.
+        // Hidden on scenes that ship their own top-start back arrow
+        // (BrowseYouTube, VideoPlayer) so we don't stack two icons.
         val sessionActive =
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
+        val sceneActive = scene !is Scene.Idle
         val sceneHasOwnBackButton =
             scene is Scene.BrowseYouTube || scene is Scene.VideoPlayer
-        if (sessionActive && !sceneHasOwnBackButton) {
+        if ((sessionActive || sceneActive) && !sceneHasOwnBackButton) {
             IconButton(
-                onClick = viewModel::onCloseConversation,
+                onClick = viewModel::onLongPress,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
@@ -135,7 +136,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "Cerrar conversación",
+                    contentDescription = "Volver al inicio",
                     tint = Color.White.copy(alpha = 0.6f),
                     modifier = Modifier.size(32.dp),
                 )
