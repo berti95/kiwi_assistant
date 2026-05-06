@@ -5,35 +5,37 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import android.content.Context
-import android.util.Log
+import com.kiwi.assistant.log.KLog
 import java.nio.FloatBuffer
 
 /**
  * Three-stage openWakeWord inference pipeline (mel → embedding → keyword).
  *
- * The classifier currently bundled is ``kiwi_variants.onnx``, trained
- * in Colab via ``tools/wakeword-training-es/`` (Piper TTS Spanish
- * voices for positives + the standard openWakeWord negatives +
- * augmentation). It fires on any of:
- *   • "hola kiwi"
- *   • "hey kiwi"
- *   • "oye kiwi"
- *   • "eh kiwi"
- * Mirrors the reference Python implementation (dscripka/openWakeWord)
- * so dropping in any other pre-trained ``.onnx`` (and updating the
- * ``loadAsset`` call below) works without code changes:
+ * Two classifier heads run on every embedding window and the
+ * highest-scoring one wins:
+ *   • ``kiwi_variants.onnx`` — custom-trained Spanish phrases
+ *     ("hola/hey/oye/eh kiwi"), built from Piper TTS positives in
+ *     ``tools/wakeword-training-es/``.
+ *   • ``alexa_v0.1.onnx`` — pre-trained openWakeWord model for
+ *     "alexa" / "hey alexa". Ships well-tuned out of the box; the
+ *     user already has the muscle memory from their Echo device.
  *
+ * Mel + embedding stages are shared (the heavy ones), so adding a
+ * second classifier head is a few KB / ms of extra cost. Adding
+ * more is a single line in [WAKEWORD_MODELS].
+ *
+ * Pipeline:
  *   1. **Mel spectrogram** model converts a chunk of raw 16 kHz PCM
- *      audio into 32-band mel feature frames. We normalise in place
+ *      audio into 32-band mel feature frames. Normalised in place
  *      with the openWakeWord convention ``x / 10 + 2``.
  *   2. **Embedding** model (Google's speech embedding network)
  *      consumes a 76-frame window of mel features and emits a 96-dim
- *      embedding. The sliding stride is 8 mel frames, which gives
- *      one new embedding roughly every 80 ms.
- *   3. **Wake word** model takes the most recent N embeddings (N is
- *      whatever the wake word model was trained for; we read it from
- *      the ONNX input shape at load time, so different ``.onnx``
- *      files keep working) and returns the wake-phrase probability.
+ *      embedding. Sliding stride is 8 mel frames → roughly one new
+ *      embedding every 80 ms.
+ *   3. **Wake word** models take the most recent N embeddings (read
+ *      from each ``.onnx`` input shape at load time, so different
+ *      models with different time windows still work) and return a
+ *      wake-phrase probability.
  *
  * Single-threaded — the buffers and ONNX sessions are not safe for
  * concurrent feeders. The wake-word listener owns one detector and
@@ -47,51 +49,60 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         env.createSession(loadAsset(context, "wakeword/melspectrogram.onnx"))
     private val embeddingSession: OrtSession =
         env.createSession(loadAsset(context, "wakeword/embedding_model.onnx"))
-    private val wakewordSession: OrtSession =
-        env.createSession(loadAsset(context, "wakeword/kiwi_variants.onnx"))
 
     private val melInputName: String = melSession.inputNames.first()
     private val embeddingInputName: String = embeddingSession.inputNames.first()
-    private val wakewordInputName: String = wakewordSession.inputNames.first()
 
     /**
-     * How many embeddings the wake-word model expects. Read at load
-     * time from the model's input shape (typically 16 for
-     * ``hey_jarvis_v0.1``) so different openWakeWord ``.onnx`` files
-     * with different time windows still work.
+     * One classifier head — name + ONNX session + input tensor name +
+     * how many embeddings the model expects in its input window.
      */
-    private val wakewordWindow: Int = run {
-        val info = wakewordSession.inputInfo[wakewordInputName]
+    private data class WakewordModel(
+        val name: String,
+        val session: OrtSession,
+        val inputName: String,
+        val window: Int,
+    )
+
+    private val models: List<WakewordModel> = WAKEWORD_MODELS.map { (name, asset) ->
+        val session = env.createSession(loadAsset(context, asset))
+        val inputName = session.inputNames.first()
+        val info = session.inputInfo[inputName]
         val shape = (info?.info as? TensorInfo)?.shape
             ?: longArrayOf(1, 16, EMBEDDING_DIM.toLong())
-        shape.getOrNull(1)?.toInt()?.takeIf { it > 0 } ?: 16
-    }.also { Log.i(TAG, "Wake-word model window: $it embeddings") }
+        val window = shape.getOrNull(1)?.toInt()?.takeIf { it > 0 } ?: 16
+        KLog.i(TAG, "loaded wake-word model '$name' (window=$window)")
+        WakewordModel(name, session, inputName, window)
+    }
+
+    /** All models share the same embedding buffer; cap once for the worst case. */
+    private val embeddingBufferCap: Int =
+        (models.maxOfOrNull { it.window } ?: 16) + EMBEDDING_BUFFER_HEADROOM
 
     private val melBuffer = ArrayDeque<FloatArray>()  // each entry = 32 mel bins
     private val embeddingBuffer = ArrayDeque<FloatArray>()  // each = 96 floats
 
     /**
-     * How many embeddings to keep around. We never look further back
-     * than [wakewordWindow] when building the wake-word input, so the
-     * cap is `wakewordWindow + EMBEDDING_BUFFER_HEADROOM`. Hard-coding a
-     * smaller absolute cap (the previous behaviour) silently broke any
-     * future ``.onnx`` whose window happened to exceed it — e.g. a
-     * custom model trained on a longer phrase.
+     * Score for each model from the last [feed] that produced one.
+     * Defaults to 0 for all models. Useful for debugging "why didn't
+     * it fire" via the periodic peak-score log.
      */
-    private val embeddingBufferCap: Int =
-        wakewordWindow + EMBEDDING_BUFFER_HEADROOM
-
     @Volatile
-    var lastScore: Float = 0f
+    var lastScores: Map<String, Float> = models.associate { it.name to 0f }
         private set
+
+    /** Backwards-compat single value — the highest of [lastScores]. */
+    val lastScore: Float
+        get() = lastScores.values.maxOrNull() ?: 0f
 
     /**
      * Feed a chunk of raw 16 kHz mono PCM 16-bit samples. 1280 samples
      * (80 ms) is the sweet spot recommended by openWakeWord, but other
-     * sizes work — the pipeline buffers internally. Returns the latest
-     * wake-word probability if this feed produced one, else null.
+     * sizes work — the pipeline buffers internally. Returns the
+     * highest of the per-model scores if this feed produced any, else
+     * null.
      */
-    fun feed(samples: ShortArray): Float? {
+    fun feed(samples: ShortArray): Scores? {
         if (samples.isEmpty()) return null
 
         // 1. Audio → mel features.
@@ -118,14 +129,29 @@ class WakeWordDetector(context: Context) : AutoCloseable {
             newEmbeddings = true
         }
 
-        // 3. Embeddings → wake-word probability, but only when we have
-        // enough embeddings to fill the model's window AND we actually
-        // produced new ones this round (otherwise the score wouldn't
-        // change so re-running is pointless).
-        if (!newEmbeddings || embeddingBuffer.size < wakewordWindow) return null
-        val score = runWakeword()
-        lastScore = score
-        return score
+        // 3. Embeddings → wake-word probability per model. Skip when
+        // we don't have any new embeddings (the score wouldn't change).
+        if (!newEmbeddings) return null
+        val scores = mutableMapOf<String, Float>()
+        for (model in models) {
+            if (embeddingBuffer.size < model.window) {
+                scores[model.name] = 0f
+                continue
+            }
+            scores[model.name] = runWakeword(model)
+        }
+        if (scores.isEmpty()) return null
+        lastScores = scores
+        return Scores(scores)
+    }
+
+    /** Per-model output of one [feed] call. */
+    data class Scores(val perModel: Map<String, Float>) {
+        /** Highest score across all models — what the threshold check uses. */
+        val max: Float get() = perModel.values.maxOrNull() ?: 0f
+        /** Name of the model that produced [max] (deterministic on ties). */
+        val winner: String
+            get() = perModel.maxByOrNull { it.value }?.key ?: "?"
     }
 
     // ---- ONNX helpers --------------------------------------------------
@@ -191,20 +217,20 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         }
     }
 
-    private fun runWakeword(): Float {
-        val flat = FloatArray(wakewordWindow * EMBEDDING_DIM)
-        val start = embeddingBuffer.size - wakewordWindow
-        for (i in 0 until wakewordWindow) {
+    private fun runWakeword(model: WakewordModel): Float {
+        val flat = FloatArray(model.window * EMBEDDING_DIM)
+        val start = embeddingBuffer.size - model.window
+        for (i in 0 until model.window) {
             val emb = embeddingBuffer[start + i]
             System.arraycopy(emb, 0, flat, i * EMBEDDING_DIM, EMBEDDING_DIM)
         }
         val tensor = OnnxTensor.createTensor(
             env,
             FloatBuffer.wrap(flat),
-            longArrayOf(1L, wakewordWindow.toLong(), EMBEDDING_DIM.toLong()),
+            longArrayOf(1L, model.window.toLong(), EMBEDDING_DIM.toLong()),
         )
         return tensor.use {
-            wakewordSession.run(mapOf(wakewordInputName to it)).use { result ->
+            model.session.run(mapOf(model.inputName to it)).use { result ->
                 val out = result[0] as OnnxTensor
                 val buffer = out.floatBuffer
                 // openWakeWord wake-word models output a single
@@ -224,12 +250,14 @@ class WakeWordDetector(context: Context) : AutoCloseable {
     }
 
     override fun close() {
-        runCatching { wakewordSession.close() }
+        for (model in models) {
+            runCatching { model.session.close() }
+        }
         runCatching { embeddingSession.close() }
         runCatching { melSession.close() }
         // Don't close OrtEnvironment — it's a process-wide singleton
         // shared with SpeechActivityDetector.
-        Log.i(TAG, "WakeWordDetector closed")
+        KLog.i(TAG, "WakeWordDetector closed")
     }
 
     private companion object {
@@ -239,9 +267,18 @@ class WakeWordDetector(context: Context) : AutoCloseable {
         const val EMBEDDING_HOP = 8
         const val EMBEDDING_DIM = 96
         const val MEL_BUFFER_MAX = 200
-        // A few embeddings of headroom on top of the model's own
-        // window — keeps memory bounded while still surviving a small
-        // burst of mel frames produced from a single feed() call.
+        // A few embeddings of headroom on top of the deepest model's
+        // own window — keeps memory bounded while still surviving a
+        // small burst of mel frames produced from a single feed() call.
         const val EMBEDDING_BUFFER_HEADROOM = 8
+
+        /**
+         * The classifier heads we load. Add another (name, asset path)
+         * tuple to enable a new wake phrase — no other changes needed.
+         */
+        val WAKEWORD_MODELS = listOf(
+            "kiwi" to "wakeword/kiwi_variants.onnx",
+            "alexa" to "wakeword/alexa_v0.1.onnx",
+        )
     }
 }

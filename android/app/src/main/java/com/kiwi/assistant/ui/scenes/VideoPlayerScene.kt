@@ -2,6 +2,7 @@ package com.kiwi.assistant.ui.scenes
 
 import android.annotation.SuppressLint
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -41,6 +42,16 @@ private const val ASSET_HTML_PATH = "youtube/player.html"
 // approach we settled on is more permissive than the JS API path
 // (which kept tripping on "152-4 / Video no disponible" errors).
 private const val PLAYER_BASE_URL = "https://www.youtube.com"
+
+// Spoof a plain Chrome-on-Android UA. Default WebView UAs include
+// the "; wv)" marker which YouTube's anti-bot detection has been
+// observed to refuse playback for ("error 152-4"). Using a regular
+// Chrome UA — same trick that BrowseYouTubeScene uses — restores
+// playback for the same set of videos a normal browser plays.
+private const val UA_CHROME_MOBILE =
+    "Mozilla/5.0 (Linux; Android 14; Pixel Tablet) " +
+        "AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/130.0.0.0 Mobile Safari/537.36"
 
 /**
  * YouTube video playback inside an Android [WebView] using the
@@ -141,10 +152,19 @@ private fun VideoPlayerWebView(videoId: String) {
                 settings.javaScriptEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
                 settings.domStorageEnabled = true
+                settings.databaseEnabled = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
+                settings.userAgentString = UA_CHROME_MOBILE
                 setBackgroundColor(android.graphics.Color.BLACK)
+                // Persistent cookies — YouTube's embed checks third-
+                // party cookies even for unauthenticated playback in
+                // some flows. Without them WebView playback often
+                // fails with "Video no disponible / 152-4".
+                val cookies = CookieManager.getInstance()
+                cookies.setAcceptCookie(true)
+                cookies.setAcceptThirdPartyCookies(this, true)
                 webChromeClient = WebChromeClient()
                 webViewClient = object : WebViewClient() {
                     override fun onReceivedError(

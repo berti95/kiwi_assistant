@@ -88,7 +88,9 @@ class WakeWordListener(
         job = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(CHUNK_SAMPLES)
             var aboveThreshold = 0
-            var peakScore = 0f
+            // Track the peak per model so the periodic log shows
+            // which classifier is responsible (kiwi vs alexa).
+            val peakPerModel = mutableMapOf<String, Float>()
             var lastPeakLogMs = System.currentTimeMillis()
             try {
                 while (
@@ -98,26 +100,39 @@ class WakeWordListener(
                     val read = rec.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (read <= 0 || stopRequested) continue
 
-                    val score = det.feed(buffer.copyOf(read))
-                    if (score == null) continue
+                    val scores = det.feed(buffer.copyOf(read)) ?: continue
 
-                    if (score > peakScore) peakScore = score
-                    // Log the peak score every PEAK_LOG_INTERVAL_MS so
-                    // we can tell whether the model is producing
-                    // anything sensible even when the threshold isn't
+                    for ((name, score) in scores.perModel) {
+                        val prev = peakPerModel[name] ?: 0f
+                        if (score > prev) peakPerModel[name] = score
+                    }
+                    // Log peak per model every PEAK_LOG_INTERVAL_MS so
+                    // we can see whether each classifier is producing
+                    // sensible scores even when the threshold isn't
                     // being crossed — the alternative is per-frame
                     // logging which is way too chatty.
                     val now = System.currentTimeMillis()
                     if (now - lastPeakLogMs >= PEAK_LOG_INTERVAL_MS) {
-                        KLog.i(TAG, "peak score in last ${(now - lastPeakLogMs) / 1000}s: $peakScore")
-                        peakScore = 0f
+                        val summary = peakPerModel.entries
+                            .sortedBy { it.key }
+                            .joinToString(", ") { "${it.key}=${"%.3f".format(it.value)}" }
+                        KLog.i(
+                            TAG,
+                            "peak in last ${(now - lastPeakLogMs) / 1000}s: $summary",
+                        )
+                        peakPerModel.clear()
                         lastPeakLogMs = now
                     }
 
-                    if (score >= threshold) {
+                    val maxScore = scores.max
+                    if (maxScore >= threshold) {
                         aboveThreshold += 1
                         if (aboveThreshold >= debounceFrames) {
-                            KLog.i(TAG, "Wake word DETECTED (score=$score)")
+                            KLog.i(
+                                TAG,
+                                "Wake word DETECTED (winner=${scores.winner}, " +
+                                    "score=${"%.3f".format(maxScore)})",
+                            )
                             // Release the mic + ONNX sessions BEFORE
                             // notifying the caller so the session
                             // capture path can immediately acquire the
