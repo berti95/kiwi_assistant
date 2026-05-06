@@ -110,14 +110,16 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             )
         }
 
-        // Close button: only meaningful while a session is active. Hidden
-        // when the pipeline is at rest (Idle — already "closed"), on
-        // Error (a tap there already returns to Idle), and on the
-        // BrowseYouTube scene which has its own back arrow at the same
-        // anchor (top-start) and would otherwise stack on top of it.
+        // Close button: only meaningful while a session is active.
+        // Hidden when the pipeline is at rest (Idle — already
+        // "closed"), on Error (a tap there already returns to Idle),
+        // and on scenes that ship their own top-start back arrow
+        // (BrowseYouTube, VideoPlayer) — would otherwise stack on top.
         val sessionActive =
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
-        if (sessionActive && scene !is Scene.BrowseYouTube) {
+        val sceneHasOwnBackButton =
+            scene is Scene.BrowseYouTube || scene is Scene.VideoPlayer
+        if (sessionActive && !sceneHasOwnBackButton) {
             IconButton(
                 onClick = viewModel::onCloseConversation,
                 modifier = Modifier
@@ -156,7 +158,7 @@ private fun SceneLayer(scene: Scene, onExitScene: () -> Unit) {
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)
-        is Scene.VideoPlayer -> VideoPlayerScene(scene)
+        is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
         is Scene.NowPlaying -> NowPlayingScene(scene)
     }

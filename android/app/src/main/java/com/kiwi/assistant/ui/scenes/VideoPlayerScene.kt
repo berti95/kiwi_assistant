@@ -10,8 +10,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,7 +68,7 @@ private const val PLAYER_BASE_URL = "https://www.youtube-nocookie.com"
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun VideoPlayerScene(scene: Scene.VideoPlayer) {
+fun VideoPlayerScene(scene: Scene.VideoPlayer, onExit: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -72,11 +78,31 @@ fun VideoPlayerScene(scene: Scene.VideoPlayer) {
             VideoPlayerWebView(videoId = scene.videoId)
         }
 
+        // Back / exit overlay — top-left circular button. The
+        // WebView eats most touches so without this the user has no
+        // visible escape (only the long-press gesture, which most
+        // people never discover).
+        IconButton(
+            onClick = onExit,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 12.dp, start = 12.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .size(44.dp),
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Salir del video",
+                tint = Color.White,
+            )
+        }
+
         if (scene.title.isNotBlank()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 16.dp, start = 24.dp, end = 24.dp)
+                    .padding(top = 16.dp, start = 80.dp, end = 24.dp)
                     .widthIn(max = 720.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black.copy(alpha = 0.6f))
