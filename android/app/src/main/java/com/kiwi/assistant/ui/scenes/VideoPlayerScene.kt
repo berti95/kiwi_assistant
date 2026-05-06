@@ -37,12 +37,10 @@ import com.kiwi.assistant.ui.Scene
 
 private const val TAG = "VideoPlayerScene"
 private const val ASSET_HTML_PATH = "youtube/player.html"
-// Match the host on the IFrame Player config inside player.html so
-// postMessage origin checks succeed. Using youtube-nocookie.com
-// instead of www.youtube.com works around the recurring "152-4"
-// error that the player throws when the embedding origin/cookie
-// context isn't to its liking inside WebViews.
-private const val PLAYER_BASE_URL = "https://www.youtube-nocookie.com"
+// Match the iframe src origin in player.html. The plain-iframe
+// approach we settled on is more permissive than the JS API path
+// (which kept tripping on "152-4 / Video no disponible" errors).
+private const val PLAYER_BASE_URL = "https://www.youtube.com"
 
 /**
  * YouTube video playback inside an Android [WebView] using the

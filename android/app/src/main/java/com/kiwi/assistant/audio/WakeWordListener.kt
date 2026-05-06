@@ -193,10 +193,16 @@ class WakeWordListener(
         // spikes, so dropping the threshold without raising the
         // debounce keeps false positives in check.
         const val DEFAULT_THRESHOLD = 0.4f
-        // Require this many consecutive yes-frames before firing, to
-        // avoid spurious triggers. 2 × 80 ms = 160 ms of sustained
-        // detection — short enough to feel snappy.
-        const val DEFAULT_DEBOUNCE_FRAMES = 2
+        // Single-frame triggers used to be filtered out by a 2-frame
+        // debounce, but real-world testing showed that ~30 % of
+        // legitimate utterances of the trigger phrases only spike
+        // above threshold for one 80 ms frame. Live-shipped logs
+        // showed peak-score windows of 0.45-0.55 with NO subsequent
+        // openSession (i.e. the wake word was detected but the
+        // debounce ate it). With the model output cleanly bimodal
+        // (silence sits at ~0.001, valid utterances at >=0.4) a
+        // single-frame trigger is reliable enough.
+        const val DEFAULT_DEBOUNCE_FRAMES = 1
         // How often to summarise the peak wake-word score in the log
         // when no detection has fired. Useful for tuning the threshold
         // and for sanity-checking that the model is producing scores
