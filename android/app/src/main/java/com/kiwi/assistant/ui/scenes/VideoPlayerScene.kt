@@ -31,7 +31,12 @@ import com.kiwi.assistant.ui.Scene
 
 private const val TAG = "VideoPlayerScene"
 private const val ASSET_HTML_PATH = "youtube/player.html"
-private const val PLAYER_BASE_URL = "https://www.youtube.com"
+// Match the host on the IFrame Player config inside player.html so
+// postMessage origin checks succeed. Using youtube-nocookie.com
+// instead of www.youtube.com works around the recurring "152-4"
+// error that the player throws when the embedding origin/cookie
+// context isn't to its liking inside WebViews.
+private const val PLAYER_BASE_URL = "https://www.youtube-nocookie.com"
 
 /**
  * YouTube video playback inside an Android [WebView] using the

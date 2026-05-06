@@ -371,8 +371,21 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             KiwiSessionEvent.ResponseEnd -> {
-                KLog.i(TAG, "response.end → drain → next turn")
-                waitForAudioAndStartNextTurn()
+                if (isPassiveConsumptionScene(_scene.value)) {
+                    // The user just told Kiwi to play something
+                    // (video or song). Once Kiwi finishes saying
+                    // "ahora reproduciendo X" there is no point
+                    // re-opening the mic for another turn — we'd
+                    // either pick up the playback as input or sit
+                    // burning input tokens for 15 s until the
+                    // no-speech timeout fires. Close cleanly so the
+                    // HUD vanishes the moment Kiwi stops talking.
+                    KLog.i(TAG, "response.end on playback scene → drain + close")
+                    waitForAudioAndCloseConversation()
+                } else {
+                    KLog.i(TAG, "response.end → drain → next turn")
+                    waitForAudioAndStartNextTurn()
+                }
             }
 
             is KiwiSessionEvent.Closed -> {
@@ -450,6 +463,35 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return@launch
             startUserTurn()
         }
+    }
+
+    /**
+     * Same drain-then-act dance as [waitForAudioAndStartNextTurn] but
+     * closes the conversation instead of opening the next turn. Used
+     * after a play-something tool fires so the HUD vanishes the moment
+     * Kiwi finishes saying "ahora reproduciendo X" — keeping the mic
+     * open while the user is consuming media is both pointless and
+     * costly.
+     */
+    private fun waitForAudioAndCloseConversation() {
+        if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return
+        viewModelScope.launch(Dispatchers.Main) {
+            while (pendingPlaybackChunks.get() > 0) delay(50)
+            delay(800)
+            if (_pipeline.value is PipelineState.Idle) return@launch
+            closeConversation(resetScene = false)
+        }
+    }
+
+    /**
+     * Whether the active scene is one where the user is consuming
+     * media passively and we should NOT keep listening after Kiwi's
+     * response. Add new scenes here when they become "media-playing"
+     * destinations.
+     */
+    private fun isPassiveConsumptionScene(scene: Scene): Boolean = when (scene) {
+        is Scene.VideoPlayer, is Scene.NowPlaying -> true
+        else -> false
     }
 
     private fun closeConversation(resetScene: Boolean) {

@@ -2,13 +2,18 @@
   YouTube IFrame Player host page for Kiwi.
 
   Loaded from android/assets and rendered inside an Android WebView.
-  The Compose layer injects a window.kiwiVideoId variable BEFORE
-  loading the page (via loadDataWithBaseURL substitution); on
-  YouTube's iframe_api ready event we instantiate a player at full
-  size that auto-plays.
+  The Compose layer substitutes ``__VIDEO_ID__`` with the real id
+  before handing the HTML to the WebView; loadDataWithBaseURL sets
+  the base URL to https://www.youtube-nocookie.com so the IFrame
+  player accepts the embedding origin.
 
-  base URL is set to https://www.youtube.com so cookies + the
-  IFrame API postMessage origin checks succeed.
+  Why youtube-nocookie:
+  - The standard www.youtube.com embed inside an Android WebView is
+    flaky — Google often serves "video unavailable / 152-4" errors
+    when the player thinks the cookie/origin context isn't trusted.
+  - youtube-nocookie.com is the privacy-friendly variant Google
+    explicitly designed for third-party embeds. Same player API,
+    no behavioural cookies, much wider compatibility in WebViews.
 -->
 <!DOCTYPE html>
 <html>
@@ -16,32 +21,63 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
-  #player { width: 100vw; height: 100vh; }
+  #player, #message { width: 100vw; height: 100vh; }
+  #message {
+    display: none;
+    color: #fff;
+    font-family: sans-serif;
+    padding: 32px;
+    box-sizing: border-box;
+  }
 </style>
 </head>
 <body>
   <div id="player"></div>
+  <div id="message"></div>
   <script>
     var tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     document.body.appendChild(tag);
 
     var player;
+    var ERROR_LABELS = {
+      2:   'parámetro inválido en el reproductor',
+      5:   'error interno HTML5 en el reproductor',
+      100: 'video no encontrado o privado',
+      101: 'el dueño del video no permite reproducción embebida',
+      150: 'el dueño del video no permite reproducción embebida'
+    };
+
+    function showError(code) {
+      var msg = ERROR_LABELS[code] || ('error desconocido (' + code + ')');
+      var el = document.getElementById('message');
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.innerText = 'No se puede reproducir: ' + msg;
+      console.error('YT player error', code, msg);
+    }
+
     function onYouTubeIframeAPIReady() {
-      player = new YT.Player('player', {
-        height: '100%',
-        width: '100%',
-        videoId: '__VIDEO_ID__',
-        playerVars: {
-          autoplay: 1,
-          playsinline: 1,
-          rel: 0,
-          modestbranding: 1
-        },
-        events: {
-          onReady: function (e) { e.target.playVideo(); }
-        }
-      });
+      try {
+        player = new YT.Player('player', {
+          host: 'https://www.youtube-nocookie.com',
+          height: '100%',
+          width: '100%',
+          videoId: '__VIDEO_ID__',
+          playerVars: {
+            autoplay: 1,
+            playsinline: 1,
+            rel: 0
+          },
+          events: {
+            onReady: function (e) { e.target.playVideo(); },
+            onError: function (e) { showError(e.data); }
+          }
+        });
+      } catch (err) {
+        showError('init: ' + (err && err.message ? err.message : err));
+      }
     }
   </script>
 </body>
