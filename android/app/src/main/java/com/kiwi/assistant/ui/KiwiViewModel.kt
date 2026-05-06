@@ -532,12 +532,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
         // How long the user has to be silent (after Silero stopped
         // returning isSpeech=true) before we auto-close the turn.
-        // Silero already smooths over ~300 ms internally, so the
-        // perceived silence-to-Kiwi-replies delay is ~300 ms longer
-        // than this. 800 ms here ⇒ feels like ~1.1 s of pause, in line
-        // with what conversational voice agents (LiveKit, Pipecat)
-        // ship by default.
-        const val SILENCE_END_OF_TURN_MS = 800L
+        // Silero already smooths over ~300 ms internally so the
+        // perceived end-of-speech delay is ~300 ms longer than this.
+        // 1200 ms here ⇒ feels like ~1.5 s of pause: long enough
+        // that Kiwi doesn't cut the user off mid-thought when they
+        // pause to phrase a longer query, short enough that the
+        // back-and-forth still feels conversational.
+        const val SILENCE_END_OF_TURN_MS = 1_200L
 
         // How long Listening can stay open WITHOUT any speech being
         // detected before we auto-close the conversation. Listening

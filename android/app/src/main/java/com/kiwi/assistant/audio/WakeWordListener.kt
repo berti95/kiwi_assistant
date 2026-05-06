@@ -5,7 +5,7 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.util.Log
+import com.kiwi.assistant.log.KLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +51,7 @@ class WakeWordListener(
             AudioFormat.ENCODING_PCM_16BIT,
         )
         if (minBuffer <= 0) {
-            Log.w(TAG, "Invalid min buffer size: $minBuffer")
+            KLog.w(TAG, "Invalid min buffer size: $minBuffer")
             return false
         }
         // Read in 80 ms chunks (1280 samples) — openWakeWord's
@@ -67,7 +67,7 @@ class WakeWordListener(
             bufferSize,
         )
         if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "AudioRecord failed to initialize (permission missing?).")
+            KLog.w(TAG, "AudioRecord failed to initialize (permission missing?).")
             rec.release()
             return false
         }
@@ -75,7 +75,7 @@ class WakeWordListener(
         val det = try {
             WakeWordDetector(context)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialise WakeWordDetector", e)
+            KLog.e(TAG, "Failed to initialise WakeWordDetector", e)
             rec.release()
             return false
         }
@@ -83,7 +83,7 @@ class WakeWordListener(
         recorder = rec
         detector = det
         rec.startRecording()
-        Log.i(TAG, "Wake-word listener started (threshold=$threshold)")
+        KLog.i(TAG, "Wake-word listener started (threshold=$threshold)")
 
         job = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(CHUNK_SAMPLES)
@@ -109,7 +109,7 @@ class WakeWordListener(
                     // logging which is way too chatty.
                     val now = System.currentTimeMillis()
                     if (now - lastPeakLogMs >= PEAK_LOG_INTERVAL_MS) {
-                        Log.i(TAG, "peak score in last ${(now - lastPeakLogMs) / 1000}s: $peakScore")
+                        KLog.i(TAG, "peak score in last ${(now - lastPeakLogMs) / 1000}s: $peakScore")
                         peakScore = 0f
                         lastPeakLogMs = now
                     }
@@ -117,7 +117,7 @@ class WakeWordListener(
                     if (score >= threshold) {
                         aboveThreshold += 1
                         if (aboveThreshold >= debounceFrames) {
-                            Log.i(TAG, "Wake word DETECTED (score=$score)")
+                            KLog.i(TAG, "Wake word DETECTED (score=$score)")
                             // Release the mic + ONNX sessions BEFORE
                             // notifying the caller so the session
                             // capture path can immediately acquire the
@@ -143,11 +143,11 @@ class WakeWordListener(
                 // coroutine machinery can settle the parent job.
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Wake-word loop crashed", e)
+                KLog.e(TAG, "Wake-word loop crashed", e)
             } finally {
                 // Idempotent: if we hit detection above, this is a no-op.
                 releaseRecorderAndDetector()
-                Log.i(TAG, "Wake-word loop exiting")
+                KLog.i(TAG, "Wake-word loop exiting")
             }
         }
         return true
@@ -185,9 +185,14 @@ class WakeWordListener(
         // this minimises end-to-end latency.
         const val CHUNK_SAMPLES = 1_280
         // Probability above which we count the frame as a "yes". The
-        // openWakeWord README suggests 0.5 as a sane default; we can
-        // raise it if false positives appear in real use.
-        const val DEFAULT_THRESHOLD = 0.5f
+        // openWakeWord README suggests 0.5 as a sane default; we run
+        // a notch lower because in practice 0.5 was missing too many
+        // legitimate "hola/hey/oye/eh kiwi" especially when the user
+        // is more than ~1 m from the dock or speaks softly. The
+        // 2-frame debounce below already filters out single-frame
+        // spikes, so dropping the threshold without raising the
+        // debounce keeps false positives in check.
+        const val DEFAULT_THRESHOLD = 0.4f
         // Require this many consecutive yes-frames before firing, to
         // avoid spurious triggers. 2 × 80 ms = 160 ms of sustained
         // detection — short enough to feel snappy.

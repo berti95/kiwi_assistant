@@ -273,11 +273,13 @@ async def _run_one_turn(
                 )
 
             if getattr(sc, "turn_complete", False):
+                user_text = "".join(user_text_parts).strip()
                 log.info(
-                    "turn %d: turn_complete (audio=%d bytes, text=%r)",
+                    "turn %d: turn_complete user=%r kiwi=%r (audio=%d bytes)",
                     turn_index,
-                    audio_bytes_out,
+                    user_text or "(no transcript)",
                     "".join(kiwi_text_parts),
+                    audio_bytes_out,
                 )
                 await _safe_send(ws, {"type": protocol.TYPE_RESPONSE_END})
                 return
