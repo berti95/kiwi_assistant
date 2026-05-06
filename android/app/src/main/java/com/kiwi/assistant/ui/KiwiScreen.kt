@@ -85,6 +85,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             scene = scene,
             homeSnapshot = homeSnapshot,
             onExitScene = viewModel::onExitScene,
+            onTodoTap = viewModel::onTodoTap,
         )
 
         // Overlay layer. Two modes:
@@ -163,6 +164,7 @@ private fun SceneLayer(
     scene: Scene,
     homeSnapshot: HomeSnapshot?,
     onExitScene: () -> Unit,
+    onTodoTap: (TodoItem) -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(snapshot = homeSnapshot)
@@ -172,7 +174,7 @@ private fun SceneLayer(
         is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
         is Scene.NowPlaying -> NowPlayingScene(scene)
-        is Scene.TodoList -> TodoListScene(scene)
+        is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
     }
 }
 

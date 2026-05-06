@@ -2,6 +2,7 @@ package com.kiwi.assistant.ui.scenes
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,11 +39,15 @@ import com.kiwi.assistant.ui.TodoItem
  * Renders the user's TODO list.
  *
  * Pending items at the top, completed items below (greyed out and
- * struck through). All operations happen via voice — there are no
- * tap targets.
+ * struck through). Tap on a pending item marks it done; tap again on
+ * a completed item removes it. Voice flow keeps working in parallel
+ * (todo_complete / todo_remove tools).
  */
 @Composable
-fun TodoListScene(scene: Scene.TodoList) {
+fun TodoListScene(
+    scene: Scene.TodoList,
+    onTodoTap: (TodoItem) -> Unit,
+) {
     val pending = scene.items.filter { !it.completed }
     val done = scene.items.filter { it.completed }
 
@@ -54,21 +59,23 @@ fun TodoListScene(scene: Scene.TodoList) {
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Header(pending = pending.size, total = scene.items.size)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(8.dp))
+            HelperHint(hasDone = done.isNotEmpty(), hasPending = pending.isNotEmpty())
+            Spacer(Modifier.height(16.dp))
 
             if (scene.items.isEmpty()) {
                 EmptyTodos()
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(pending, key = { _, it -> it.id }) { index, item ->
-                        TodoRow(position = index + 1, item = item)
+                        TodoRow(position = index + 1, item = item, onTap = onTodoTap)
                     }
                     if (done.isNotEmpty()) {
                         item(key = "completed-header") {
                             CompletedSectionHeader(count = done.size)
                         }
                         itemsIndexed(done, key = { _, it -> it.id }) { _, item ->
-                            TodoRow(position = null, item = item)
+                            TodoRow(position = null, item = item, onTap = onTodoTap)
                         }
                     }
                 }
@@ -93,6 +100,22 @@ private fun Header(pending: Int, total: Int) {
             style = MaterialTheme.typography.titleMedium,
         )
     }
+}
+
+@Composable
+private fun HelperHint(hasDone: Boolean, hasPending: Boolean) {
+    val text = when {
+        hasPending && hasDone -> "Toca para marcar como hecho · toca de nuevo para borrar"
+        hasPending -> "Toca cualquier tarea para marcarla como hecha"
+        hasDone -> "Toca una tarea hecha para borrarla"
+        else -> ""
+    }
+    if (text.isBlank()) return
+    Text(
+        text = text,
+        color = Color.White.copy(alpha = 0.4f),
+        style = MaterialTheme.typography.bodySmall,
+    )
 }
 
 private fun subtitleFor(pending: Int, total: Int): String {
@@ -131,12 +154,17 @@ private fun EmptyTodos() {
 }
 
 @Composable
-private fun TodoRow(position: Int?, item: TodoItem) {
+private fun TodoRow(
+    position: Int?,
+    item: TodoItem,
+    onTap: (TodoItem) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White.copy(alpha = if (item.completed) 0.03f else 0.06f))
+            .clickable { onTap(item) }
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -70,6 +70,49 @@ def test_get_todos_returns_added_items(client: TestClient) -> None:
     assert all(it["completed"] is False for it in body["items"])
 
 
+# ---- POST /api/todos/{id}/complete + /remove ------------------------
+
+
+def test_complete_todo_endpoint_marks_item(client: TestClient) -> None:
+    from kiwi_backend import todos
+
+    item = todos.add("comprar tomates")
+    response = client.post(f"/api/todos/{item.id}/complete?token={DEV_TOKEN}")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["completed"] is True
+
+
+def test_complete_todo_endpoint_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.post(f"/api/todos/phantom/complete?token={DEV_TOKEN}")
+    assert response.status_code == 404
+
+
+def test_complete_todo_endpoint_rejects_missing_token(client: TestClient) -> None:
+    from kiwi_backend import todos
+
+    item = todos.add("comprar tomates")
+    response = client.post(f"/api/todos/{item.id}/complete")
+    assert response.status_code == 403
+
+
+def test_remove_todo_endpoint_drops_item(client: TestClient) -> None:
+    from kiwi_backend import todos
+
+    todos.add("uno")
+    item = todos.add("dos")
+    response = client.post(f"/api/todos/{item.id}/remove?token={DEV_TOKEN}")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [it["text"] for it in items] == ["uno"]
+
+
+def test_remove_todo_endpoint_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.post(f"/api/todos/phantom/remove?token={DEV_TOKEN}")
+    assert response.status_code == 404
+
+
 # ---- /api/home ------------------------------------------------------
 
 

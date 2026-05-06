@@ -144,6 +144,36 @@ async def get_todos(token: str = "") -> dict[str, object]:
     return {"items": todos.to_wire(items)}
 
 
+@app.post("/api/todos/{todo_id}/complete")
+async def complete_todo(todo_id: str, token: str = "") -> dict[str, object]:
+    """Mark a TODO as completed. Used by the tablet's tap-to-check
+    action, complementary to the ``todo_complete`` voice tool."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(todos.complete, todo_id)
+    except todos.TodoNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"todo not found: {todo_id}",
+        ) from exc
+    items = await asyncio.to_thread(todos.list_all)
+    return {"items": todos.to_wire(items)}
+
+
+@app.post("/api/todos/{todo_id}/remove")
+async def remove_todo(todo_id: str, token: str = "") -> dict[str, object]:
+    """Delete a TODO outright. Used by the tablet to drop a completed
+    item with a second tap."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(todos.remove, todo_id)
+    except todos.TodoNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"todo not found: {todo_id}",
+        ) from exc
+    items = await asyncio.to_thread(todos.list_all)
+    return {"items": todos.to_wire(items)}
+
+
 @app.get("/api/home")
 async def get_home(token: str = "") -> dict[str, object]:
     """Aggregate snapshot the tablet renders on the Idle/Home scene.

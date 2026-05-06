@@ -12,6 +12,7 @@ import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
+import com.kiwi.assistant.network.TodoApi
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,6 +73,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         devToken = BuildConfig.DEV_LOGS_TOKEN,
     )
 
+    private val todoApi = TodoApi(
+        baseUrl = BuildConfig.CLOUD_RUN_URL,
+        devToken = BuildConfig.DEV_LOGS_TOKEN,
+    )
+
     /**
      * Background coroutine that refreshes [homeSnapshot] every
      * [HOME_REFRESH_INTERVAL_MS]. Started in init and lives for the
@@ -95,6 +101,35 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     /** On-demand refresh — fire-and-forget, tolerates transient failures. */
     private fun triggerHomeRefresh() {
         viewModelScope.launch(Dispatchers.IO) { refreshHomeSnapshot() }
+    }
+
+    /**
+     * Tap-to-toggle for a TODO from the [Scene.TodoList] surface.
+     *
+     * Pending → mark completed. Completed → remove (so a second tap on
+     * a struck-through item drops it from the list). Both operations
+     * hit the dev-token-gated REST endpoints; on success we update
+     * the on-screen scene with the server-returned list and refresh
+     * the home snapshot. On failure we silently keep the previous
+     * state — there's a logged warning in [TodoApi].
+     */
+    fun onTodoTap(item: TodoItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = if (!item.completed) {
+                todoApi.complete(item.id)
+            } else {
+                todoApi.remove(item.id)
+            } ?: return@launch
+            // Push the new list onto the active scene so the row
+            // updates without waiting for the next /api/home cycle.
+            // Done on the IO dispatcher → switching back to main is
+            // not required for StateFlow.value, but we trigger the
+            // home refresh which needs to land too.
+            if (_scene.value is Scene.TodoList) {
+                _scene.value = Scene.TodoList(items = updated)
+            }
+            refreshHomeSnapshot()
+        }
     }
 
     private val capture = AudioCaptureManager()
