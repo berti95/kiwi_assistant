@@ -26,6 +26,7 @@ import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.ClockScene
+import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
 import com.kiwi.assistant.ui.scenes.VideoPlayerScene
@@ -139,6 +140,7 @@ private fun SceneLayer(scene: Scene, onExitScene: () -> Unit) {
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
+        is Scene.NowPlaying -> NowPlayingScene(scene)
     }
 }
 

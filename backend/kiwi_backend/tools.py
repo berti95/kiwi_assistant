@@ -37,11 +37,12 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import requests
 from google.genai import types
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from . import google_auth
+from . import google_auth, spotify_auth
 
 log = logging.getLogger(__name__)
 
@@ -957,6 +958,432 @@ register(
         required=["video_id"],
     ),
     handler=_youtube_play,
+)
+
+
+# ---- spotify -------------------------------------------------------
+
+SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+
+def _spotify_get(path: str, params: dict | None = None) -> dict:
+    """GET helper that wires the access token + relative path.
+
+    Returns the parsed JSON. Empty 204 responses become {}.
+    Raises ``requests.HTTPError`` on non-2xx; the caller usually
+    catches it and returns an error dict to Gemini.
+    """
+    holder = spotify_auth.token_holder()
+    response = requests.get(
+        f"{SPOTIFY_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {holder.access_token()}"},
+        params=params or {},
+        timeout=15,
+    )
+    if response.status_code == 204:
+        return {}
+    response.raise_for_status()
+    return response.json()
+
+
+def _spotify_send(method: str, path: str, json_body: dict | None = None) -> dict:
+    """PUT/POST/DELETE helper. Returns {} on 204 (Spotify's "ok empty")."""
+    holder = spotify_auth.token_holder()
+    response = requests.request(
+        method,
+        f"{SPOTIFY_API_BASE}{path}",
+        headers={"Authorization": f"Bearer {holder.access_token()}"},
+        json=json_body,
+        timeout=15,
+    )
+    if response.status_code == 204:
+        return {}
+    if not response.ok:
+        # Spotify-specific 404: "no active device". Surface a friendly
+        # message that Gemini can relay verbatim instead of "404".
+        if response.status_code == 404 and "device" in response.text.lower():
+            raise SpotifyNoDeviceError()
+        response.raise_for_status()
+    return response.json() if response.text else {}
+
+
+class SpotifyNoDeviceError(RuntimeError):
+    """Spotify has no active device to send the command to."""
+
+
+def _spotify_image_url(images: list[dict] | None) -> str | None:
+    """Pick the largest-but-reasonable cover image."""
+    if not images:
+        return None
+    # Spotify orders images largest-first usually, but be defensive
+    # and pick by width.
+    best = max(images, key=lambda i: i.get("width") or 0)
+    return best.get("url")
+
+
+def _spotify_track_dto(track: dict | None) -> dict[str, Any] | None:
+    if not track:
+        return None
+    artists = ", ".join(a.get("name", "") for a in track.get("artists") or [])
+    album = track.get("album") or {}
+    return {
+        "uri": track.get("uri"),
+        "title": track.get("name") or "",
+        "artist": artists,
+        "album": album.get("name") or "",
+        "album_art_url": _spotify_image_url(album.get("images")),
+        "duration_ms": track.get("duration_ms") or 0,
+    }
+
+
+def _now_playing_scene(payload: dict | None, *, is_playing: bool) -> dict | None:
+    """Build the wire-format NowPlaying scene from /me/player payload."""
+    track = _spotify_track_dto(payload.get("item") if payload else None)
+    if not track:
+        return None
+    return {
+        "type": "now_playing",
+        "title": track["title"],
+        "artist": track["artist"],
+        "album": track["album"],
+        "album_art_url": track["album_art_url"],
+        "is_playing": is_playing,
+        "duration_ms": track["duration_ms"],
+        "progress_ms": (payload or {}).get("progress_ms") or 0,
+    }
+
+
+# --- read state -----------------------------------------------------
+
+
+def _spotify_currently_playing_blocking() -> tuple[dict, dict | None]:
+    """Returns (response_for_gemini, scene_payload)."""
+    try:
+        payload = _spotify_get("/me/player")
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}, None
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}, None
+    if not payload:
+        return {"playing": False, "track": None}, None
+    track = _spotify_track_dto(payload.get("item"))
+    is_playing = bool(payload.get("is_playing"))
+    response = {
+        "playing": is_playing,
+        "track": track,
+        "device": (payload.get("device") or {}).get("name"),
+    }
+    scene = _now_playing_scene(payload, is_playing=is_playing)
+    return response, scene
+
+
+async def _spotify_currently_playing() -> ToolResult:
+    response, scene = await asyncio.to_thread(_spotify_currently_playing_blocking)
+    return ToolResult(response=response, scene=scene)
+
+
+# --- search ---------------------------------------------------------
+
+
+_VALID_SEARCH_TYPES = {"track", "album", "artist", "playlist"}
+
+
+def _spotify_search_blocking(
+    query: str, kind: str, limit: int,
+) -> dict[str, Any]:
+    payload = _spotify_get(
+        "/search",
+        params={
+            "q": query,
+            "type": kind,
+            "limit": min(max(limit, 1), 20),
+            "market": "from_token",
+        },
+    )
+    items: list[dict[str, Any]] = []
+    if kind == "track":
+        for t in (payload.get("tracks") or {}).get("items") or []:
+            items.append(_spotify_track_dto(t) or {})
+    elif kind == "album":
+        for a in (payload.get("albums") or {}).get("items") or []:
+            items.append({
+                "uri": a.get("uri"),
+                "title": a.get("name") or "",
+                "artist": ", ".join(
+                    x.get("name", "") for x in a.get("artists") or []
+                ),
+                "album_art_url": _spotify_image_url(a.get("images")),
+            })
+    elif kind == "artist":
+        for a in (payload.get("artists") or {}).get("items") or []:
+            items.append({
+                "uri": a.get("uri"),
+                "title": a.get("name") or "",
+                "album_art_url": _spotify_image_url(a.get("images")),
+            })
+    elif kind == "playlist":
+        for p in (payload.get("playlists") or {}).get("items") or []:
+            if not p:
+                continue
+            items.append({
+                "uri": p.get("uri"),
+                "title": p.get("name") or "",
+                "owner": (p.get("owner") or {}).get("display_name") or "",
+                "album_art_url": _spotify_image_url(p.get("images")),
+            })
+    return {"kind": kind, "query": query, "count": len(items), "items": items}
+
+
+async def _spotify_search(
+    query: str,
+    kind: str = "track",
+    max_results: int = 10,
+) -> ToolResult:
+    if not query or not query.strip():
+        return ToolResult(response={"error": "missing query"})
+    kind = kind.lower()
+    if kind not in _VALID_SEARCH_TYPES:
+        return ToolResult(response={
+            "error": (
+                f"unknown kind {kind!r}. valid: {sorted(_VALID_SEARCH_TYPES)}"
+            ),
+        })
+    try:
+        result = await asyncio.to_thread(
+            _spotify_search_blocking, query, kind, max_results,
+        )
+    except requests.HTTPError as exc:
+        return ToolResult(
+            response={"error": f"spotify api error: {exc.response.status_code}"},
+        )
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return ToolResult(response={"error": str(exc)})
+    return ToolResult(response=result)
+
+
+# --- playback control ----------------------------------------------
+
+
+def _try_resolve_first_track(query: str) -> dict | None:
+    """Look up the first track URI matching ``query``."""
+    result = _spotify_search_blocking(query, "track", 1)
+    items = result.get("items") or []
+    return items[0] if items else None
+
+
+def _spotify_play_blocking(
+    uri: str | None, query: str | None,
+) -> tuple[dict, dict | None]:
+    """Start playback. Returns (response, scene_or_none)."""
+    target_uri: str | None = uri
+    track_meta: dict | None = None
+    if not target_uri and query:
+        track_meta = _try_resolve_first_track(query)
+        if not track_meta:
+            return {"error": f"no spotify track found for {query!r}"}, None
+        target_uri = track_meta.get("uri")
+    if not target_uri:
+        return {"error": "supply either uri or query"}, None
+
+    try:
+        body: dict[str, Any]
+        if target_uri.startswith("spotify:track:"):
+            body = {"uris": [target_uri]}
+        else:
+            # Albums, artists, playlists go via context_uri.
+            body = {"context_uri": target_uri}
+        _spotify_send("PUT", "/me/player/play", json_body=body)
+    except SpotifyNoDeviceError:
+        return {
+            "error": (
+                "no active spotify device. Abre Spotify en el móvil o "
+                "PC para que aparezca como dispositivo activo."
+            ),
+        }, None
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}, None
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}, None
+
+    # Build a NowPlaying scene from what we know plus a best-effort
+    # /me/player snapshot (the start can lag a beat so the snapshot
+    # may still be the previous track — we fall back to the search
+    # metadata in that case).
+    scene: dict | None = None
+    try:
+        snapshot = _spotify_get("/me/player")
+        scene = _now_playing_scene(snapshot, is_playing=True)
+    except Exception:  # noqa: BLE001
+        pass
+    if scene is None and track_meta:
+        scene = {
+            "type": "now_playing",
+            "title": track_meta.get("title") or "",
+            "artist": track_meta.get("artist") or "",
+            "album": track_meta.get("album") or "",
+            "album_art_url": track_meta.get("album_art_url"),
+            "is_playing": True,
+            "duration_ms": track_meta.get("duration_ms") or 0,
+            "progress_ms": 0,
+        }
+    return {"started": target_uri, "track": track_meta}, scene
+
+
+async def _spotify_play(
+    uri: str | None = None,
+    query: str | None = None,
+) -> ToolResult:
+    response, scene = await asyncio.to_thread(_spotify_play_blocking, uri, query)
+    return ToolResult(response=response, scene=scene)
+
+
+def _spotify_simple_command(method: str, path: str) -> dict:
+    try:
+        _spotify_send(method, path)
+        return {"ok": True}
+    except SpotifyNoDeviceError:
+        return {
+            "error": (
+                "no active spotify device. Abre Spotify en el móvil o "
+                "PC primero."
+            ),
+        }
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+async def _spotify_pause() -> dict:
+    return await asyncio.to_thread(
+        _spotify_simple_command, "PUT", "/me/player/pause",
+    )
+
+
+async def _spotify_resume() -> dict:
+    return await asyncio.to_thread(
+        _spotify_simple_command, "PUT", "/me/player/play",
+    )
+
+
+async def _spotify_next() -> dict:
+    return await asyncio.to_thread(
+        _spotify_simple_command, "POST", "/me/player/next",
+    )
+
+
+async def _spotify_previous() -> dict:
+    return await asyncio.to_thread(
+        _spotify_simple_command, "POST", "/me/player/previous",
+    )
+
+
+# --- registrations --------------------------------------------------
+
+
+register(
+    name="spotify_currently_playing",
+    description=(
+        "Devuelve qué se está reproduciendo ahora en Spotify y muestra "
+        "una pantalla NowPlaying con la carátula. Útil cuando el "
+        "usuario pregunte 'qué suena', 'qué estoy escuchando'."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_currently_playing,
+)
+
+register(
+    name="spotify_search",
+    description=(
+        "Busca en Spotify. Por defecto busca tracks; pasa kind="
+        "'album' / 'artist' / 'playlist' si el usuario lo pide "
+        "explícitamente. Tras la respuesta el usuario puede decir "
+        "'pon ese' / 'el segundo' y entonces llamas a spotify_play "
+        "con el uri correspondiente."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "query": types.Schema(
+                type=types.Type.STRING,
+                description="Texto de búsqueda libre.",
+            ),
+            "kind": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "'track' (default), 'album', 'artist' o 'playlist'."
+                ),
+            ),
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo de resultados (1-20, por defecto 10).",
+            ),
+        },
+        required=["query"],
+    ),
+    handler=_spotify_search,
+)
+
+register(
+    name="spotify_play",
+    description=(
+        "Empieza a reproducir algo en Spotify. Acepta 'uri' (Spotify URI: "
+        "spotify:track:..., spotify:album:..., etc.) cuando ya lo tienes "
+        "de un spotify_search anterior, o 'query' (texto libre) cuando "
+        "el usuario describe lo que quiere oír y no hemos buscado todavía. "
+        "Si Spotify devuelve 'no active device', dile al usuario que abra "
+        "Spotify en su móvil o PC para activarlo (de momento — pronto el "
+        "tablet será también un dispositivo Spotify)."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "uri": types.Schema(
+                type=types.Type.STRING,
+                description="URI de Spotify (track / album / artist / playlist).",
+            ),
+            "query": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Texto libre. Cuando lo uses se hace una búsqueda "
+                    "implícita y se reproduce el primer resultado."
+                ),
+            ),
+        },
+    ),
+    handler=_spotify_play,
+)
+
+register(
+    name="spotify_pause",
+    description="Pausa la reproducción de Spotify.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_pause,
+)
+
+register(
+    name="spotify_resume",
+    description="Reanuda la reproducción de Spotify pausada.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_resume,
+)
+
+register(
+    name="spotify_next",
+    description="Salta a la siguiente canción en Spotify.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_next,
+)
+
+register(
+    name="spotify_previous",
+    description=(
+        "Vuelve a la canción anterior en Spotify. Si llevas pocos "
+        "segundos en la canción actual Spotify suele saltar a la "
+        "anterior; si llevas más, reinicia la actual."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_previous,
 )
 
 

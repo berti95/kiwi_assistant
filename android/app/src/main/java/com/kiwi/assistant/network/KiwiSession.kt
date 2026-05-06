@@ -219,6 +219,7 @@ class KiwiSession(
             "playlist_list" -> parsePlaylistListScene(scene)
             "video_player" -> parseVideoPlayerScene(scene)
             "browse_youtube" -> parseBrowseYouTubeScene(scene)
+            "now_playing" -> parseNowPlayingScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -288,6 +289,22 @@ class KiwiSession(
     private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
         val url = scene.string("url") ?: return null
         return Scene.BrowseYouTube(url = url)
+    }
+
+    private fun parseNowPlayingScene(scene: JsonObject): Scene.NowPlaying? {
+        val title = scene.string("title") ?: return null
+        return Scene.NowPlaying(
+            title = title,
+            artist = scene.string("artist") ?: "",
+            album = scene.string("album") ?: "",
+            albumArtUrl = scene.string("album_art_url"),
+            isPlaying = (scene["is_playing"] as? JsonPrimitive)
+                ?.booleanOrNull ?: true,
+            durationMs = (scene["duration_ms"] as? JsonPrimitive)
+                ?.contentOrNull?.toLongOrNull() ?: 0L,
+            progressMs = (scene["progress_ms"] as? JsonPrimitive)
+                ?.contentOrNull?.toLongOrNull() ?: 0L,
+        )
     }
 
     private companion object {

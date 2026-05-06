@@ -67,6 +67,25 @@ sealed interface Scene {
      * canales sueltos. El usuario interactúa con el dedo.
      */
     data class BrowseYouTube(val url: String) : Scene
+
+    /**
+     * Lo que está sonando en Spotify ahora mismo. Carátula grande,
+     * título, artista, álbum, indicador play/pause y barra de
+     * progreso (estática — refresca al pedir "qué suena" de nuevo).
+     *
+     * Renderiza para cualquier dispositivo Spotify Connect activo
+     * del usuario (móvil, PC, altavoz) — el tablet aún no es un
+     * dispositivo de Connect.
+     */
+    data class NowPlaying(
+        val title: String,
+        val artist: String,
+        val album: String,
+        val albumArtUrl: String?,
+        val isPlaying: Boolean,
+        val durationMs: Long,
+        val progressMs: Long,
+    ) : Scene
 }
 
 /** A YouTube video item, used in [Scene.VideoList]. */
