@@ -1,6 +1,7 @@
 package com.kiwi.assistant.ui.scenes
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -67,7 +68,10 @@ private const val MAX_TODO_ROWS = 5
  *   - If music is playing, a slim chip across the bottom.
  */
 @Composable
-fun HomeScene(snapshot: HomeSnapshot?) {
+fun HomeScene(
+    snapshot: HomeSnapshot?,
+    onOpenTodoList: () -> Unit = {},
+) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
     val hasNowPlaying = snapshot?.nowPlaying != null
@@ -109,6 +113,7 @@ fun HomeScene(snapshot: HomeSnapshot?) {
                 )
                 TodosCard(
                     items = snapshot?.todos.orEmpty(),
+                    onOpen = onOpenTodoList,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
@@ -180,9 +185,13 @@ private fun AgendaCard(events: List<CalendarEvent>, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun TodosCard(items: List<TodoItem>, modifier: Modifier = Modifier) {
+private fun TodosCard(
+    items: List<TodoItem>,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val pending = items.filter { !it.completed }
-    DashboardCard(modifier = modifier) {
+    DashboardCard(modifier = modifier.clickable { onOpen() }) {
         CardTitle(
             "Pendientes",
             subtitle = if (pending.isEmpty()) "Sin tareas" else

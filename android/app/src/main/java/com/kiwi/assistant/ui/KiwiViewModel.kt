@@ -113,6 +113,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * the home snapshot. On failure we silently keep the previous
      * state — there's a logged warning in [TodoApi].
      */
+    /**
+     * Open the dedicated TodoList scene, populated from the cached
+     * home snapshot. Called from the home dashboard's TODOs card so
+     * a tap drills into the full list without going through Gemini.
+     * Empty snapshot → empty TodoList ("Nada apuntado.").
+     */
+    fun onOpenTodoList() {
+        val items = _homeSnapshot.value?.todos.orEmpty()
+        _scene.value = Scene.TodoList(items = items)
+    }
+
     fun onTodoTap(item: TodoItem) {
         viewModelScope.launch(Dispatchers.IO) {
             val updated = if (!item.completed) {

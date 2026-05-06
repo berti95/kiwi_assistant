@@ -86,6 +86,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             homeSnapshot = homeSnapshot,
             onExitScene = viewModel::onExitScene,
             onTodoTap = viewModel::onTodoTap,
+            onOpenTodoList = viewModel::onOpenTodoList,
         )
 
         // Overlay layer. Two modes:
@@ -165,9 +166,13 @@ private fun SceneLayer(
     homeSnapshot: HomeSnapshot?,
     onExitScene: () -> Unit,
     onTodoTap: (TodoItem) -> Unit,
+    onOpenTodoList: () -> Unit,
 ) {
     when (scene) {
-        Scene.Idle -> HomeScene(snapshot = homeSnapshot)
+        Scene.Idle -> HomeScene(
+            snapshot = homeSnapshot,
+            onOpenTodoList = onOpenTodoList,
+        )
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)
