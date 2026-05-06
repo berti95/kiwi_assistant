@@ -35,6 +35,7 @@ import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.HomeScene
 import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
+import com.kiwi.assistant.ui.scenes.TimerScene
 import com.kiwi.assistant.ui.scenes.TodoListScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
 import com.kiwi.assistant.ui.scenes.VideoPlayerScene
@@ -88,6 +89,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             onExitScene = viewModel::onExitScene,
             onTodoTap = viewModel::onTodoTap,
             onOpenTodoList = viewModel::onOpenTodoList,
+            onTimerDismiss = viewModel::onTimerDismiss,
         )
 
         // Overlay layer. Two modes:
@@ -174,6 +176,7 @@ private fun SceneLayer(
     onExitScene: () -> Unit,
     onTodoTap: (TodoItem) -> Unit,
     onOpenTodoList: () -> Unit,
+    onTimerDismiss: () -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -187,6 +190,7 @@ private fun SceneLayer(
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
         is Scene.NowPlaying -> NowPlayingScene(scene)
         is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
+        is Scene.Timer -> TimerScene(scene, onDismiss = onTimerDismiss)
     }
 }
 

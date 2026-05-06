@@ -147,6 +147,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         is Scene.VideoPlayer,
         is Scene.BrowseYouTube,
         is Scene.NowPlaying,
+        is Scene.Timer,  // tiene su propio "Cancelar/Apagar"; nunca auto.
         Scene.Idle,
         -> false
     }
@@ -170,6 +171,19 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     fun onOpenTodoList() {
         val items = _homeSnapshot.value?.todos.orEmpty()
         _scene.value = Scene.TodoList(items = items)
+    }
+
+    /**
+     * Dismiss the active TimerScene from the tablet (Cancelar / Apagar
+     * button). Notifies the backend so a follow-up "cuánto queda"
+     * voice query reports "no active timer" instead of stale state,
+     * then exits the scene back to home.
+     */
+    fun onTimerDismiss() {
+        viewModelScope.launch(Dispatchers.IO) { todoApi.cancelTimer() }
+        if (_scene.value is Scene.Timer) {
+            _scene.value = Scene.Idle
+        }
     }
 
     fun onTodoTap(item: TodoItem) {

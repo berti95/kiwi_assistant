@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import log_buffer, todos, tools, weather
+from . import log_buffer, timer, todos, tools, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -157,6 +157,19 @@ async def complete_todo(todo_id: str, token: str = "") -> dict[str, object]:
         ) from exc
     items = await asyncio.to_thread(todos.list_all)
     return {"items": todos.to_wire(items)}
+
+
+@app.post("/api/timer/cancel")
+async def cancel_timer(token: str = "") -> dict[str, object]:
+    """Drop the currently-active timer. Used by the tablet's TimerScene
+    Cancelar/Apagar button so a tap-cancel keeps voice queries
+    ('cuánto queda') honest about there being no timer."""
+    _require_dev_token(token)
+    cancelled = await asyncio.to_thread(timer.cancel)
+    return {
+        "cancelled": cancelled is not None,
+        "label": cancelled.label if cancelled is not None else "",
+    }
 
 
 @app.post("/api/todos/{todo_id}/remove")

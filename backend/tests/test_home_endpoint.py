@@ -113,6 +113,31 @@ def test_remove_todo_endpoint_unknown_id_returns_404(client: TestClient) -> None
     assert response.status_code == 404
 
 
+# ---- POST /api/timer/cancel -----------------------------------------
+
+
+def test_cancel_timer_rejects_missing_token(client: TestClient) -> None:
+    response = client.post("/api/timer/cancel")
+    assert response.status_code == 403
+
+
+def test_cancel_timer_returns_false_when_none(client: TestClient) -> None:
+    from kiwi_backend import timer
+    timer.reset()
+    body = client.post(f"/api/timer/cancel?token={DEV_TOKEN}").json()
+    assert body == {"cancelled": False, "label": ""}
+
+
+def test_cancel_timer_clears_active_one(client: TestClient) -> None:
+    from kiwi_backend import timer
+    timer.start(60, label="pasta")
+    body = client.post(f"/api/timer/cancel?token={DEV_TOKEN}").json()
+    assert body["cancelled"] is True
+    assert body["label"] == "pasta"
+    assert timer.current() is None
+    timer.reset()
+
+
 # ---- /api/home ------------------------------------------------------
 
 

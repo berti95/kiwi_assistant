@@ -7,7 +7,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
-import kotlin.math.ln
+import kotlin.math.pow
 
 /**
  * Ajusta el brillo de la ventana en función del sensor de luz ambiente.
@@ -57,16 +57,31 @@ class BrightnessManager(private val activity: Activity) {
 
     private fun luxToBrightness(lux: Float): Float {
         if (lux <= 0f) return MIN_BRIGHTNESS
-        // ln(1+lux) / ln(1+REF_LUX) maps 0..REF_LUX onto 0..1 with a soft curve.
-        val normalized = ln(1f + lux) / ln(1f + REF_LUX)
+        // Power curve `(lux/REF)^GAMMA` con gamma<1: pegada al suelo
+        // a poca luz (habitación de noche con la persiana bajada =
+        // ~5 lux → ~5% pantalla) y subida progresiva hasta saturar
+        // a REF_LUX. La log-curve original era demasiado plana en el
+        // tramo bajo y daba 28% a 5 lux — mucho para una mesilla.
+        val normalized = (lux / REF_LUX).pow(GAMMA)
         return normalized.coerceIn(MIN_BRIGHTNESS, MAX_BRIGHTNESS)
     }
 
     private companion object {
         const val TAG = "BrightnessManager"
-        const val MIN_BRIGHTNESS = 0.02f
+        // 0.5% es lo más bajo que permite la mayoría de paneles sin
+        // apagar el backlight; suficiente para no deslumbrar en
+        // dormitorio a oscuras.
+        const val MIN_BRIGHTNESS = 0.005f
         const val MAX_BRIGHTNESS = 1.0f
-        const val REF_LUX = 600f
+        // Lux a partir del cual la pantalla está al 100%. Salón con
+        // luz natural ronda 300-500; ponemos 500 para que un día
+        // soleado satures sin pasarte.
+        const val REF_LUX = 500f
+        // gamma<1 expande la zona oscura, comprime la clara —
+        // exactamente lo que queremos para mejorar el comportamiento
+        // nocturno sin estropear el diurno. 0.65 es un punto agradable
+        // (5 lux → 4%, 50 lux → 18%, 300 lux → 71%).
+        const val GAMMA = 0.65f
         const val SYSTEM_BRIGHTNESS = -1f
     }
 }

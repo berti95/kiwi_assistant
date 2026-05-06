@@ -37,6 +37,24 @@ class TodoApi(
 
     suspend fun remove(id: String): List<TodoItem>? = post("$id/remove")
 
+    /**
+     * Cancel the active backend timer. Fire-and-forget — if the call
+     * fails the timer expires on its own (current() drops expired
+     * entries) so a stale "cuánto queda" answer is at most a few
+     * minutes off.
+     */
+    suspend fun cancelTimer(): Boolean {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return false
+        val url = "${baseUrl.trimEnd('/')}/api/timer/cancel?token=$devToken"
+        val request = Request.Builder().url(url).post(EMPTY_BODY).build()
+        return try {
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            false
+        }
+    }
+
     private fun post(suffix: String): List<TodoItem>? {
         if (baseUrl.isEmpty() || devToken.isEmpty()) return null
         val url = "${baseUrl.trimEnd('/')}/api/todos/$suffix?token=$devToken"

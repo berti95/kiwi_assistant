@@ -93,6 +93,15 @@ sealed interface Scene {
      * un resumen reducido aparece también en [Idle] vía [HomeSnapshot].
      */
     data class TodoList(val items: List<TodoItem>) : Scene
+
+    /**
+     * Cuenta atrás de cocina. ``endsAtMs`` = epoch-ms en el que el
+     * timer suena. ``label`` opcional ("pasta", "horno"). Cuando
+     * ``endsAtMs == 0`` la escena interpreta "no hay timer activo"
+     * y se cierra sola — así el tool ``timer_cancel`` puede empujar
+     * la misma escena vacía y el tablet vuelve a la home.
+     */
+    data class Timer(val endsAtMs: Long, val label: String) : Scene
 }
 
 /**

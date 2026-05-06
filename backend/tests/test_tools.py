@@ -859,3 +859,87 @@ def test_get_weather_returns_error_when_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(weather, "current", lambda: None)
     result = _run(tools.dispatch("get_weather", None))
     assert "error" in result
+
+
+# ---- timer tools ---------------------------------------------------
+
+
+@_pt.fixture
+def fresh_timer() -> None:
+    from kiwi_backend import timer
+    timer.reset()
+    yield
+    timer.reset()
+
+
+def test_timer_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in ("timer_start", "timer_cancel", "timer_status"):
+        assert n in names
+
+
+def test_timer_start_pushes_scene_with_remaining(fresh_timer) -> None:  # noqa: ARG001
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch(
+            "timer_start",
+            {"minutes": 10, "label": "pasta"},
+            on_scene=sink,
+        ),
+    )
+    assert result["started"] is True
+    assert result["remaining_seconds"] == 600
+    assert result["label"] == "pasta"
+    assert pushed[0]["type"] == "timer"
+    assert pushed[0]["label"] == "pasta"
+    assert pushed[0]["remaining_seconds"] <= 600
+
+
+def test_timer_start_combines_durations(fresh_timer) -> None:  # noqa: ARG001
+    result = _run(
+        tools.dispatch(
+            "timer_start",
+            {"hours": 1, "minutes": 30, "duration_seconds": 15},
+        ),
+    )
+    assert result["remaining_seconds"] == 3_600 + 30 * 60 + 15
+
+
+def test_timer_start_rejects_zero_duration(fresh_timer) -> None:  # noqa: ARG001
+    result = _run(tools.dispatch("timer_start", {}))
+    assert "error" in result
+
+
+def test_timer_cancel_when_active_pushes_clear_scene(fresh_timer) -> None:  # noqa: ARG001
+    _run(tools.dispatch("timer_start", {"minutes": 5}))
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("timer_cancel", None, on_scene=sink))
+    assert result["cancelled"] is True
+    # Scene push uses ends_at_ms=0 to signal "no timer"; the tablet
+    # interprets that as "leave TimerScene".
+    assert pushed[0]["ends_at_ms"] == 0
+
+
+def test_timer_cancel_when_none_says_so(fresh_timer) -> None:  # noqa: ARG001
+    result = _run(tools.dispatch("timer_cancel", None))
+    assert result["cancelled"] is False
+
+
+def test_timer_status_returns_remaining(fresh_timer) -> None:  # noqa: ARG001
+    _run(tools.dispatch("timer_start", {"minutes": 3}))
+    result = _run(tools.dispatch("timer_status", None))
+    assert result["active"] is True
+    assert 0 < result["remaining_seconds"] <= 180
+
+
+def test_timer_status_when_none(fresh_timer) -> None:  # noqa: ARG001
+    result = _run(tools.dispatch("timer_status", None))
+    assert result == {"active": False}

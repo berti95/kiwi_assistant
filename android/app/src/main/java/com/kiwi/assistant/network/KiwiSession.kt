@@ -245,6 +245,7 @@ class KiwiSession(
             "browse_youtube" -> parseBrowseYouTubeScene(scene)
             "now_playing" -> parseNowPlayingScene(scene)
             "todo_list" -> parseTodoListScene(scene)
+            "timer" -> parseTimerScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -314,6 +315,15 @@ class KiwiSession(
     private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
         val url = scene.string("url") ?: return null
         return Scene.BrowseYouTube(url = url)
+    }
+
+    private fun parseTimerScene(scene: JsonObject): Scene.Timer {
+        val endsAtMs = (scene["ends_at_ms"] as? JsonPrimitive)
+            ?.contentOrNull?.toLongOrNull() ?: 0L
+        return Scene.Timer(
+            endsAtMs = endsAtMs,
+            label = scene.string("label").orEmpty(),
+        )
     }
 
     private fun parseTodoListScene(scene: JsonObject): Scene.TodoList {
