@@ -73,6 +73,10 @@ android {
 
         buildConfigField("String", "CLOUD_RUN_URL", "\"${secret("CLOUD_RUN_URL")}\"")
         buildConfigField("String", "KIWI_API_KEY", "\"${secret("KIWI_API_KEY")}\"")
+        // Same DEV_LOGS_TOKEN the backend uses to gate /api/logs/recent
+        // and the new /api/home + /api/todos endpoints. Pulled from the
+        // ``DEV_LOGS_TOKEN`` env var (CI) or local.properties.
+        buildConfigField("String", "DEV_LOGS_TOKEN", "\"${secret("DEV_LOGS_TOKEN")}\"")
         buildConfigField(
             "String",
             "PICOVOICE_ACCESS_KEY",

@@ -86,7 +86,47 @@ sealed interface Scene {
         val durationMs: Long,
         val progressMs: Long,
     ) : Scene
+
+    /**
+     * Lista de tareas pendientes capturadas con "Kiwi, apúntame que…".
+     * Render dedicado (lista grande) mientras dura la conversación;
+     * un resumen reducido aparece también en [Idle] vía [HomeSnapshot].
+     */
+    data class TodoList(val items: List<TodoItem>) : Scene
 }
+
+/**
+ * One persistent TODO. ``completed`` reflects whether the user already
+ * marked it done — items still appear in the list (visually struck
+ * through) until they are explicitly removed.
+ */
+data class TodoItem(
+    val id: String,
+    val text: String,
+    val completed: Boolean,
+)
+
+/**
+ * "Now playing" chip rendered on the home dashboard. Slimmer than
+ * [Scene.NowPlaying]: only what the chip needs.
+ */
+data class NowPlayingChip(
+    val title: String,
+    val artist: String,
+    val albumArtUrl: String?,
+)
+
+/**
+ * Aggregated snapshot for the Idle/Home dashboard. Fetched periodically
+ * from `GET /api/home`. ``null`` means the tablet hasn't received a
+ * snapshot yet (first load) — the home scene falls back to the bare
+ * clock in that case.
+ */
+data class HomeSnapshot(
+    val eventsToday: List<CalendarEvent>,
+    val todos: List<TodoItem>,
+    val nowPlaying: NowPlayingChip?,
+)
 
 /** A YouTube video item, used in [Scene.VideoList]. */
 data class VideoItem(

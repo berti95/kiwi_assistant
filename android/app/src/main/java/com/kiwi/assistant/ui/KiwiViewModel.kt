@@ -9,6 +9,7 @@ import com.kiwi.assistant.audio.AudioPlaybackManager
 import com.kiwi.assistant.audio.SpeechActivityDetector
 import com.kiwi.assistant.audio.WakeWordListener
 import com.kiwi.assistant.log.KLog
+import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import java.util.concurrent.atomic.AtomicInteger
@@ -59,6 +60,42 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     // the calendar / album art / video while Gemini answers.
     private val _scene = MutableStateFlow<Scene>(Scene.Idle)
     val scene: StateFlow<Scene> = _scene.asStateFlow()
+
+    // Snapshot rendered by the Idle/Home dashboard. Null until the
+    // first /api/home fetch resolves, in which case [HomeScene] falls
+    // back to a bare clock.
+    private val _homeSnapshot = MutableStateFlow<HomeSnapshot?>(null)
+    val homeSnapshot: StateFlow<HomeSnapshot?> = _homeSnapshot.asStateFlow()
+
+    private val homePoller = HomeStatePoller(
+        baseUrl = BuildConfig.CLOUD_RUN_URL,
+        devToken = BuildConfig.DEV_LOGS_TOKEN,
+    )
+
+    /**
+     * Background coroutine that refreshes [homeSnapshot] every
+     * [HOME_REFRESH_INTERVAL_MS]. Started in init and lives for the
+     * ViewModel's lifetime; the IO dispatcher keeps the network call
+     * off the main thread. Failures keep the previous snapshot on
+     * screen — the Home scene degrades to a bare clock if there's
+     * never been a successful fetch.
+     */
+    private val homePollerJob: Job = viewModelScope.launch(Dispatchers.IO) {
+        while (true) {
+            refreshHomeSnapshot()
+            delay(HOME_REFRESH_INTERVAL_MS)
+        }
+    }
+
+    private suspend fun refreshHomeSnapshot() {
+        val snapshot = homePoller.fetchOnce() ?: return
+        _homeSnapshot.value = snapshot
+    }
+
+    /** On-demand refresh — fire-and-forget, tolerates transient failures. */
+    private fun triggerHomeRefresh() {
+        viewModelScope.launch(Dispatchers.IO) { refreshHomeSnapshot() }
+    }
 
     private val capture = AudioCaptureManager()
     private val playback = AudioPlaybackManager()
@@ -193,6 +230,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             if (_pipeline.value is PipelineState.Idle) {
                 startWakeWordListener()
             }
+            triggerHomeRefresh()
         }
     }
 
@@ -507,6 +545,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // closed, the user may still trigger Kiwi by saying the wake
         // word with the calendar (or whatever) still on screen.
         startWakeWordListener()
+        // The conversation may have added/completed/removed a TODO or
+        // bumped Spotify/Calendar state; if we land back on the Home
+        // scene the user expects it fresh. Kicks off async — the
+        // HomeScene keeps the previous snapshot until the new one
+        // lands.
+        if (_scene.value is Scene.Idle) triggerHomeRefresh()
     }
 
     private fun cleanup() {
@@ -521,6 +565,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         wakeWordListener.stop()
         playbackQueue.close()
         playbackWorker.cancel()
+        homePollerJob.cancel()
         if (detectorLazy.isInitialized()) {
             runCatching { detectorLazy.value.close() }
         }
@@ -529,6 +574,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "KiwiViewModel"
+
+        // How often we re-pull /api/home in the background. Five
+        // minutes is enough to keep events / now-playing reasonably
+        // current without burning Cloud Run requests on a tablet
+        // that's mostly idle. After-conversation refresh handles the
+        // "I just added a TODO" path on its own.
+        const val HOME_REFRESH_INTERVAL_MS = 5L * 60_000L
 
         // How long the user has to be silent (after Silero stopped
         // returning isSpeech=true) before we auto-close the turn.

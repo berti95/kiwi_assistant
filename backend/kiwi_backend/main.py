@@ -1,10 +1,12 @@
+import asyncio
 import logging
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import log_buffer
+from . import log_buffer, todos, tools
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -119,6 +121,95 @@ async def get_recent_logs(
         "entries": entries,
         "count": len(entries),
         "next_since": cursor,
+    }
+
+
+def _require_dev_token(token: str) -> None:
+    """Reject non-matching dev tokens with 403. Same gate as /api/logs/recent."""
+    expected = settings.dev_logs_token
+    if not expected or token != expected:
+        raise HTTPException(status_code=403, detail="invalid dev token")
+
+
+@app.get("/api/todos")
+async def get_todos(token: str = "") -> dict[str, object]:
+    """Return the user's TODO list. Dev-token gated.
+
+    Closed by default (empty token in settings → every request 403).
+    The same token already protects ``/api/logs/recent``; reusing it
+    means there's no new secret to provision.
+    """
+    _require_dev_token(token)
+    items = await asyncio.to_thread(todos.list_all)
+    return {"items": todos.to_wire(items)}
+
+
+@app.get("/api/home")
+async def get_home(token: str = "") -> dict[str, object]:
+    """Aggregate snapshot the tablet renders on the Idle/Home scene.
+
+    Composed of three parts:
+      - ``events_today``: today's calendar (uses the same blocking
+        helper the calendar tool does).
+      - ``todos``: full TODO list, both pending and completed.
+      - ``now_playing``: optional Spotify-currently-playing card.
+
+    Each subsystem failing degrades only its own part — Spotify down
+    or Calendar misconfigured shouldn't blank the whole home screen.
+    """
+    _require_dev_token(token)
+
+    # Calendar: today's events.
+    events_today: list[dict] = []
+    try:
+        creds = await asyncio.to_thread(tools.google_auth.credentials)
+        tz = ZoneInfo(tools.DEFAULT_TIMEZONE)
+        now = datetime.now(tz)
+        window = tools._calendar_window("today", now)
+        if window is not None:
+            time_min, time_max = window
+            events_today = await asyncio.to_thread(
+                tools._list_events_blocking, creds, time_min, time_max, 10,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: calendar unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
+    # TODOs: all of them; client decides what to show.
+    todo_items: list[dict] = []
+    try:
+        loaded = await asyncio.to_thread(todos.list_all)
+        todo_items = todos.to_wire(loaded)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: todos unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
+    # Now playing: optional. _spotify_currently_playing_blocking
+    # already swallows API errors and returns (response, None) in
+    # that case; we surface ``None`` to the client either way.
+    now_playing: dict | None = None
+    try:
+        _, scene = await asyncio.to_thread(tools._spotify_currently_playing_blocking)
+        # The scene payload already has the right shape for the chip
+        # (title, artist, album_art_url, …); strip the wire-type field
+        # the WS pipeline uses.
+        if scene is not None and scene.get("is_playing"):
+            now_playing = {
+                "title": scene.get("title", ""),
+                "artist": scene.get("artist", ""),
+                "album_art_url": scene.get("album_art_url"),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: spotify unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
+    return {
+        "events_today": events_today,
+        "todos": todo_items,
+        "now_playing": now_playing,
     }
 
 

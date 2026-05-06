@@ -86,5 +86,11 @@ class Settings(BaseSettings):
     app_version_name: str = "0.1.0"
     apk_url: str = ""
 
+    # GCS bucket holding cross-request state (TODOs, light caches…). Empty
+    # in tests / local dev keeps the bucket calls behind a clear error
+    # instead of silently writing somewhere unexpected.
+    kiwi_state_bucket: str = ""
+    kiwi_state_todos_path: str = "todos.json"
+
 
 settings = Settings()

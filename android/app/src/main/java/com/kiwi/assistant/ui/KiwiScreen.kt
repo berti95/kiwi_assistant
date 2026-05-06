@@ -32,9 +32,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
-import com.kiwi.assistant.ui.scenes.ClockScene
+import com.kiwi.assistant.ui.scenes.HomeScene
 import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
+import com.kiwi.assistant.ui.scenes.TodoListScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
 import com.kiwi.assistant.ui.scenes.VideoPlayerScene
 import com.kiwi.assistant.ui.screens.ConnectingScreen
@@ -65,6 +66,7 @@ import com.kiwi.assistant.ui.screens.RespondingScreen
 fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val pipeline by viewModel.pipeline.collectAsState()
     val scene by viewModel.scene.collectAsState()
+    val homeSnapshot by viewModel.homeSnapshot.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
 
     Box(
@@ -79,7 +81,11 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     ) {
         // Base layer: the active scene (clock, calendar, video list,
         // playback, browse). Each scene is full-screen.
-        SceneLayer(scene = scene, onExitScene = viewModel::onExitScene)
+        SceneLayer(
+            scene = scene,
+            homeSnapshot = homeSnapshot,
+            onExitScene = viewModel::onExitScene,
+        )
 
         // Overlay layer. Two modes:
         //
@@ -152,15 +158,20 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
 }
 
 @Composable
-private fun SceneLayer(scene: Scene, onExitScene: () -> Unit) {
+private fun SceneLayer(
+    scene: Scene,
+    homeSnapshot: HomeSnapshot?,
+    onExitScene: () -> Unit,
+) {
     when (scene) {
-        Scene.Idle -> ClockScene()
+        Scene.Idle -> HomeScene(snapshot = homeSnapshot)
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
         is Scene.NowPlaying -> NowPlayingScene(scene)
+        is Scene.TodoList -> TodoListScene(scene)
     }
 }
 

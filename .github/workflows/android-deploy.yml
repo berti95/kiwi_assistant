@@ -69,6 +69,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           CLOUD_RUN_URL: ${{ secrets.CLOUD_RUN_URL }}
           KIWI_API_KEY: ${{ secrets.KIWI_API_KEY }}
+          DEV_LOGS_TOKEN: ${{ secrets.DEV_LOGS_TOKEN }}
         run: ./gradlew --no-daemon assembleRelease
 
       - name: Authenticate to Google Cloud

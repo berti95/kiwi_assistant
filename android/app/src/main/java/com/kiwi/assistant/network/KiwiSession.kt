@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.VideoItem
 
 /**
@@ -220,6 +221,7 @@ class KiwiSession(
             "video_player" -> parseVideoPlayerScene(scene)
             "browse_youtube" -> parseBrowseYouTubeScene(scene)
             "now_playing" -> parseNowPlayingScene(scene)
+            "todo_list" -> parseTodoListScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -289,6 +291,21 @@ class KiwiSession(
     private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
         val url = scene.string("url") ?: return null
         return Scene.BrowseYouTube(url = url)
+    }
+
+    private fun parseTodoListScene(scene: JsonObject): Scene.TodoList {
+        val raw = scene["items"] as? JsonArray ?: emptyList()
+        val items = raw.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.string("id") ?: return@mapNotNull null
+            TodoItem(
+                id = id,
+                text = obj.string("text") ?: "",
+                completed = (obj["completed"] as? JsonPrimitive)
+                    ?.booleanOrNull ?: false,
+            )
+        }
+        return Scene.TodoList(items = items)
     }
 
     private fun parseNowPlayingScene(scene: JsonObject): Scene.NowPlaying? {

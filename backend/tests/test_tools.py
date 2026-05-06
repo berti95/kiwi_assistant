@@ -704,3 +704,122 @@ def test_youtube_open_adds_https_when_missing() -> None:
         ),
     )
     assert result["opened"] == "https://m.youtube.com/@somechannel"
+
+
+# ---- todos tools ----------------------------------------------------
+
+
+import pytest as _pt  # noqa: E402  — local helper for the fixture below
+
+
+@_pt.fixture
+def fake_todos_blob(monkeypatch: _pt.MonkeyPatch) -> dict:
+    """Swap state_store's GCS reads/writes with a per-test in-memory dict."""
+    from kiwi_backend import state_store
+
+    blobs: dict = {}
+
+    def fake_read(path: str, default):
+        return blobs.get(path, default)
+
+    def fake_write(path: str, payload):
+        blobs[path] = payload
+
+    monkeypatch.setattr(state_store, "read_json", fake_read)
+    monkeypatch.setattr(state_store, "write_json", fake_write)
+    return blobs
+
+
+def test_todos_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in ("todo_add", "todo_list", "todo_complete", "todo_remove"):
+        assert n in names
+
+
+def test_todo_add_pushes_scene_with_updated_list(fake_todos_blob) -> None:  # noqa: ARG001
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("todo_add", {"text": "comprar tomates"}, on_scene=sink),
+    )
+    assert result["added"]["text"] == "comprar tomates"
+    assert result["count"] == 1
+    assert pushed[0]["type"] == "todo_list"
+    assert pushed[0]["items"][0]["text"] == "comprar tomates"
+
+
+def test_todo_add_missing_text_returns_error() -> None:
+    result = _run(tools.dispatch("todo_add", {"text": "  "}))
+    assert "error" in result
+
+
+def test_todo_list_pushes_full_list(fake_todos_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("todo_add", {"text": "uno"}))
+    _run(tools.dispatch("todo_add", {"text": "dos"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("todo_list", None, on_scene=sink))
+    assert result["count"] == 2
+    assert result["pending"] == 2
+    texts = [it["text"] for it in result["items"]]
+    assert texts == ["uno", "dos"]
+    assert pushed[0]["type"] == "todo_list"
+    assert [it["text"] for it in pushed[0]["items"]] == ["uno", "dos"]
+
+
+def test_todo_complete_marks_item_and_pushes_scene(fake_todos_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("todo_add", {"text": "comprar tomates"}))
+    _run(tools.dispatch("todo_add", {"text": "llamar a marta"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("todo_complete", {"match": "tomates"}, on_scene=sink),
+    )
+    assert "completed" in result
+    assert result["completed"]["text"] == "comprar tomates"
+    items_after = pushed[-1]["items"]
+    by_text = {it["text"]: it for it in items_after}
+    assert by_text["comprar tomates"]["completed"] is True
+    assert by_text["llamar a marta"]["completed"] is False
+
+
+def test_todo_complete_unknown_returns_error_with_pending_list(
+    fake_todos_blob,  # noqa: ARG001
+) -> None:
+    _run(tools.dispatch("todo_add", {"text": "comprar pan"}))
+    result = _run(tools.dispatch("todo_complete", {"match": "tomates"}))
+    assert "error" in result
+    assert "comprar pan" in result["error"]
+
+
+def test_todo_remove_drops_item(fake_todos_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("todo_add", {"text": "borrame"}))
+    _run(tools.dispatch("todo_add", {"text": "quedate"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("todo_remove", {"match": "borrame"}, on_scene=sink),
+    )
+    assert result["removed"]["text"] == "borrame"
+    remaining = [it["text"] for it in pushed[-1]["items"]]
+    assert remaining == ["quedate"]
+
+
+def test_todo_remove_unknown_returns_error(fake_todos_blob) -> None:  # noqa: ARG001
+    result = _run(tools.dispatch("todo_remove", {"match": "fantasma"}))
+    assert "error" in result
