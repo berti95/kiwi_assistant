@@ -169,7 +169,7 @@ private fun AgendaCard(events: List<CalendarEvent>, modifier: Modifier = Modifie
         Spacer(Modifier.height(12.dp))
         if (events.isEmpty()) {
             CardEmpty("Nada en la agenda.")
-            return@Card
+            return@DashboardCard
         }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             events.take(MAX_AGENDA_ROWS).forEach { event ->
@@ -191,7 +191,7 @@ private fun TodosCard(items: List<TodoItem>, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(12.dp))
         if (items.isEmpty()) {
             CardEmpty("Nada apuntado.")
-            return@Card
+            return@DashboardCard
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // Pending first; if there's room, fill with recently
