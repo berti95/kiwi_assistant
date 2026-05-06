@@ -21,6 +21,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -101,6 +103,52 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     /** On-demand refresh — fire-and-forget, tolerates transient failures. */
     private fun triggerHomeRefresh() {
         viewModelScope.launch(Dispatchers.IO) { refreshHomeSnapshot() }
+    }
+
+    /**
+     * Auto-close info-display scenes (Calendar, VideoList, PlaylistList,
+     * TodoList) after [SCENE_AUTO_CLOSE_MS] of inactivity, returning the
+     * tablet to the home dashboard. We use [collectLatest] so any change
+     * to scene OR pipeline cancels the pending timer cleanly: a fresh
+     * scene push, the user re-engaging Kiwi, or pressing X all reset
+     * the countdown. Passive consumption scenes (VideoPlayer,
+     * BrowseYouTube, NowPlaying) are explicitly excluded — the user is
+     * still using them even if no input arrives.
+     */
+    private val sceneAutoCloseJob: Job = viewModelScope.launch {
+        combine(scene, pipeline) { s, p -> s to p }
+            .collectLatest { (currentScene, currentPipeline) ->
+                if (
+                    isAutoCloseable(currentScene) &&
+                    currentPipeline is PipelineState.Idle
+                ) {
+                    delay(SCENE_AUTO_CLOSE_MS)
+                    // Re-check on the main thread before yanking: a
+                    // race where a new scene push lands during the
+                    // delay would otherwise be clobbered.
+                    if (
+                        _scene.value === currentScene &&
+                        _pipeline.value is PipelineState.Idle
+                    ) {
+                        KLog.i(TAG, "auto-close: ${currentScene::class.simpleName} → home")
+                        _scene.value = Scene.Idle
+                        triggerHomeRefresh()
+                    }
+                }
+            }
+    }
+
+    private fun isAutoCloseable(scene: Scene): Boolean = when (scene) {
+        is Scene.Calendar,
+        is Scene.VideoList,
+        is Scene.PlaylistList,
+        is Scene.TodoList,
+        -> true
+        is Scene.VideoPlayer,
+        is Scene.BrowseYouTube,
+        is Scene.NowPlaying,
+        Scene.Idle,
+        -> false
     }
 
     /**
@@ -669,6 +717,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         playbackQueue.close()
         playbackWorker.cancel()
         homePollerJob.cancel()
+        sceneAutoCloseJob.cancel()
         if (detectorLazy.isInitialized()) {
             runCatching { detectorLazy.value.close() }
         }
@@ -708,5 +757,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // typical post-Doze stale-socket case (~3 s for the WiFi/4G
         // stack to stabilise) without making real outages drag on.
         const val MAX_CONNECT_ATTEMPTS = 3
+
+        // Auto-cierre de escenas informativas (Calendar / VideoList /
+        // PlaylistList / TodoList): si el usuario las deja en pantalla
+        // sin tocar y sin volver a hablar con Kiwi durante este tiempo,
+        // el tablet vuelve a la home automáticamente. 90 s deja
+        // margen para leer una agenda densa o una lista de videos sin
+        // sentirse pillado por el tiempo.
+        const val SCENE_AUTO_CLOSE_MS = 90_000L
     }
 }

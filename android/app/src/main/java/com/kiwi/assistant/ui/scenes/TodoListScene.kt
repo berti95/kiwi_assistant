@@ -180,8 +180,10 @@ private fun TodoRow(
             style = MaterialTheme.typography.titleMedium.copy(
                 textDecoration = if (item.completed) TextDecoration.LineThrough else null,
             ),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
+            // No max — let long capture-style entries (multi-clause
+            // ideas, full-sentence reminders) wrap as far as needed.
+            // The list is a LazyColumn so vertical room is unlimited.
+            overflow = TextOverflow.Visible,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(12.dp))

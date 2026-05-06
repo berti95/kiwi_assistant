@@ -1521,8 +1521,11 @@ register(
             "text": types.Schema(
                 type=types.Type.STRING,
                 description=(
-                    "Texto del TODO en infinitivo o como lo dijo el usuario "
-                    "('comprar tomates', 'llamar a Marta', etc.)."
+                    "Texto LITERAL de la tarea, lo más fiel posible a lo "
+                    "que dijo el usuario, sin resumir ni reformular. Si "
+                    "añadió motivo / contexto / plazo / descripción larga, "
+                    "inclúyelo entero — el desarrollador lee la lista para "
+                    "implementarla. Captura completa > captura corta."
                 ),
             ),
         },

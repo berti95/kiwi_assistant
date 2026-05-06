@@ -341,7 +341,10 @@ private fun TodoRow(item: TodoItem) {
             style = MaterialTheme.typography.bodyLarge.copy(
                 textDecoration = if (item.completed) TextDecoration.LineThrough else null,
             ),
-            maxLines = 1,
+            // 2 lines on the home card lets longer captures peek without
+            // dominating the layout — the user can tap the card to jump
+            // to the full TodoList scene if they want everything.
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
