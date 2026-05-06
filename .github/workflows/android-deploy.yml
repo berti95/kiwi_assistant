@@ -59,6 +59,10 @@ jobs:
           echo "apk_url=https://storage.googleapis.com/${APK_BUCKET}/kiwi-v${VC}.apk" >> "$GITHUB_OUTPUT"
 
       - name: Assemble release APK
+        # Reads the DEV_LOGS_TOKEN GitHub Secret so the tablet can call
+        # the dev-token-gated backend endpoints (/api/home, /api/todos,
+        # /api/logs/recent). Same value lives in GCP Secret Manager as
+        # `kiwi-dev-logs-token`.
         working-directory: android
         env:
           KIWI_VERSION_CODE: ${{ steps.version.outputs.version_code }}
