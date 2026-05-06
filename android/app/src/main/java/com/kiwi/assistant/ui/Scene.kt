@@ -117,6 +117,18 @@ data class NowPlayingChip(
 )
 
 /**
+ * Current-weather snapshot for the home dashboard, sourced from
+ * Open-Meteo via the backend's /api/home endpoint. ``icon`` is one
+ * of the strings emitted by ``weather._icon`` (clear / partly_cloudy
+ * / cloudy / fog / rain / snow / storm); the UI maps it to an emoji.
+ */
+data class WeatherInfo(
+    val temperatureC: Double,
+    val description: String,
+    val icon: String,
+)
+
+/**
  * Aggregated snapshot for the Idle/Home dashboard. Fetched periodically
  * from `GET /api/home`. ``null`` means the tablet hasn't received a
  * snapshot yet (first load) — the home scene falls back to the bare
@@ -126,6 +138,7 @@ data class HomeSnapshot(
     val eventsToday: List<CalendarEvent>,
     val todos: List<TodoItem>,
     val nowPlaying: NowPlayingChip?,
+    val weather: WeatherInfo?,
 )
 
 /** A YouTube video item, used in [Scene.VideoList]. */

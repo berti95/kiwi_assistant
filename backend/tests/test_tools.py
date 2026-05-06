@@ -823,3 +823,39 @@ def test_todo_remove_drops_item(fake_todos_blob) -> None:  # noqa: ARG001
 def test_todo_remove_unknown_returns_error(fake_todos_blob) -> None:  # noqa: ARG001
     result = _run(tools.dispatch("todo_remove", {"match": "fantasma"}))
     assert "error" in result
+
+
+# ---- weather tool ---------------------------------------------------
+
+
+def test_get_weather_is_registered() -> None:
+    assert "get_weather" in tools.registered_names()
+
+
+def test_get_weather_returns_dto(monkeypatch) -> None:
+    from kiwi_backend import weather
+
+    monkeypatch.setattr(
+        weather, "current",
+        lambda: weather.CurrentWeather(
+            temperature_c=12.3,
+            weather_code=61,
+            description="Lluvia ligera",
+            icon="rain",
+        ),
+    )
+    result = _run(tools.dispatch("get_weather", None))
+    assert result == {
+        "temperature_c": 12.3,
+        "weather_code": 61,
+        "description": "Lluvia ligera",
+        "icon": "rain",
+    }
+
+
+def test_get_weather_returns_error_when_unavailable(monkeypatch) -> None:
+    from kiwi_backend import weather
+
+    monkeypatch.setattr(weather, "current", lambda: None)
+    result = _run(tools.dispatch("get_weather", None))
+    assert "error" in result

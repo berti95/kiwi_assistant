@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import log_buffer, todos, tools
+from . import log_buffer, todos, tools, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -236,10 +236,23 @@ async def get_home(token: str = "") -> dict[str, object]:
             "home: spotify unavailable: %s: %s", type(exc).__name__, exc,
         )
 
+    # Weather: cached at the module level (10 min TTL) so this is a
+    # ~no-op most of the time; failures degrade to None.
+    current_weather: dict | None = None
+    try:
+        snap = await asyncio.to_thread(weather.current)
+        if snap is not None:
+            current_weather = weather.to_wire(snap)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: weather unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
     return {
         "events_today": events_today,
         "todos": todo_items,
         "now_playing": now_playing,
+        "weather": current_weather,
     }
 
 

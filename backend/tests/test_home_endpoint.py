@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from kiwi_backend import state_store, tools
+from kiwi_backend import state_store, tools, weather
 from kiwi_backend.main import app
 from kiwi_backend.settings import settings
 
@@ -136,6 +136,21 @@ def _stub_spotify_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools, "_spotify_currently_playing_blocking", fake_blocking)
 
 
+@pytest.fixture(autouse=True)
+def _stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default weather stub: cloudy 18°. Individual tests override."""
+    weather.reset_cache()
+    monkeypatch.setattr(
+        weather, "current",
+        lambda: weather.CurrentWeather(
+            temperature_c=18.0,
+            weather_code=2,
+            description="Parcialmente nublado",
+            icon="partly_cloudy",
+        ),
+    )
+
+
 def test_get_home_happy_path_with_todos_and_no_calendar_no_spotify(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -208,6 +223,34 @@ def test_get_home_includes_now_playing_when_spotify_active(
         "artist": "David Bowie",
         "album_art_url": "https://img/heroes.jpg",
     }
+
+
+def test_get_home_includes_weather_block(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["weather"] == {
+        "temperature_c": 18.0,
+        "weather_code": 2,
+        "description": "Parcialmente nublado",
+        "icon": "partly_cloudy",
+    }
+
+
+def test_get_home_weather_null_when_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+    monkeypatch.setattr(weather, "current", lambda: None)
+
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["weather"] is None
 
 
 def test_get_home_skips_now_playing_when_spotify_paused(

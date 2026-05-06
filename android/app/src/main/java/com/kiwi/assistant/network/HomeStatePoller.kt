@@ -5,6 +5,8 @@ import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.WeatherInfo
+import kotlinx.serialization.json.doubleOrNull
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -88,10 +90,21 @@ class HomeStatePoller(
             )
         }
 
+        val weather = (root["weather"] as? JsonObject)?.let { obj ->
+            val temp = (obj["temperature_c"] as? JsonPrimitive)
+                ?.doubleOrNull ?: return@let null
+            WeatherInfo(
+                temperatureC = temp,
+                description = obj.string("description").orEmpty(),
+                icon = obj.string("icon") ?: "cloudy",
+            )
+        }
+
         return HomeSnapshot(
             eventsToday = events,
             todos = todos,
             nowPlaying = nowPlaying,
+            weather = weather,
         )
     }
 

@@ -106,5 +106,11 @@ class Settings(BaseSettings):
     kiwi_state_bucket: str = ""
     kiwi_state_todos_path: str = "todos.json"
 
+    # Lat/lon for the weather widget on the home dashboard + the
+    # get_weather tool. Defaults to Madrid; override per deploy if Kiwi
+    # ever lives somewhere else.
+    kiwi_weather_lat: float = 40.4168
+    kiwi_weather_lon: float = -3.7038
+
 
 settings = Settings()

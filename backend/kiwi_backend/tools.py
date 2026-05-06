@@ -42,7 +42,7 @@ from google.genai import types
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from . import google_auth, spotify_auth, todos
+from . import google_auth, spotify_auth, todos, weather
 
 log = logging.getLogger(__name__)
 
@@ -1574,6 +1574,28 @@ register(
     ),
     handler=_todo_complete,
 )
+
+async def _get_weather() -> dict[str, Any]:
+    """Return current weather for the configured location."""
+    snap = await asyncio.to_thread(weather.current)
+    if snap is None:
+        return {"error": "weather service unavailable"}
+    return weather.to_wire(snap)
+
+
+register(
+    name="get_weather",
+    description=(
+        "Devuelve el tiempo actual (temperatura y descripción breve) en "
+        "la ubicación del usuario. Llama a este tool cuando pregunte "
+        "'qué tiempo hace', 'cómo está el día', 'hace frío', 'va a "
+        "llover ahora', etc. Resume el resultado en una frase natural; "
+        "no hace falta listar todos los campos."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_get_weather,
+)
+
 
 register(
     name="todo_remove",

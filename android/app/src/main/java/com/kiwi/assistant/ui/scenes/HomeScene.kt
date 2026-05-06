@@ -39,6 +39,7 @@ import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.WeatherInfo
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -83,7 +84,10 @@ fun HomeScene(
             .background(Color.Black),
     ) {
         if (!hasContent) {
-            ClockBlock(modifier = Modifier.fillMaxSize().padding(40.dp))
+            ClockBlock(
+                modifier = Modifier.fillMaxSize().padding(40.dp),
+                weather = snapshot?.weather,
+            )
             return@Box
         }
 
@@ -97,6 +101,7 @@ fun HomeScene(
                     .fillMaxWidth()
                     .padding(bottom = 24.dp),
                 compact = true,
+                weather = snapshot?.weather,
             )
 
             Row(
@@ -129,7 +134,11 @@ fun HomeScene(
 }
 
 @Composable
-private fun ClockBlock(modifier: Modifier = Modifier, compact: Boolean = false) {
+private fun ClockBlock(
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    weather: WeatherInfo? = null,
+) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
 
     LaunchedEffect(Unit) {
@@ -163,8 +172,45 @@ private fun ClockBlock(modifier: Modifier = Modifier, compact: Boolean = false) 
                 style = if (compact) MaterialTheme.typography.titleLarge
                 else MaterialTheme.typography.headlineMedium,
             )
+            if (weather != null) {
+                Spacer(Modifier.height(if (compact) 6.dp else 12.dp))
+                WeatherLine(weather = weather, compact = compact)
+            }
         }
     }
+}
+
+@Composable
+private fun WeatherLine(weather: WeatherInfo, compact: Boolean) {
+    val tempLabel = "${weather.temperatureC.toInt()}°"
+    val text = listOf(
+        weatherEmoji(weather.icon),
+        tempLabel,
+        weather.description,
+    ).filter { it.isNotBlank() }.joinToString("  ")
+    Text(
+        text = text,
+        color = Color.White.copy(alpha = 0.55f),
+        style = if (compact) MaterialTheme.typography.titleMedium
+        else MaterialTheme.typography.headlineSmall,
+    )
+}
+
+/**
+ * Map the backend's coarse icon string to a single emoji. Stays in
+ * sync with ``weather._icon`` on the Python side. We render an emoji
+ * (rather than a vector drawable) because the home is glanceable —
+ * single glyph + temperature is enough.
+ */
+private fun weatherEmoji(icon: String): String = when (icon) {
+    "clear" -> "☀️"
+    "partly_cloudy" -> "⛅"
+    "cloudy" -> "☁️"
+    "fog" -> "🌫️"
+    "rain" -> "🌧️"
+    "snow" -> "🌨️"
+    "storm" -> "⛈️"
+    else -> ""
 }
 
 @Composable
