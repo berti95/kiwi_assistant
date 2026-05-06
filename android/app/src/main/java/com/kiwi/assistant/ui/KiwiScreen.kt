@@ -1,18 +1,25 @@
 package com.kiwi.assistant.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,10 +91,21 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         //    over fullscreen — they're meant to interrupt.
         if (scene is Scene.Idle || pipeline is PipelineState.Error) {
             PipelineFullscreenOverlay(pipeline)
-        } else {
+        } else if (pipeline !is PipelineState.Idle) {
             PipelineHud(
                 state = pipeline,
                 onClose = viewModel::onCloseConversation,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        } else {
+            // Non-Idle scene + Idle pipeline = the user is consuming
+            // content (calendar, video, NowPlaying, …) without an
+            // active conversation. The wake word ("hola kiwi") still
+            // works in the background but it's neither obvious nor
+            // 100% reliable over playback audio. Surface a tappable
+            // chip so the user has a guaranteed way to re-engage.
+            TalkAffordance(
+                onTap = viewModel::onTap,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -141,6 +159,44 @@ private fun SceneLayer(scene: Scene, onExitScene: () -> Unit) {
         is Scene.VideoPlayer -> VideoPlayerScene(scene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
         is Scene.NowPlaying -> NowPlayingScene(scene)
+    }
+}
+
+/**
+ * Tappable bottom-center chip that re-opens a Kiwi conversation
+ * from inside a non-Idle scene. Backup for the wake word: even when
+ * "hola kiwi" doesn't get through (e.g. the user is watching a
+ * video, music is playing, or the mic is too far) the chip is one
+ * tap away.
+ */
+@Composable
+private fun TalkAffordance(onTap: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .padding(bottom = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(28.dp))
+                .background(Color.Black.copy(alpha = 0.78f))
+                .clickable(onClick = onTap)
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Mic,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.9f),
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                text = "Habla con Kiwi",
+                color = Color.White.copy(alpha = 0.92f),
+                style = MaterialTheme.typography.titleSmall,
+            )
+        }
     }
 }
 
