@@ -22,6 +22,15 @@ sealed interface PipelineState {
      */
     data object Connecting : PipelineState
 
+    /**
+     * Reintentando conectar tras un fallo transitorio de red (típico
+     * tras volver de Doze: "SocketException: Software caused connection
+     * abort"). El ViewModel programa varios reintentos con backoff
+     * antes de pasar a [Error]. La UI lo muestra como "Sin conexión,
+     * reintentando…" para que el usuario sepa que va solo.
+     */
+    data class Reconnecting(val attempt: Int, val maxAttempts: Int) : PipelineState
+
     /** Capturando audio del usuario (entre activity.start y activity.end). */
     data object Listening : PipelineState
 

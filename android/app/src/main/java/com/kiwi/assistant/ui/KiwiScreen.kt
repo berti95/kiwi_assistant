@@ -42,6 +42,7 @@ import com.kiwi.assistant.ui.screens.ConnectingScreen
 import com.kiwi.assistant.ui.screens.ErrorScreen
 import com.kiwi.assistant.ui.screens.ListeningScreen
 import com.kiwi.assistant.ui.screens.ProcessingScreen
+import com.kiwi.assistant.ui.screens.ReconnectingScreen
 import com.kiwi.assistant.ui.screens.RespondingScreen
 
 /**
@@ -97,7 +98,13 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         //    HUD pinned at the bottom so the scene stays visible
         //    while the user converses about it. Errors still take
         //    over fullscreen — they're meant to interrupt.
-        if (scene is Scene.Idle || pipeline is PipelineState.Error) {
+        // Reconnecting + Error are "important" enough that we always
+        // take over the canvas with a fullscreen overlay, even if a
+        // scene was visible — the user needs to know connectivity is
+        // bad before they keep trying to talk to Kiwi.
+        val pipelineWantsFullscreen =
+            pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting
+        if (scene is Scene.Idle || pipelineWantsFullscreen) {
             PipelineFullscreenOverlay(pipeline)
         } else if (pipeline !is PipelineState.Idle) {
             PipelineHud(
@@ -232,6 +239,8 @@ private fun PipelineFullscreenOverlay(state: PipelineState) {
         // No overlay — the scene below shows through.
         PipelineState.Idle -> Unit
         PipelineState.Connecting -> ConnectingScreen()
+        is PipelineState.Reconnecting ->
+            ReconnectingScreen(attempt = state.attempt, maxAttempts = state.maxAttempts)
         PipelineState.Listening -> ListeningScreen()
         is PipelineState.Processing ->
             ProcessingScreen(userTranscript = state.userTranscript)

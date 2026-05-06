@@ -187,6 +187,18 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Tracks how many times the current ``openSession`` flow has
+     * retried a failed connect. Reset on successful ``session.ready``
+     * and when we surface a hard error.
+     */
+    private var connectRetryAttempt = 0
+
+    /** Set true on session.ready so we know whether a later failure
+     *  is "WS never opened" (retry) vs "WS dropped mid-conversation"
+     *  (don't retry, the conversation is gone anyway). */
+    private var sessionReady = false
+
     private var permissionGranted = false
 
     fun setMicrophonePermission(granted: Boolean) {
@@ -244,6 +256,10 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             // While the WS handshake is in flight a tap would race with
             // the auto-start that fires on session.ready, so swallow it.
             PipelineState.Connecting -> Unit
+            // Same idea while we're waiting between auto-retries —
+            // the scheduled coroutine will retry on its own. Long-press
+            // / X cancels if the user really wants out.
+            is PipelineState.Reconnecting -> Unit
             PipelineState.Listening -> endUserTurn()
             is PipelineState.Processing,
             is PipelineState.Responding,
@@ -316,6 +332,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        sessionReady = false
         KLog.i(TAG, "openSession: connecting…")
         // Manual taps may arrive while the wake-word listener is still
         // holding the mic (e.g. user taps the screen instead of saying
@@ -423,6 +440,8 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         when (event) {
             KiwiSessionEvent.SessionReady -> {
                 KLog.i(TAG, "session.ready → auto-starting first turn")
+                sessionReady = true
+                connectRetryAttempt = 0
                 // Long-press during the handshake, or an error, may have
                 // already closed the session — only auto-start if we're
                 // still in the Connecting state we set in openSession.
@@ -491,8 +510,44 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             is KiwiSessionEvent.Error -> {
-                _pipeline.value = PipelineState.Error(event.message)
-                cleanup()
+                if (
+                    event.transient &&
+                    !sessionReady &&
+                    connectRetryAttempt < MAX_CONNECT_ATTEMPTS - 1
+                ) {
+                    // Pre-handshake transient (DNS, EBADF post-Doze, …):
+                    // tear down the dead session and schedule a retry.
+                    // Mid-conversation drops fall through to Error
+                    // because the upstream Gemini turn would be lost
+                    // anyway.
+                    connectRetryAttempt += 1
+                    KLog.i(
+                        TAG,
+                        "transient connect failure (${event.message}); " +
+                            "retry $connectRetryAttempt/${MAX_CONNECT_ATTEMPTS - 1}",
+                    )
+                    cleanup()
+                    _pipeline.value = PipelineState.Reconnecting(
+                        attempt = connectRetryAttempt,
+                        maxAttempts = MAX_CONNECT_ATTEMPTS - 1,
+                    )
+                    val attempt = connectRetryAttempt
+                    val delayMs = if (attempt == 1) 1_000L else 3_000L
+                    viewModelScope.launch {
+                        delay(delayMs)
+                        // The user may have cancelled (long-press, X)
+                        // during the wait — only retry if we're still
+                        // in Reconnecting.
+                        if (_pipeline.value is PipelineState.Reconnecting) {
+                            openSession()
+                        }
+                    }
+                } else {
+                    _pipeline.value = PipelineState.Error(event.message)
+                    cleanup()
+                    connectRetryAttempt = 0
+                    sessionReady = false
+                }
             }
         }
     }
@@ -581,6 +636,8 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun closeConversation(resetScene: Boolean) {
         noSpeechTimeoutJob?.cancel()
         cleanup()
+        connectRetryAttempt = 0
+        sessionReady = false
         _pipeline.value = PipelineState.Idle
         // The close-conversation X buttons keep the active scene
         // (calendar / now-playing / …) so the user can keep reading
@@ -645,5 +702,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // the user time to think after Kiwi answers; once they speak,
         // the regular VAD path takes over and this timer is cancelled.
         const val NO_SPEECH_TIMEOUT_MS = 15_000L
+
+        // Total handshake attempts before we surface PipelineState.Error.
+        // First attempt + 2 retries with 1s/3s backoff covers the
+        // typical post-Doze stale-socket case (~3 s for the WiFi/4G
+        // stack to stabilise) without making real outages drag on.
+        const val MAX_CONNECT_ATTEMPTS = 3
     }
 }

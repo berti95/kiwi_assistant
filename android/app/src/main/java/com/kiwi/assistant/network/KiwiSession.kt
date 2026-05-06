@@ -44,7 +44,17 @@ sealed interface KiwiSessionEvent {
      */
     data class SceneSet(val scene: Scene) : KiwiSessionEvent
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
-    data class Error(val message: String) : KiwiSessionEvent
+
+    /**
+     * @param transient set when the failure is a TCP/DNS-level issue
+     *  before the server accepted the upgrade — typical post-Doze
+     *  resume situation. Lets the ViewModel decide whether an automatic
+     *  retry makes sense versus surfacing a hard error.
+     */
+    data class Error(
+        val message: String,
+        val transient: Boolean = false,
+    ) : KiwiSessionEvent
 }
 
 /**
@@ -128,7 +138,20 @@ class KiwiSession(
                 val msg = t.message?.takeIf { it.isNotBlank() }
                 val http = response?.let { " HTTP ${it.code}" } ?: ""
                 val composed = if (msg != null) "$cls: $msg$http" else "$cls$http"
-                onEvent(KiwiSessionEvent.Error(composed))
+                // No HTTP response = the server never accepted the
+                // upgrade. Combined with a low-level network exception
+                // it's the post-Doze / Wi-Fi-flap pattern: a stale
+                // socket the OS had marked dead. Tag as transient so
+                // the ViewModel can retry with backoff before surfacing
+                // a hard error.
+                val transient = response == null && (
+                    t is java.net.SocketException ||
+                    t is java.net.UnknownHostException ||
+                    t is java.net.ConnectException ||
+                    t is java.net.SocketTimeoutException ||
+                    t is java.io.EOFException
+                )
+                onEvent(KiwiSessionEvent.Error(composed, transient = transient))
             }
         })
     }
