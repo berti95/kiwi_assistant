@@ -23,7 +23,11 @@ from .settings import settings
 
 log = logging.getLogger(__name__)
 
-_CACHE_TTL_S = 10 * 60
+# Open-Meteo recompila el modelo cada hora; cachear menos no aporta
+# datos más frescos, sólo gasta cuota / latencia. 60 min cubre el
+# polling de la home (cada 5 min ⇒ 1 de cada 12 toca la red) y las
+# preguntas de voz dentro de la hora.
+_CACHE_TTL_S = 60 * 60
 _TIMEOUT_S = 8
 _FORECAST_DAYS = 7  # today + 6 future days
 
