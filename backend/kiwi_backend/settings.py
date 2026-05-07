@@ -112,5 +112,12 @@ class Settings(BaseSettings):
     kiwi_weather_lat: float = 40.4168
     kiwi_weather_lon: float = -3.7038
 
+    # Substring (case-insensitive) used to identify the Pixel Tablet
+    # in Spotify Connect's device list when "Kiwi pon Spotify aquí"
+    # fires. Spotify name's the device after the model by default
+    # (e.g. "Pixel Tablet"), so "tablet" matches out of the box. If
+    # the user picks a custom name in the Spotify app, override here.
+    kiwi_spotify_tablet_name: str = "tablet"
+
 
 settings = Settings()

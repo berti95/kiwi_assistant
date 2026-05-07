@@ -140,3 +140,111 @@ def test_to_wire_rounds_temperature() -> None:
         "description": "Parcialmente nublado",
         "icon": "partly_cloudy",
     }
+
+
+# ---- forecast cache + lookup ---------------------------------------
+
+
+_FORECAST_PAYLOAD = {
+    "current": {"temperature_2m": 18.0, "weather_code": 2},
+    "daily": {
+        "time": ["2026-05-07", "2026-05-08", "2026-05-09"],
+        "temperature_2m_max": [22.5, 19.1, 25.0],
+        "temperature_2m_min": [13.1, 12.0, 16.5],
+        "weather_code": [61, 2, 0],
+        "precipitation_probability_max": [60, 20, 0],
+        "precipitation_sum": [4.5, 0.2, 0.0],
+        "sunrise": [
+            "2026-05-07T07:23",
+            "2026-05-08T07:22",
+            "2026-05-09T07:21",
+        ],
+        "sunset": [
+            "2026-05-07T20:51",
+            "2026-05-08T20:52",
+            "2026-05-09T20:53",
+        ],
+    },
+    "hourly": {
+        "time": [
+            "2026-05-07T08:00", "2026-05-07T09:00",
+            "2026-05-08T10:00",
+        ],
+        "temperature_2m": [14.0, 15.5, 12.5],
+        "weather_code": [61, 61, 2],
+        "precipitation_probability": [80, 70, 10],
+    },
+}
+
+
+def test_forecast_returns_day_with_hourly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get",
+        lambda *_a, **_kw: _FakeResponse(_FORECAST_PAYLOAD),
+    )
+    day = weather.forecast("2026-05-07")
+    assert day is not None
+    assert day.temp_max_c == pytest.approx(22.5)
+    assert day.temp_min_c == pytest.approx(13.1)
+    assert day.description == "Lluvia ligera"
+    assert day.icon == "rain"
+    assert day.sunrise == "07:23"
+    assert day.sunset == "20:51"
+    assert [h.hour for h in day.hourly] == ["08:00", "09:00"]
+    assert day.hourly[0].precipitation_probability == 80
+
+
+def test_forecast_unknown_date_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get",
+        lambda *_a, **_kw: _FakeResponse(_FORECAST_PAYLOAD),
+    )
+    assert weather.forecast("2099-01-01") is None
+
+
+def test_forecast_dates_lists_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get",
+        lambda *_a, **_kw: _FakeResponse(_FORECAST_PAYLOAD),
+    )
+    assert weather.forecast_dates() == [
+        "2026-05-07", "2026-05-08", "2026-05-09",
+    ]
+
+
+def test_forecast_to_wire_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        weather.requests, "get",
+        lambda *_a, **_kw: _FakeResponse(_FORECAST_PAYLOAD),
+    )
+    day = weather.forecast("2026-05-08")
+    assert day is not None
+    wire = weather.forecast_to_wire(day)
+    assert wire["date"] == "2026-05-08"
+    assert wire["temp_max_c"] == 19.1
+    assert wire["sunrise"] == "07:22"
+    assert isinstance(wire["hourly"], list)
+    assert len(wire["hourly"]) == 1
+    assert wire["hourly"][0] == {
+        "hour": "10:00",
+        "temperature_c": 12.5,
+        "weather_code": 2,
+        "icon": "partly_cloudy",
+        "precipitation_probability": 10,
+    }
+
+
+def test_current_and_forecast_share_one_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One HTTP call fills both `current()` and the forecast cache."""
+    calls = {"n": 0}
+
+    def fake_get(*_a, **_kw):
+        calls["n"] += 1
+        return _FakeResponse(_FORECAST_PAYLOAD)
+
+    monkeypatch.setattr(weather.requests, "get", fake_get)
+    weather.current()
+    weather.forecast("2026-05-07")
+    weather.forecast("2026-05-08")
+    weather.forecast_dates()
+    assert calls["n"] == 1

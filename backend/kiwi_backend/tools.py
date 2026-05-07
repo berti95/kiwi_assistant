@@ -1387,6 +1387,154 @@ register(
 )
 
 
+# ---- spotify connect: transfer between devices ---------------------
+
+
+def _spotify_devices_blocking() -> list[dict]:
+    """Return the list of available Spotify Connect devices."""
+    payload = _spotify_get("/me/player/devices")
+    return payload.get("devices") or []
+
+
+def _spotify_transfer_blocking(device_id: str) -> tuple[dict, dict | None]:
+    """Move playback to ``device_id``. Returns (response, scene)."""
+    try:
+        # play=True keeps the music going; if nothing was playing
+        # Spotify will pick up where it left off (or stay paused on
+        # devices with no recent state).
+        _spotify_send(
+            "PUT", "/me/player",
+            json_body={"device_ids": [device_id], "play": True},
+        )
+    except SpotifyNoDeviceError:
+        return {"error": (
+            "Spotify no encuentra el dispositivo. Abre la app de "
+            "Spotify en él para activarlo."
+        )}, None
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}, None
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}, None
+
+    # Best-effort: read /me/player so we can show a now-playing card.
+    scene: dict | None = None
+    try:
+        snapshot = _spotify_get("/me/player")
+        scene = _now_playing_scene(snapshot, is_playing=bool(snapshot.get("is_playing")))
+    except Exception:  # noqa: BLE001
+        pass
+    return {"transferred_device_id": device_id}, scene
+
+
+async def _spotify_play_here() -> ToolResult:
+    """Move Spotify Connect playback to the configured tablet device."""
+    from .settings import settings as _settings
+
+    pattern = (_settings.kiwi_spotify_tablet_name or "tablet").lower()
+    try:
+        devices = await asyncio.to_thread(_spotify_devices_blocking)
+    except requests.HTTPError as exc:
+        return ToolResult(
+            response={"error": f"spotify api error: {exc.response.status_code}"},
+        )
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return ToolResult(response={"error": str(exc)})
+
+    target = next(
+        (d for d in devices if pattern in (d.get("name") or "").lower()),
+        None,
+    )
+    if target is None:
+        names = [d.get("name") or "?" for d in devices]
+        return ToolResult(response={
+            "error": (
+                f"no se encontró el tablet (buscando {pattern!r}) en los "
+                f"dispositivos de Spotify Connect: {names}. Asegúrate de "
+                "tener la app de Spotify instalada y abierta al menos "
+                "una vez en el tablet."
+            ),
+        })
+
+    response, scene = await asyncio.to_thread(
+        _spotify_transfer_blocking, target["id"],
+    )
+    response = {**response, "device_name": target.get("name")}
+    return ToolResult(response=response, scene=scene)
+
+
+async def _spotify_transfer_to(target: str) -> ToolResult:
+    """Move Spotify playback to a named device (fuzzy match)."""
+    if not target or not target.strip():
+        return ToolResult(response={"error": "target requerido"})
+    try:
+        devices = await asyncio.to_thread(_spotify_devices_blocking)
+    except requests.HTTPError as exc:
+        return ToolResult(
+            response={"error": f"spotify api error: {exc.response.status_code}"},
+        )
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return ToolResult(response={"error": str(exc)})
+
+    from . import state_store
+
+    matched = state_store.fuzzy_match_one(
+        list(devices), target, key=lambda d: d.get("name") or "",
+    )
+    if matched is None:
+        names = [d.get("name") or "?" for d in devices]
+        return ToolResult(response={
+            "error": f"ningún dispositivo coincide con {target!r}. Disponibles: {names}",
+        })
+
+    response, scene = await asyncio.to_thread(
+        _spotify_transfer_blocking, matched["id"],
+    )
+    response = {**response, "device_name": matched.get("name")}
+    return ToolResult(response=response, scene=scene)
+
+
+register(
+    name="spotify_play_here",
+    description=(
+        "Transfiere la reproducción de Spotify al propio tablet. Llama "
+        "a este tool cuando el usuario diga 'pon Spotify aquí', "
+        "'reproduce aquí', 'cambia el sonido al tablet', 'tráelo a "
+        "este altavoz', etc. Requiere que la app de Spotify esté "
+        "instalada y abierta al menos una vez en el tablet (para que "
+        "aparezca como dispositivo Connect). Si no aparece, devuelve "
+        "un error explicando cómo activarlo."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_play_here,
+)
+
+
+register(
+    name="spotify_transfer_to",
+    description=(
+        "Transfiere la reproducción de Spotify a un dispositivo "
+        "concreto por nombre (fuzzy match, sin acentos ni mayúsculas). "
+        "Llama cuando el usuario diga 'pon Spotify en el móvil', "
+        "'cambia al ordenador', 'pásalo al salón', etc. Para 'aquí' / "
+        "'en el tablet' usa spotify_play_here."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "target": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Trozo del nombre del dispositivo destino, p.ej. "
+                    "'móvil', 'pixel', 'salón', 'pc'."
+                ),
+            ),
+        },
+        required=["target"],
+    ),
+    handler=_spotify_transfer_to,
+)
+
+
 # ---- todos ---------------------------------------------------------
 
 
@@ -1707,14 +1855,65 @@ register(
 register(
     name="get_weather",
     description=(
-        "Devuelve el tiempo actual (temperatura y descripción breve) en "
+        "Devuelve el tiempo ACTUAL (temperatura y descripción breve) en "
         "la ubicación del usuario. Llama a este tool cuando pregunte "
-        "'qué tiempo hace', 'cómo está el día', 'hace frío', 'va a "
-        "llover ahora', etc. Resume el resultado en una frase natural; "
-        "no hace falta listar todos los campos."
+        "'qué tiempo hace ahora', 'hace frío', 'está lloviendo'. Para "
+        "preguntas sobre cómo va a estar el día, mañana o un día "
+        "concreto usa get_weather_forecast en su lugar."
     ),
     parameters=types.Schema(type=types.Type.OBJECT, properties={}),
     handler=_get_weather,
+)
+
+
+async def _get_weather_forecast(date: str = "") -> dict[str, Any]:
+    """Return per-day forecast for an ISO date (YYYY-MM-DD)."""
+    if not date:
+        return {"error": "date required (formato YYYY-MM-DD)"}
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        return {"error": f"date debe ser YYYY-MM-DD; recibido {date!r}"}
+    snap = await asyncio.to_thread(weather.forecast, date)
+    if snap is None:
+        available = await asyncio.to_thread(weather.forecast_dates)
+        return {
+            "error": (
+                f"sin previsión para {date}. Fechas disponibles: {available}"
+            ),
+        }
+    return weather.forecast_to_wire(snap)
+
+
+register(
+    name="get_weather_forecast",
+    description=(
+        "Devuelve la previsión del tiempo para una fecha: máxima, "
+        "mínima, condición dominante, probabilidad de lluvia, salida "
+        "y puesta del sol, y un desglose hora a hora. Llama a este "
+        "tool cuando el usuario pregunte 'qué tiempo va a hacer hoy', "
+        "'cómo va a estar mañana', 'va a llover esta tarde', 'qué "
+        "tiempo hará el viernes', '¿me llevo abrigo?', etc. Si "
+        "pregunta por una franja del día (mañana / tarde / noche / a "
+        "las X) usa el array `hourly` para responder con precisión; "
+        "si pregunta por el día en general usa el resumen diario "
+        "(max, min, descripción)."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "date": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Fecha en formato ISO YYYY-MM-DD. Convierte la "
+                    "petición ('hoy', 'mañana', 'el viernes', 'el día "
+                    "12') a fecha concreta. Cubre hoy + 6 días."
+                ),
+            ),
+        },
+        required=["date"],
+    ),
+    handler=_get_weather_forecast,
 )
 
 

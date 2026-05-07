@@ -943,3 +943,160 @@ def test_timer_status_returns_remaining(fresh_timer) -> None:  # noqa: ARG001
 def test_timer_status_when_none(fresh_timer) -> None:  # noqa: ARG001
     result = _run(tools.dispatch("timer_status", None))
     assert result == {"active": False}
+
+
+# ---- weather forecast tool -----------------------------------------
+
+
+def test_get_weather_forecast_is_registered() -> None:
+    assert "get_weather_forecast" in tools.registered_names()
+
+
+def test_get_weather_forecast_validates_date() -> None:
+    result = _run(tools.dispatch("get_weather_forecast", {"date": "no es fecha"}))
+    assert "error" in result
+
+
+def test_get_weather_forecast_missing_date() -> None:
+    result = _run(tools.dispatch("get_weather_forecast", {}))
+    assert "error" in result
+
+
+def test_get_weather_forecast_returns_dto(monkeypatch) -> None:
+    from kiwi_backend import weather
+
+    monkeypatch.setattr(
+        weather, "forecast",
+        lambda d: weather.DayForecast(
+            date=d,
+            temp_max_c=22.5,
+            temp_min_c=13.1,
+            weather_code=61,
+            description="Lluvia ligera",
+            icon="rain",
+            precipitation_probability_max=60,
+            precipitation_sum_mm=4.5,
+            sunrise="07:23",
+            sunset="20:51",
+            hourly=[],
+        ),
+    )
+    result = _run(
+        tools.dispatch("get_weather_forecast", {"date": "2026-05-07"}),
+    )
+    assert result["temp_max_c"] == 22.5
+    assert result["icon"] == "rain"
+
+
+def test_get_weather_forecast_unknown_date_returns_error_with_window(
+    monkeypatch,
+) -> None:
+    from kiwi_backend import weather
+
+    monkeypatch.setattr(weather, "forecast", lambda d: None)  # noqa: ARG005
+    monkeypatch.setattr(
+        weather, "forecast_dates",
+        lambda: ["2026-05-07", "2026-05-08"],
+    )
+    result = _run(
+        tools.dispatch("get_weather_forecast", {"date": "2099-01-01"}),
+    )
+    assert "error" in result
+    assert "2026-05-07" in result["error"]
+
+
+# ---- spotify transfer tools ----------------------------------------
+
+
+def test_spotify_transfer_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in ("spotify_play_here", "spotify_transfer_to"):
+        assert n in names
+
+
+def test_spotify_play_here_finds_tablet_and_transfers(monkeypatch) -> None:
+    from kiwi_backend.settings import settings as live
+
+    monkeypatch.setattr(live, "kiwi_spotify_tablet_name", "tablet")
+    monkeypatch.setattr(
+        tools, "_spotify_devices_blocking",
+        lambda: [
+            {"id": "phone-id", "name": "Pixel 9"},
+            {"id": "tablet-id", "name": "Pixel Tablet"},
+        ],
+    )
+
+    captured: dict = {}
+
+    def fake_transfer(device_id: str):
+        captured["id"] = device_id
+        return {"transferred_device_id": device_id}, {
+            "type": "now_playing",
+            "title": "Heroes",
+            "artist": "Bowie",
+            "album": "Heroes",
+            "album_art_url": None,
+            "is_playing": True,
+            "duration_ms": 0,
+            "progress_ms": 0,
+        }
+
+    monkeypatch.setattr(tools, "_spotify_transfer_blocking", fake_transfer)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("spotify_play_here", None, on_scene=sink))
+    assert captured["id"] == "tablet-id"
+    assert result["device_name"] == "Pixel Tablet"
+    assert pushed[0]["type"] == "now_playing"
+
+
+def test_spotify_play_here_no_tablet_returns_error(monkeypatch) -> None:
+    from kiwi_backend.settings import settings as live
+
+    monkeypatch.setattr(live, "kiwi_spotify_tablet_name", "tablet")
+    monkeypatch.setattr(
+        tools, "_spotify_devices_blocking",
+        lambda: [{"id": "phone-id", "name": "Pixel 9"}],
+    )
+    result = _run(tools.dispatch("spotify_play_here", None))
+    assert "error" in result
+    assert "Pixel 9" in result["error"]
+
+
+def test_spotify_transfer_to_fuzzy_match(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools, "_spotify_devices_blocking",
+        lambda: [
+            {"id": "salon-id", "name": "Sonos Salón"},
+            {"id": "movil-id", "name": "Pixel 9"},
+        ],
+    )
+
+    captured: dict = {}
+
+    def fake_transfer(device_id: str):
+        captured["id"] = device_id
+        return {"transferred_device_id": device_id}, None
+
+    monkeypatch.setattr(tools, "_spotify_transfer_blocking", fake_transfer)
+
+    result = _run(
+        tools.dispatch("spotify_transfer_to", {"target": "salon"}),
+    )
+    assert captured["id"] == "salon-id"
+    assert result["device_name"] == "Sonos Salón"
+
+
+def test_spotify_transfer_to_no_match_returns_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tools, "_spotify_devices_blocking",
+        lambda: [{"id": "movil-id", "name": "Pixel 9"}],
+    )
+    result = _run(
+        tools.dispatch("spotify_transfer_to", {"target": "fantasma"}),
+    )
+    assert "error" in result
