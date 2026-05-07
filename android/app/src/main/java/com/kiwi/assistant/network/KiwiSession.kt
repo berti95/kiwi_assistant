@@ -15,6 +15,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
+import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
@@ -246,6 +247,7 @@ class KiwiSession(
             "now_playing" -> parseNowPlayingScene(scene)
             "todo_list" -> parseTodoListScene(scene)
             "timer" -> parseTimerScene(scene)
+            "alarm_list" -> parseAlarmListScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -315,6 +317,22 @@ class KiwiSession(
     private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
         val url = scene.string("url") ?: return null
         return Scene.BrowseYouTube(url = url)
+    }
+
+    private fun parseAlarmListScene(scene: JsonObject): Scene.AlarmList {
+        val raw = scene["items"] as? JsonArray ?: emptyList()
+        val items = raw.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val id = obj.string("id") ?: return@mapNotNull null
+            val firesAtMs = (obj["fires_at_ms"] as? JsonPrimitive)
+                ?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+            AlarmItem(
+                id = id,
+                firesAtMs = firesAtMs,
+                label = obj.string("label").orEmpty(),
+            )
+        }
+        return Scene.AlarmList(items = items)
     }
 
     private fun parseTimerScene(scene: JsonObject): Scene.Timer {

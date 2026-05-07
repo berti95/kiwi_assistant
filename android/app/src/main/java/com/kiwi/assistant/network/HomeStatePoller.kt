@@ -2,6 +2,7 @@ package com.kiwi.assistant.network
 
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.ui.CalendarEvent
+import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
@@ -100,11 +101,24 @@ class HomeStatePoller(
             )
         }
 
+        val alarmsArr = root["alarms"] as? JsonArray ?: JsonArray(emptyList())
+        val alarms = alarmsArr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            val firesAtMs = (obj["fires_at_ms"] as? JsonPrimitive)
+                ?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+            AlarmItem(
+                id = obj.string("id") ?: return@mapNotNull null,
+                firesAtMs = firesAtMs,
+                label = obj.string("label").orEmpty(),
+            )
+        }
+
         return HomeSnapshot(
             eventsToday = events,
             todos = todos,
             nowPlaying = nowPlaying,
             weather = weather,
+            alarms = alarms,
         )
     }
 

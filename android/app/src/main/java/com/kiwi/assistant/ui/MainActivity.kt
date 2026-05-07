@@ -13,8 +13,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import android.content.Intent
 import androidx.lifecycle.lifecycleScope
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.alarm.AlarmRingReceiver
 import com.kiwi.assistant.kiosk.KioskController
 import com.kiwi.assistant.log.LogShipper
 import com.kiwi.assistant.ui.theme.KiwiTheme
@@ -69,6 +71,29 @@ class MainActivity : ComponentActivity() {
                 KiwiScreen(viewModel = viewModel)
             }
         }
+
+        handleAlarmIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // launchMode=singleTask sends new alarm ring intents through
+        // here when MainActivity is already running. Without this we'd
+        // miss every alarm except the very first one after launch.
+        setIntent(intent)
+        handleAlarmIntent(intent)
+    }
+
+    private fun handleAlarmIntent(intent: Intent) {
+        val id = intent.getStringExtra(AlarmRingReceiver.EXTRA_ID) ?: return
+        val label = intent.getStringExtra(AlarmRingReceiver.EXTRA_LABEL).orEmpty()
+        val firesAt = intent.getLongExtra(AlarmRingReceiver.EXTRA_FIRES_AT, 0L)
+        viewModel.onAlarmRing(id, label, firesAt)
+        // Strip the extras so a config change (rotation, resume) doesn't
+        // re-fire the same alarm scene.
+        intent.removeExtra(AlarmRingReceiver.EXTRA_ID)
+        intent.removeExtra(AlarmRingReceiver.EXTRA_LABEL)
+        intent.removeExtra(AlarmRingReceiver.EXTRA_FIRES_AT)
     }
 
     override fun onResume() {

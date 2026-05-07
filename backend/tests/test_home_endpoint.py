@@ -138,6 +138,71 @@ def test_cancel_timer_clears_active_one(client: TestClient) -> None:
     timer.reset()
 
 
+# ---- alarms endpoints -----------------------------------------------
+
+
+def _set_alarm_in_future(label: str = "x") -> str:
+    """Helper: schedule an alarm 1 min into the future and return its id."""
+    import time as _time
+
+    from kiwi_backend import alarms
+    fires = int(_time.time() * 1000) + 60_000
+    return alarms.set_alarm(fires, label=label).id
+
+
+def test_get_home_includes_alarms_list(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+    _set_alarm_in_future("trabajo")
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    labels = [a["label"] for a in body["alarms"]]
+    assert labels == ["trabajo"]
+
+
+def test_dismiss_alarm_drops_it(client: TestClient) -> None:
+    aid = _set_alarm_in_future("x")
+    body = client.post(f"/api/alarms/{aid}/dismiss?token={DEV_TOKEN}").json()
+    assert body["dismissed"] is True
+    assert body["items"] == []
+
+
+def test_dismiss_unknown_alarm_idempotent(client: TestClient) -> None:
+    body = client.post(f"/api/alarms/phantom/dismiss?token={DEV_TOKEN}").json()
+    assert body["dismissed"] is False
+
+
+def test_snooze_alarm_pushes_fires_at(client: TestClient) -> None:
+    import time as _time
+    aid = _set_alarm_in_future("x")
+    body = client.post(
+        f"/api/alarms/{aid}/snooze?token={DEV_TOKEN}&minutes=10",
+    ).json()
+    assert body["snoozed"] is True
+    assert body["fires_at_ms"] >= int(_time.time() * 1000) + 9 * 60_000
+
+
+def test_snooze_unknown_alarm_returns_404(client: TestClient) -> None:
+    response = client.post(f"/api/alarms/phantom/snooze?token={DEV_TOKEN}")
+    assert response.status_code == 404
+
+
+def test_snooze_rejects_zero_minutes(client: TestClient) -> None:
+    aid = _set_alarm_in_future("x")
+    response = client.post(
+        f"/api/alarms/{aid}/snooze?token={DEV_TOKEN}&minutes=0",
+    )
+    assert response.status_code == 400
+
+
+def test_alarms_endpoints_require_dev_token(client: TestClient) -> None:
+    aid = _set_alarm_in_future("x")
+    assert client.post(f"/api/alarms/{aid}/dismiss").status_code == 403
+    assert client.post(f"/api/alarms/{aid}/snooze").status_code == 403
+
+
 # ---- /api/home ------------------------------------------------------
 
 

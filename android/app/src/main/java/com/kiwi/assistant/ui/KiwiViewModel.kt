@@ -7,6 +7,7 @@ import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.audio.AudioCaptureManager
 import com.kiwi.assistant.audio.AudioPlaybackManager
 import com.kiwi.assistant.audio.SpeechActivityDetector
+import com.kiwi.assistant.alarm.AlarmScheduler
 import com.kiwi.assistant.audio.WakeWordListener
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.HomeStatePoller
@@ -80,6 +81,8 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         devToken = BuildConfig.DEV_LOGS_TOKEN,
     )
 
+    private val alarmScheduler = AlarmScheduler(application.applicationContext)
+
     /**
      * Background coroutine that refreshes [homeSnapshot] every
      * [HOME_REFRESH_INTERVAL_MS]. Started in init and lives for the
@@ -98,6 +101,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun refreshHomeSnapshot() {
         val snapshot = homePoller.fetchOnce() ?: return
         _homeSnapshot.value = snapshot
+        // Reconcile AlarmManager schedule with the authoritative list
+        // every refresh — covers the boot-up case (first poll re-arms
+        // alarms after a reboot) and any change made by voice while
+        // the app was offline.
+        alarmScheduler.sync(snapshot.alarms)
     }
 
     /** On-demand refresh — fire-and-forget, tolerates transient failures. */
@@ -143,11 +151,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         is Scene.VideoList,
         is Scene.PlaylistList,
         is Scene.TodoList,
+        is Scene.AlarmList,
         -> true
         is Scene.VideoPlayer,
         is Scene.BrowseYouTube,
         is Scene.NowPlaying,
-        is Scene.Timer,  // tiene su propio "Cancelar/Apagar"; nunca auto.
+        is Scene.Timer,
+        is Scene.AlarmRinging,  // sólo sale al pulsar Apagar / Posponer.
         Scene.Idle,
         -> false
     }
@@ -182,6 +192,46 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     fun onTimerDismiss() {
         viewModelScope.launch(Dispatchers.IO) { todoApi.cancelTimer() }
         if (_scene.value is Scene.Timer) {
+            _scene.value = Scene.Idle
+        }
+    }
+
+    /**
+     * Called by [MainActivity] when AlarmManager's broadcast receiver
+     * launched us with an alarm-ring intent. Flips the scene to
+     * AlarmRinging — the composable starts the alarm tone there.
+     */
+    fun onAlarmRing(alarmId: String, label: String, firesAtMs: Long) {
+        KLog.i(TAG, "alarm ring: id=$alarmId label=$label")
+        _scene.value = Scene.AlarmRinging(
+            alarmId = alarmId,
+            label = label,
+            firesAtMs = firesAtMs,
+        )
+    }
+
+    /** Apagar from the AlarmRingingScene: drop the alarm + go home. */
+    fun onAlarmDismiss(alarmId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            todoApi.dismissAlarm(alarmId)
+            refreshHomeSnapshot()
+        }
+        if (_scene.value is Scene.AlarmRinging) {
+            _scene.value = Scene.Idle
+        }
+    }
+
+    /**
+     * Posponer from the AlarmRingingScene: push the alarm forward by
+     * [minutes] on the backend; the next snapshot reschedules it via
+     * AlarmManager. Goes home immediately so the alarm tone stops.
+     */
+    fun onAlarmSnooze(alarmId: String, minutes: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            todoApi.snoozeAlarm(alarmId, minutes)
+            refreshHomeSnapshot()
+        }
+        if (_scene.value is Scene.AlarmRinging) {
             _scene.value = Scene.Idle
         }
     }
@@ -533,6 +583,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             is KiwiSessionEvent.SceneSet -> {
                 KLog.i(TAG, "scene.set → ${event.scene::class.simpleName}")
                 _scene.value = event.scene
+                // Voice-driven alarm tools push the full updated
+                // alarm list as Scene.AlarmList — reconcile the system
+                // scheduler immediately so a "ponme un despertador en
+                // 2 min" doesn't have to wait for the next /api/home
+                // poll to actually arm.
+                if (event.scene is Scene.AlarmList) {
+                    alarmScheduler.sync(event.scene.items)
+                }
             }
 
             KiwiSessionEvent.ResponseEnd -> {

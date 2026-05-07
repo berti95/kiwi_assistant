@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.ui.scenes.AlarmListScene
+import com.kiwi.assistant.ui.scenes.AlarmRingingScene
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.HomeScene
@@ -90,6 +92,8 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             onTodoTap = viewModel::onTodoTap,
             onOpenTodoList = viewModel::onOpenTodoList,
             onTimerDismiss = viewModel::onTimerDismiss,
+            onAlarmDismiss = viewModel::onAlarmDismiss,
+            onAlarmSnooze = viewModel::onAlarmSnooze,
         )
 
         // Overlay layer. Two modes:
@@ -177,6 +181,8 @@ private fun SceneLayer(
     onTodoTap: (TodoItem) -> Unit,
     onOpenTodoList: () -> Unit,
     onTimerDismiss: () -> Unit,
+    onAlarmDismiss: (String) -> Unit,
+    onAlarmSnooze: (String, Int) -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -191,6 +197,12 @@ private fun SceneLayer(
         is Scene.NowPlaying -> NowPlayingScene(scene)
         is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
         is Scene.Timer -> TimerScene(scene, onDismiss = onTimerDismiss)
+        is Scene.AlarmList -> AlarmListScene(scene)
+        is Scene.AlarmRinging -> AlarmRingingScene(
+            scene = scene,
+            onDismiss = onAlarmDismiss,
+            onSnooze = onAlarmSnooze,
+        )
     }
 }
 

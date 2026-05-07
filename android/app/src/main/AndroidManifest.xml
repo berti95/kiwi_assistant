@@ -41,6 +41,14 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".alarm.AlarmRingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.kiwi.assistant.ALARM_RING" />
+            </intent-filter>
+        </receiver>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

@@ -1100,3 +1100,126 @@ def test_spotify_transfer_to_no_match_returns_error(monkeypatch) -> None:
         tools.dispatch("spotify_transfer_to", {"target": "fantasma"}),
     )
     assert "error" in result
+
+
+# ---- alarm tools ---------------------------------------------------
+
+
+@_pt.fixture
+def fake_alarms_blob(monkeypatch: _pt.MonkeyPatch) -> dict:
+    from kiwi_backend import state_store
+
+    blobs: dict = {}
+
+    def fake_read(path, default):
+        return blobs.get(path, default)
+
+    def fake_write(path, payload):
+        blobs[path] = payload
+
+    monkeypatch.setattr(state_store, "read_json", fake_read)
+    monkeypatch.setattr(state_store, "write_json", fake_write)
+    return blobs
+
+
+def test_alarm_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in ("alarm_set", "alarm_cancel", "alarm_list"):
+        assert n in names
+
+
+def test_alarm_set_pushes_scene_with_list(fake_alarms_blob) -> None:  # noqa: ARG001
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    # Far enough in the future that _parse_when accepts; the tool's
+    # logic + alarms.set_alarm both forbid past timestamps.
+    future = "2099-01-01T07:00:00+01:00"
+    result = _run(
+        tools.dispatch(
+            "alarm_set",
+            {"when": future, "label": "trabajo"},
+            on_scene=sink,
+        ),
+    )
+    assert "scheduled" in result
+    assert result["scheduled"]["label"] == "trabajo"
+    assert pushed[0]["type"] == "alarm_list"
+    assert pushed[0]["items"][0]["label"] == "trabajo"
+
+
+def test_alarm_set_rejects_past() -> None:
+    result = _run(
+        tools.dispatch("alarm_set", {"when": "1990-01-01T07:00:00+01:00"}),
+    )
+    assert "error" in result
+
+
+def test_alarm_set_rejects_garbage() -> None:
+    result = _run(tools.dispatch("alarm_set", {"when": "ayer a las 7"}))
+    assert "error" in result
+
+
+def test_alarm_set_naive_iso_uses_madrid(fake_alarms_blob, monkeypatch) -> None:  # noqa: ARG001
+    """A naive ISO string is interpreted as Europe/Madrid local time."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    captured: dict = {}
+
+    def fake_set(fires_at_ms: int, label: str = ""):
+        captured["fires_at_ms"] = fires_at_ms
+        from kiwi_backend.alarms import Alarm
+        return Alarm(id="x", fires_at_ms=fires_at_ms, label=label, created_ms=0)
+
+    monkeypatch.setattr(tools.alarms, "set_alarm", fake_set)
+    monkeypatch.setattr(tools.alarms, "list_active", lambda: [])
+
+    result = _run(
+        tools.dispatch("alarm_set", {"when": "2099-06-15T07:00:00"}),
+    )
+    assert "scheduled" in result
+    expected = int(
+        datetime(2099, 6, 15, 7, 0, 0, tzinfo=ZoneInfo("Europe/Madrid"))
+        .timestamp() * 1000
+    )
+    assert captured["fires_at_ms"] == expected
+
+
+def test_alarm_cancel_by_label(fake_alarms_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("alarm_set", {"when": "2099-01-01T07:00:00+01:00", "label": "trabajo"}))
+    _run(tools.dispatch("alarm_set", {"when": "2099-01-01T08:00:00+01:00", "label": "gimnasio"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("alarm_cancel", {"match": "trabajo"}, on_scene=sink),
+    )
+    assert result["cancelled"]["label"] == "trabajo"
+    remaining = [it["label"] for it in pushed[-1]["items"]]
+    assert remaining == ["gimnasio"]
+
+
+def test_alarm_cancel_unknown_returns_error_with_active(fake_alarms_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("alarm_set", {"when": "2099-01-01T07:00:00+01:00", "label": "trabajo"}))
+    result = _run(tools.dispatch("alarm_cancel", {"match": "fantasma"}))
+    assert "error" in result
+    assert "trabajo" in result["error"]
+
+
+def test_alarm_list_returns_active(fake_alarms_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("alarm_set", {"when": "2099-01-01T07:00:00+01:00", "label": "uno"}))
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("alarm_list", None, on_scene=sink))
+    assert result["count"] == 1
+    assert pushed[0]["type"] == "alarm_list"
+    assert pushed[0]["items"][0]["label"] == "uno"

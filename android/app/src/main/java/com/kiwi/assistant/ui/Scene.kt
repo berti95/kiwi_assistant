@@ -102,7 +102,38 @@ sealed interface Scene {
      * la misma escena vacía y el tablet vuelve a la home.
      */
     data class Timer(val endsAtMs: Long, val label: String) : Scene
+
+    /**
+     * Lista de despertadores activos, empujada tras alarm_set /
+     * alarm_cancel / alarm_list. Visualiza lo que hay programado;
+     * la sincronización con AlarmManager la dispara el ViewModel
+     * cuando llega esta escena (o cuando llegan alarmas en
+     * homeSnapshot).
+     */
+    data class AlarmList(val items: List<AlarmItem>) : Scene
+
+    /**
+     * Despertador sonando ahora mismo. La activa el BroadcastReceiver
+     * de Android cuando AlarmManager dispara el PendingIntent;
+     * MainActivity lee los extras y se la mete al ViewModel.
+     */
+    data class AlarmRinging(
+        val alarmId: String,
+        val label: String,
+        val firesAtMs: Long,
+    ) : Scene
 }
+
+/**
+ * Despertador one-shot que el backend persiste en GCS. ``firesAtMs``
+ * es el momento absoluto en epoch-ms; el tablet usa AlarmManager.
+ * setAlarmClock para programarlo localmente.
+ */
+data class AlarmItem(
+    val id: String,
+    val firesAtMs: Long,
+    val label: String,
+)
 
 /**
  * One persistent TODO. ``completed`` reflects whether the user already
@@ -148,6 +179,7 @@ data class HomeSnapshot(
     val todos: List<TodoItem>,
     val nowPlaying: NowPlayingChip?,
     val weather: WeatherInfo?,
+    val alarms: List<AlarmItem>,
 )
 
 /** A YouTube video item, used in [Scene.VideoList]. */

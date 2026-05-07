@@ -55,6 +55,27 @@ class TodoApi(
         }
     }
 
+    suspend fun dismissAlarm(id: String): Boolean = simplePost(
+        "/api/alarms/$id/dismiss",
+    )
+
+    suspend fun snoozeAlarm(id: String, minutes: Int): Boolean = simplePost(
+        "/api/alarms/$id/snooze?minutes=$minutes",
+    )
+
+    private fun simplePost(pathAndQuery: String): Boolean {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return false
+        val sep = if ('?' in pathAndQuery) '&' else '?'
+        val url = "${baseUrl.trimEnd('/')}$pathAndQuery${sep}token=$devToken"
+        val request = Request.Builder().url(url).post(EMPTY_BODY).build()
+        return try {
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            false
+        }
+    }
+
     private fun post(suffix: String): List<TodoItem>? {
         if (baseUrl.isEmpty() || devToken.isEmpty()) return null
         val url = "${baseUrl.trimEnd('/')}/api/todos/$suffix?token=$devToken"

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import log_buffer, timer, todos, tools, weather
+from . import alarms, log_buffer, timer, todos, tools, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -261,11 +261,55 @@ async def get_home(token: str = "") -> dict[str, object]:
             "home: weather unavailable: %s: %s", type(exc).__name__, exc,
         )
 
+    # Alarms: full active list so the tablet can reconcile its
+    # AlarmManager scheduling. Failures degrade to empty.
+    alarm_items: list[dict] = []
+    try:
+        alarm_items = alarms.to_wire(await asyncio.to_thread(alarms.list_active))
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: alarms unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
     return {
         "events_today": events_today,
         "todos": todo_items,
         "now_playing": now_playing,
         "weather": current_weather,
+        "alarms": alarm_items,
+    }
+
+
+@app.post("/api/alarms/{alarm_id}/dismiss")
+async def dismiss_alarm(alarm_id: str, token: str = "") -> dict[str, object]:
+    """Drop an alarm after the tablet rang it (Apagar button)."""
+    _require_dev_token(token)
+    cancelled = await asyncio.to_thread(alarms.dismiss, alarm_id)
+    items = await asyncio.to_thread(alarms.list_active)
+    return {
+        "dismissed": cancelled is not None,
+        "label": cancelled.label if cancelled is not None else "",
+        "items": alarms.to_wire(items),
+    }
+
+
+@app.post("/api/alarms/{alarm_id}/snooze")
+async def snooze_alarm(
+    alarm_id: str, minutes: int = 10, token: str = "",
+) -> dict[str, object]:
+    """Push an alarm forward by ``minutes`` (Posponer button)."""
+    _require_dev_token(token)
+    if minutes <= 0:
+        raise HTTPException(status_code=400, detail="minutes must be positive")
+    try:
+        updated = await asyncio.to_thread(alarms.snooze, alarm_id, minutes)
+    except alarms.AlarmNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"alarm not found: {alarm_id}") from exc
+    items = await asyncio.to_thread(alarms.list_active)
+    return {
+        "snoozed": True,
+        "fires_at_ms": updated.fires_at_ms,
+        "items": alarms.to_wire(items),
     }
 
 
