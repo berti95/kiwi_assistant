@@ -1091,13 +1091,18 @@ _VALID_SEARCH_TYPES = {"track", "album", "artist", "playlist"}
 def _spotify_search_blocking(
     query: str, kind: str, limit: int,
 ) -> dict[str, Any]:
+    # market=from_token requiere el scope `user-read-private`, que el
+    # bundle OAuth actual no tiene → Spotify devuelve 403. Como Kiwi
+    # vive en España, fijamos market=ES; resultados se filtran a lo
+    # reproducible aquí sin pedir un scope nuevo. Si en algún momento
+    # hace falta multi-región, mover a settings.
     payload = _spotify_get(
         "/search",
         params={
             "q": query,
             "type": kind,
             "limit": min(max(limit, 1), 20),
-            "market": "from_token",
+            "market": "ES",
         },
     )
     items: list[dict[str, Any]] = []
