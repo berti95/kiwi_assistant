@@ -104,8 +104,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // Reconcile AlarmManager schedule with the authoritative list
         // every refresh — covers the boot-up case (first poll re-arms
         // alarms after a reboot) and any change made by voice while
-        // the app was offline.
-        alarmScheduler.sync(snapshot.alarms)
+        // the app was offline. Defensive: AlarmManager calls can
+        // throw SecurityException in some Android 14+ scenarios; let
+        // the snapshot stick aunque el scheduler falle.
+        runCatching { alarmScheduler.sync(snapshot.alarms) }
+            .onFailure { e ->
+                KLog.w(
+                    TAG,
+                    "alarmScheduler.sync from snapshot failed: " +
+                        "${e::class.simpleName}: ${e.message}",
+                )
+            }
     }
 
     /** On-demand refresh — fire-and-forget, tolerates transient failures. */
@@ -587,9 +596,20 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 // alarm list as Scene.AlarmList — reconcile the system
                 // scheduler immediately so a "ponme un despertador en
                 // 2 min" doesn't have to wait for the next /api/home
-                // poll to actually arm.
+                // poll to actually arm. Defensive try-catch: si
+                // setAlarmClock se queja (p.ej. SecurityException en
+                // Android 14+ sin permiso), preferimos enseñar la
+                // escena con la alarma "registrada" antes que matar
+                // el proceso a media conversación.
                 if (event.scene is Scene.AlarmList) {
-                    alarmScheduler.sync(event.scene.items)
+                    runCatching { alarmScheduler.sync(event.scene.items) }
+                        .onFailure { e ->
+                            KLog.w(
+                                TAG,
+                                "alarmScheduler.sync from scene failed: " +
+                                    "${e::class.simpleName}: ${e.message}",
+                            )
+                        }
                 }
             }
 

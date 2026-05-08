@@ -42,10 +42,23 @@ class AlarmScheduler(private val context: Context) {
             ?: emptySet()
 
         for (id in previouslyScheduled - newIds) {
-            cancelById(id)
+            runCatching { cancelById(id) }.onFailure { e ->
+                KLog.w(TAG, "cancel $id failed: ${e::class.simpleName}: ${e.message}")
+            }
         }
         for (item in items) {
-            schedule(item)
+            runCatching { schedule(item) }.onFailure { e ->
+                // Lo más típico aquí es SecurityException en Android
+                // 14+ cuando el SO restringe setAlarmClock para apps
+                // sin la categoría correcta. No queremos que una
+                // alarma rota tire la app entera; logueamos y
+                // seguimos con el resto.
+                KLog.w(
+                    TAG,
+                    "schedule ${item.id} failed: " +
+                        "${e::class.simpleName}: ${e.message}",
+                )
+            }
         }
 
         prefs.edit { putStringSet(KEY_SCHEDULED_IDS, newIds) }

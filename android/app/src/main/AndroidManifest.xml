@@ -7,6 +7,16 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!--
+      setAlarmClock está exento de SCHEDULE_EXACT_ALARM en la
+      mayoría de versiones, pero algunos OEM de Android 14+ lo
+      exigen igualmente. SCHEDULE_EXACT_ALARM se concede por
+      defecto en instalación; USE_EXACT_ALARM es la variante "no
+      revocable" para apps con uso legítimo de alarma. Declaramos
+      ambas para cubrir cualquier configuración.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INSTALL_PACKAGES"
