@@ -40,6 +40,7 @@ import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -52,6 +53,14 @@ private val DATE_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", SPANISH)
 private val EVENT_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("HH:mm")
+
+/**
+ * Para eventos all-day multi-día. Sin "EEEE," delante del mes para
+ * que entre en una sola línea junto a "Hasta el "; si la fecha es
+ * en el mismo año vuela el año.
+ */
+private val ALL_DAY_END_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", SPANISH)
 
 private const val MAX_AGENDA_ROWS = 5
 private const val MAX_TODO_ROWS = 5
@@ -404,12 +413,19 @@ private fun subtitleForAgenda(events: List<CalendarEvent>): String {
 
 /**
  * Compact time slot for an event row in the home dashboard.
- * Single-line: "09:00–09:15" for timed events, "Todo el día" for
- * all-day. Falls back to the raw start string on parse failure so
- * we never blank out the row.
+ *
+ * - Timed events: "09:00–09:15".
+ * - All-day single-day: "Todo el día".
+ * - All-day multi-día: "Hasta el [día]" si aún quedan días, o
+ *   "Último día" cuando hoy es el cierre del rango. Sin esto el
+ *   usuario veía "Todo el día" tanto para uno de un día como para
+ *   uno de 13, dando la falsa sensación de que terminaba hoy.
+ *
+ * Falls back to the raw start string on parse failure so the row
+ * nunca queda en blanco.
  */
 private fun formatEventSlot(event: CalendarEvent): String {
-    if (event.allDay) return "Todo el día"
+    if (event.allDay) return formatAllDaySlot(event)
     return runCatching {
         val start = OffsetDateTime.parse(event.startsAt)
         val end = OffsetDateTime.parse(event.endsAt)
@@ -419,5 +435,28 @@ private fun formatEventSlot(event: CalendarEvent): String {
             LocalDateTime.parse(event.startsAt).format(EVENT_TIME_FORMATTER)
         }.getOrElse { event.startsAt }
     }
+}
+
+/**
+ * "Todo el día" para eventos de un solo día; para los multi-día,
+ * algo que dé contexto sobre cuándo termina:
+ *  - "Último día" cuando hoy es la fecha de cierre.
+ *  - "Hasta el viernes 20 de mayo" en cualquier otro día del rango.
+ *
+ * Google Calendar devuelve `endsAt` EXCLUSIVO en all-day events
+ * (un evento del 8 al 21 dura 8/9/…/20). Se ajusta a inclusivo
+ * antes de comparar / formatear.
+ */
+private fun formatAllDaySlot(event: CalendarEvent): String {
+    return runCatching {
+        val start = LocalDate.parse(event.startsAt)
+        val endExclusive = LocalDate.parse(event.endsAt)
+        val endInclusive = endExclusive.minusDays(1).coerceAtLeast(start)
+        if (start == endInclusive) return "Todo el día"
+        val today = LocalDate.now()
+        if (today == endInclusive) return "Último día"
+        val label = endInclusive.format(ALL_DAY_END_FORMATTER)
+        "Hasta el $label"
+    }.getOrElse { "Todo el día" }
 }
 
