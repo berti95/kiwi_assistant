@@ -1,7 +1,9 @@
 package com.kiwi.assistant.network
 
 import com.kiwi.assistant.log.KLog
+import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.UsageToolCount
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -9,6 +11,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -107,6 +111,59 @@ class TodoApi(
     suspend fun snoozeAlarm(id: String, minutes: Int): Boolean = simplePost(
         "/api/alarms/$id/snooze?minutes=$minutes",
     )
+
+    /**
+     * GET /api/stats con un periodo. Devuelve directamente
+     * [Scene.UsageStats] para que el ViewModel sólo tenga que
+     * empujarla a la escena. Null si la red falla o el JSON
+     * no parsea — el caller decide qué mostrar (típicamente:
+     * la escena con conversation_count=0).
+     */
+    suspend fun fetchUsageStats(period: String = "today"): Scene.UsageStats? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/stats?period=$period&token=$devToken"
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "GET $url returned ${response.code}")
+                    return null
+                }
+                parseUsageStats(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "GET $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    private fun parseUsageStats(body: String): Scene.UsageStats? {
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }
+            .getOrNull() ?: return null
+        fun double(key: String, default: Double = 0.0): Double =
+            (root[key] as? JsonPrimitive)?.doubleOrNull ?: default
+        fun int(key: String, default: Int = 0): Int =
+            (root[key] as? JsonPrimitive)?.intOrNull ?: default
+        val toolsArr = root["top_tools"] as? JsonArray ?: JsonArray(emptyList())
+        val tools = toolsArr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            UsageToolCount(
+                name = (obj["name"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null,
+                count = (obj["count"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+        }
+        return Scene.UsageStats(
+            period = (root["period"] as? JsonPrimitive)?.contentOrNull ?: "today",
+            conversationCount = int("conversation_count"),
+            turnCount = int("turn_count"),
+            audioInSeconds = double("audio_in_seconds"),
+            audioOutSeconds = double("audio_out_seconds"),
+            audioTotalSeconds = double("audio_total_seconds"),
+            estimatedCostEur = double("estimated_cost_eur"),
+            topTools = tools,
+        )
+    }
 
     private fun simplePost(pathAndQuery: String): Boolean {
         if (baseUrl.isEmpty() || devToken.isEmpty()) return false

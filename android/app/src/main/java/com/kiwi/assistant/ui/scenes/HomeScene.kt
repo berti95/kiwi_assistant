@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -81,6 +84,7 @@ private const val MAX_TODO_ROWS = 5
 fun HomeScene(
     snapshot: HomeSnapshot?,
     onOpenTodoList: () -> Unit = {},
+    onOpenUsageStats: () -> Unit = {},
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
@@ -96,6 +100,12 @@ fun HomeScene(
             ClockBlock(
                 modifier = Modifier.fillMaxSize().padding(40.dp),
                 weather = snapshot?.weather,
+            )
+            UsageChip(
+                onClick = onOpenUsageStats,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 16.dp),
             )
             return@Box
         }
@@ -139,6 +149,38 @@ fun HomeScene(
                 NowPlayingBar(chip)
             }
         }
+
+        UsageChip(
+            onClick = onOpenUsageStats,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, bottom = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun UsageChip(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Default.QueryStats,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.45f),
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "Uso",
+            color = Color.White.copy(alpha = 0.45f),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

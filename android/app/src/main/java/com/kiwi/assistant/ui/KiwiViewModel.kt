@@ -277,6 +277,30 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Abre la pantalla de uso/costes desde la home (chip "Uso").
+     * Hace el fetch a /api/stats en background y empuja
+     * [Scene.UsageStats]; si la red falla, empuja una escena con
+     * todo a cero — al menos el usuario ve que ha aterrizado en la
+     * pantalla aunque sin datos.
+     */
+    fun onOpenUsageStats(period: String = "today") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val stats = todoApi.fetchUsageStats(period)
+                ?: Scene.UsageStats(
+                    period = period,
+                    conversationCount = 0,
+                    turnCount = 0,
+                    audioInSeconds = 0.0,
+                    audioOutSeconds = 0.0,
+                    audioTotalSeconds = 0.0,
+                    estimatedCostEur = 0.0,
+                    topTools = emptyList(),
+                )
+            _scene.value = stats
+        }
+    }
+
+    /**
      * Dismiss the active TimerScene from the tablet (Cancelar / Apagar
      * button). Notifies the backend so a follow-up "cuánto queda"
      * voice query reports "no active timer" instead of stale state,

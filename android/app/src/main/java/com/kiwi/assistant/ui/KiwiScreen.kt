@@ -99,6 +99,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             onAlarmDismiss = viewModel::onAlarmDismiss,
             onAlarmSnooze = viewModel::onAlarmSnooze,
             onShoppingTap = viewModel::onShoppingTap,
+            onOpenUsageStats = { viewModel.onOpenUsageStats() },
         )
 
         // Overlay layer. Two modes:
@@ -270,11 +271,13 @@ private fun SceneLayer(
     onAlarmDismiss: (String) -> Unit,
     onAlarmSnooze: (String, Int) -> Unit,
     onShoppingTap: (ShoppingItem) -> Unit,
+    onOpenUsageStats: () -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
             snapshot = homeSnapshot,
             onOpenTodoList = onOpenTodoList,
+            onOpenUsageStats = onOpenUsageStats,
         )
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
