@@ -10,9 +10,10 @@ import com.kiwi.assistant.ui.MainActivity
  * Fires when AlarmManager's user-facing alarm clock triggers.
  *
  * Launches MainActivity with extras describing which alarm went off
- * so the activity (already the launcher / home category) flips into
- * the AlarmRinging scene. Direct activity intents are simpler for a
- * kiosk app that's permanently in the foreground anyway.
+ * so the activity flips into the AlarmRinging scene. Going via a
+ * direct activity intent (instead of, say, posting a notification
+ * the user has to tap) keeps the despertador appliance-like — the
+ * pantalla se enciende y muestra "¡Tiempo!" sin pasos manuales.
  */
 class AlarmRingReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {

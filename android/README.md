@@ -72,17 +72,11 @@ Y para subirla a GitHub Secrets en PowerShell:
 # pega el contenido del portapapeles en Settings > Secrets como ANDROID_KEYSTORE_B64
 ```
 
-## Setup inicial de la tablet (modo kiosk)
+## Setup inicial de la tablet
 
-Tras factory reset y con depuración USB activada:
-
-```bash
-adb install app/build/outputs/apk/debug/app-debug.apk
-adb shell dpm set-device-owner \
-    com.kiwi.assistant/.receiver.KiwiDeviceAdminReceiver
-```
-
-`set-device-owner` solo funciona si en la tablet no hay cuentas de Google
-configuradas. Sin Device Owner la app sigue arrancando como app normal y la
-activación de Lock Task se omite silenciosamente, así que el desarrollo en un
-emulador o una tablet "personal" sigue siendo posible.
+Instala la APK normalmente (sideload directo o desde Play Store interno).
+La app se declara con la intent-filter `category.HOME`, así que tras
+instalar Android pregunta si quieres usar Kiwi como launcher por defecto;
+acepta y, al pulsar el botón de inicio, vuelves siempre a Kiwi. No hay
+lockdown — si quieres salir a Ajustes o a otra app, deslizas y eliges
+otro launcher (o usas la barra de aplicaciones recientes).

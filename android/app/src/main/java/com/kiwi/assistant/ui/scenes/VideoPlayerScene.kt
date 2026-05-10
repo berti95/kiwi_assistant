@@ -59,7 +59,7 @@ private const val UA_CHROME_MOBILE =
  *
  * Why a WebView and not the YouTube Android Player SDK:
  *  - The official SDK is gated by Google Play Services and ties us
- *    to the Play APIs we don't otherwise use on this kiosk tablet.
+ *    to Play APIs que no usamos para nada más en este tablet.
  *  - The IFrame Player API is what every embedded YouTube player on
  *    the web uses. Stable, voice-friendly via JS bridge once we
  *    need it, and inherits the user's YouTube cookies if any.

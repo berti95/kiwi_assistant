@@ -11,7 +11,8 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * the developer to see what's going on remotely (ViewModel state
  * transitions, network events, tool dispatches, …). Anything that
  * stays inside `android.util.Log` won't reach Cloud Logging — and
- * since the tablet sits in a kiosk we can't easily ADB into it.
+ * reaching the tablet vía ADB en producción es engorroso, así que
+ * preferimos el camino remoto.
  *
  * Buffer is bounded ([MAX_BUFFER]) so a network outage can't blow up
  * heap; the oldest entries get dropped first. The shipper drains in

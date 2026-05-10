@@ -139,8 +139,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     // Icons used across the pipeline HUD (mic, hourglass, voice…) and
     // the close-conversation button. Extended adds a few MB to the
-    // APK but for a kiosk app that's fine, and we'll need more icons
-    // anyway as scenes (NowPlaying, VideoPlayer, …) come online.
+    // APK pero para un appliance dedicado al salón sobra el espacio,
+    // y vamos a necesitar más iconos a medida que crezcan las escenas.
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
 

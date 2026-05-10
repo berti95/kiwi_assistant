@@ -17,7 +17,6 @@ import android.content.Intent
 import androidx.lifecycle.lifecycleScope
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.alarm.AlarmRingReceiver
-import com.kiwi.assistant.kiosk.KioskController
 import com.kiwi.assistant.log.LogShipper
 import com.kiwi.assistant.ui.theme.KiwiTheme
 import com.kiwi.assistant.updater.AutoUpdater
@@ -27,7 +26,6 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var kioskController: KioskController
     private lateinit var brightnessManager: BrightnessManager
     private lateinit var autoUpdater: AutoUpdater
     private var updaterJob: Job? = null
@@ -48,7 +46,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
-        kioskController = KioskController(this)
         brightnessManager = BrightnessManager(this)
         // Updater only allowed to install when the user is not in the
         // middle of a Kiwi session. Otherwise Android force-stops the app
@@ -98,7 +95,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        kioskController.enableKiosk()
         brightnessManager.start()
         viewModel.setMicrophonePermission(hasMicPermission())
         // Belt-and-braces: setMicrophonePermission already starts the
@@ -147,8 +143,8 @@ class MainActivity : ComponentActivity() {
      * Immersive mode: hide both the status bar and the navigation bar
      * so the app fills the screen edge-to-edge. The user can swipe
      * from any edge to bring them back temporarily, then they fade
-     * away again — that's the right escape hatch for a tablet that's
-     * meant to look like an appliance but isn't a hard-locked kiosk.
+     * away again — buen compromiso para que el tablet luzca como un
+     * appliance sin bloquear al usuario.
      */
     private fun hideSystemBars() {
         WindowCompat.getInsetsController(window, window.decorView).apply {
