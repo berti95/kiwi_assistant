@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import alarms, log_buffer, shopping, timer, todos, tools, weather
+from . import alarms, log_buffer, shopping, timer, todos, tools, usage, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -322,6 +322,18 @@ async def clear_shopping(token: str = "") -> dict[str, object]:
     _require_dev_token(token)
     cleared = await asyncio.to_thread(shopping.clear_all)
     return {"cleared": cleared, "items": []}
+
+
+@app.get("/api/stats")
+async def get_stats(period: str = "today", token: str = "") -> dict[str, object]:
+    """Aggregated usage stats por periodo (today / 7d / 30d)."""
+    _require_dev_token(token)
+    if period not in ("today", "7d", "30d"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"period debe ser today / 7d / 30d (recibido: {period!r})",
+        )
+    return await asyncio.to_thread(usage.aggregate, period)
 
 
 @app.post("/api/alarms/{alarm_id}/dismiss")

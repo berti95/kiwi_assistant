@@ -258,6 +258,38 @@ def test_shopping_endpoints_require_dev_token(client: TestClient) -> None:
     assert client.post("/api/shopping/clear").status_code == 403
 
 
+# ---- /api/stats -----------------------------------------------------
+
+
+def test_stats_rejects_missing_token(client: TestClient) -> None:
+    assert client.get("/api/stats").status_code == 403
+
+
+def test_stats_invalid_period_returns_400(client: TestClient) -> None:
+    response = client.get(f"/api/stats?period=year&token={DEV_TOKEN}")
+    assert response.status_code == 400
+
+
+def test_stats_today_returns_aggregated_payload(client: TestClient) -> None:
+    import time as _time
+
+    from kiwi_backend import usage
+    now_ms = int(_time.time() * 1000)
+    usage.log_conversation(
+        started_at_ms=now_ms, ended_at_ms=now_ms + 5_000,
+        turn_count=4, audio_in_seconds=20.0, audio_out_seconds=30.0,
+        tool_call_names=["spotify_play", "todo_add"],
+    )
+    body = client.get(f"/api/stats?period=today&token={DEV_TOKEN}").json()
+    assert body["conversation_count"] == 1
+    assert body["turn_count"] == 4
+    assert body["audio_in_seconds"] == 20.0
+    assert body["audio_out_seconds"] == 30.0
+    assert body["audio_total_seconds"] == 50.0
+    names = [t["name"] for t in body["top_tools"]]
+    assert "spotify_play" in names
+
+
 # ---- /api/home ------------------------------------------------------
 
 

@@ -24,12 +24,13 @@ Wire formats:
 import asyncio
 import base64
 import logging
+import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
 
-from . import protocol, tools
+from . import protocol, tools, usage
 from .settings import Settings
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class _TurnCancelledError(Exception):
 async def proxy(ws: WebSocket, settings: Settings) -> None:
     """Run the tablet ↔ Gemini Live proxy until either side disconnects."""
     history: list[dict[str, str]] = []
+    started_at_ms = int(time.time() * 1000)
+    stats = usage.ProxyStats()
     try:
         # Google AI Studio (not Vertex Live) — see settings.gemini_api_key
         # for the rationale. The same google-genai SDK serves both; only
@@ -122,12 +125,13 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                         activity_start=types.ActivityStart(),
                     )
                     user_text, kiwi_text = await asyncio.wait_for(
-                        _run_one_turn(ws, gemini_session, turn_index),
+                        _run_one_turn(ws, gemini_session, turn_index, stats),
                         timeout=_PER_TURN_HARD_TIMEOUT_S,
                     )
                     history.append(
                         {"user": user_text.strip(), "kiwi": kiwi_text.strip()},
                     )
+                    stats.turn_count += 1
             except _TurnCancelledError:
                 log.info("turn %d: cancelled by tablet (no speech)", turn_index)
                 # Drop the upstream session, keep the WebSocket open,
@@ -167,6 +171,23 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                 "message": f"{type(exc).__name__}: {exc}",
             },
         )
+    finally:
+        # Persiste estadísticas de la conversación (incluso si terminó
+        # por excepción / disconnect / timeout). Si no hubo turnos
+        # completos no merece la pena guardar la entrada.
+        if stats.turn_count > 0:
+            try:
+                await asyncio.to_thread(
+                    usage.log_conversation,
+                    started_at_ms=started_at_ms,
+                    ended_at_ms=int(time.time() * 1000),
+                    turn_count=stats.turn_count,
+                    audio_in_seconds=stats.audio_in_seconds,
+                    audio_out_seconds=stats.audio_out_seconds,
+                    tool_call_names=stats.tool_call_names,
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("usage.log_conversation failed")
 
 
 def _build_config(
@@ -223,12 +244,14 @@ async def _run_one_turn(
     ws: WebSocket,
     gemini_session,
     turn_index: int,
+    stats: usage.ProxyStats,
 ) -> tuple[str, str]:
     """Drive one user turn against the current Gemini session.
 
     Returns ``(user_transcript, kiwi_transcript)`` so the proxy loop
     can append them to the conversation history that will be threaded
-    into the next session's system instruction.
+    into the next session's system instruction. Acumula contadores en
+    ``stats`` para el log de uso al cerrar la conversación.
     """
     user_text_parts: list[str] = []
     kiwi_text_parts: list[str] = []
@@ -296,7 +319,9 @@ async def _run_one_turn(
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call is not None:
-                await _handle_tool_call(ws, gemini_session, tool_call, turn_index)
+                await _handle_tool_call(
+                    ws, gemini_session, tool_call, turn_index, stats,
+                )
 
             sc = getattr(response, "server_content", None)
             if sc is None:
@@ -337,6 +362,10 @@ async def _run_one_turn(
                 return
 
     await asyncio.gather(tablet_to_gemini(), gemini_to_tablet())
+    # Cada chunk de input son 50 ms (16 kHz frame de 800 muestras × 16
+    # bit). Output: 24 kHz mono 16-bit = 48 000 bytes por segundo.
+    stats.audio_in_seconds += audio_chunks_in * 0.05
+    stats.audio_out_seconds += audio_bytes_out / 48_000.0
     return "".join(user_text_parts), "".join(kiwi_text_parts)
 
 
@@ -345,6 +374,7 @@ async def _handle_tool_call(
     gemini_session,
     tool_call,
     turn_index: int,
+    stats: usage.ProxyStats,
 ) -> None:
     """Run each requested tool and ship the responses back to Gemini.
 
@@ -374,6 +404,8 @@ async def _handle_tool_call(
         name = fc.name or ""
         args = dict(fc.args or {})
         log.info("turn %d: tool call %r args=%r", turn_index, name, args)
+        if name:
+            stats.tool_call_names.append(name)
         result = await tools.dispatch(name, args, on_scene=scene_sink)
         log.info("turn %d: tool %r result=%r", turn_index, name, result)
         responses.append(

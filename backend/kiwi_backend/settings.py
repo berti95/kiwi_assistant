@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     kiwi_state_todos_path: str = "todos.json"
     kiwi_state_alarms_path: str = "alarms.json"
     kiwi_state_shopping_path: str = "shopping.json"
+    kiwi_state_usage_path: str = "usage.json"
+
+    # Tarifas EUR por segundo de audio para la pantalla de costes.
+    # Defaults aproximan al modelo Flash Live (precios en USD del
+    # tier público con conversión 1 USD ≈ 0.95 EUR). Si Google
+    # actualiza precios o cambias de modelo, sobreescribe vía env
+    # KIWI_COST_AUDIO_IN_EUR_PER_SECOND / OUT.
+    kiwi_cost_audio_in_eur_per_second: float = 0.00002
+    kiwi_cost_audio_out_eur_per_second: float = 0.00006
 
     # Lat/lon for the weather widget on the home dashboard + the
     # get_weather tool. Defaults to Madrid; override per deploy if Kiwi

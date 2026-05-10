@@ -21,7 +21,10 @@ import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.ShoppingItem
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.UsageToolCount
 import com.kiwi.assistant.ui.VideoItem
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 
 /**
  * High-level event surfaced to the ViewModel.
@@ -250,6 +253,7 @@ class KiwiSession(
             "timer" -> parseTimerScene(scene)
             "alarm_list" -> parseAlarmListScene(scene)
             "shopping_list" -> parseShoppingListScene(scene)
+            "usage_stats" -> parseUsageStatsScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -319,6 +323,32 @@ class KiwiSession(
     private fun parseBrowseYouTubeScene(scene: JsonObject): Scene.BrowseYouTube? {
         val url = scene.string("url") ?: return null
         return Scene.BrowseYouTube(url = url)
+    }
+
+    private fun parseUsageStatsScene(scene: JsonObject): Scene.UsageStats {
+        fun double(key: String, default: Double = 0.0): Double =
+            (scene[key] as? JsonPrimitive)?.doubleOrNull ?: default
+        fun int(key: String, default: Int = 0): Int =
+            (scene[key] as? JsonPrimitive)?.intOrNull ?: default
+
+        val toolsArr = scene["top_tools"] as? JsonArray ?: JsonArray(emptyList())
+        val tools = toolsArr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            UsageToolCount(
+                name = obj.string("name") ?: return@mapNotNull null,
+                count = (obj["count"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+        }
+        return Scene.UsageStats(
+            period = scene.string("period") ?: "today",
+            conversationCount = int("conversation_count"),
+            turnCount = int("turn_count"),
+            audioInSeconds = double("audio_in_seconds"),
+            audioOutSeconds = double("audio_out_seconds"),
+            audioTotalSeconds = double("audio_total_seconds"),
+            estimatedCostEur = double("estimated_cost_eur"),
+            topTools = tools,
+        )
     }
 
     private fun parseShoppingListScene(scene: JsonObject): Scene.ShoppingList {

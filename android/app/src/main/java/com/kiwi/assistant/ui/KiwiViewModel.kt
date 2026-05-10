@@ -244,6 +244,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         is Scene.TodoList,
         is Scene.AlarmList,
         is Scene.ShoppingList,
+        is Scene.UsageStats,
         -> true
         is Scene.VideoPlayer,
         is Scene.BrowseYouTube,

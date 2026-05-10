@@ -41,6 +41,7 @@ import com.kiwi.assistant.ui.scenes.PlaylistListScene
 import com.kiwi.assistant.ui.scenes.ShoppingListScene
 import com.kiwi.assistant.ui.scenes.TimerScene
 import com.kiwi.assistant.ui.scenes.TodoListScene
+import com.kiwi.assistant.ui.scenes.UsageStatsScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
 import com.kiwi.assistant.ui.scenes.VideoPlayerScene
 import com.kiwi.assistant.ui.screens.ConnectingScreen
@@ -290,6 +291,7 @@ private fun SceneLayer(
             onSnooze = onAlarmSnooze,
         )
         is Scene.ShoppingList -> ShoppingListScene(scene, onItemTap = onShoppingTap)
+        is Scene.UsageStats -> UsageStatsScene(scene)
     }
 }
 

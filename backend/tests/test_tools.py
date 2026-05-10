@@ -1324,3 +1324,41 @@ def test_shopping_clear_empties_list(fake_shopping_blob) -> None:  # noqa: ARG00
     result = _run(tools.dispatch("shopping_clear", None, on_scene=sink))
     assert result["cleared"] == 2
     assert pushed[-1]["items"] == []
+
+
+# ---- usage_stats tool ----------------------------------------------
+
+
+def test_usage_stats_is_registered() -> None:
+    assert "usage_stats" in tools.registered_names()
+
+
+def test_usage_stats_invalid_period_returns_error() -> None:
+    result = _run(tools.dispatch("usage_stats", {"period": "year"}))
+    assert "error" in result
+
+
+def test_usage_stats_returns_aggregated_payload(monkeypatch) -> None:
+    fake_payload = {
+        "period": "today",
+        "conversation_count": 3,
+        "turn_count": 12,
+        "audio_in_seconds": 60.0,
+        "audio_out_seconds": 90.0,
+        "audio_total_seconds": 150.0,
+        "estimated_cost_eur": 0.012,
+        "top_tools": [{"name": "spotify_play", "count": 2}],
+    }
+    from kiwi_backend import usage as usage_mod
+
+    monkeypatch.setattr(usage_mod, "aggregate", lambda period: fake_payload)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("usage_stats", {"period": "today"}, on_scene=sink))
+    assert result == fake_payload
+    assert pushed[0]["type"] == "usage_stats"
+    assert pushed[0]["conversation_count"] == 3

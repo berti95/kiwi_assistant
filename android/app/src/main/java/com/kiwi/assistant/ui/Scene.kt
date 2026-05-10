@@ -129,7 +129,25 @@ sealed interface Scene {
      * hecho la compra" la vacía entera vía tool.
      */
     data class ShoppingList(val items: List<ShoppingItem>) : Scene
+
+    /**
+     * Pantalla de costes / telemetría. Empujada por el tool
+     * ``usage_stats(period)`` con el agregado del backend.
+     */
+    data class UsageStats(
+        val period: String,  // "today" / "7d" / "30d"
+        val conversationCount: Int,
+        val turnCount: Int,
+        val audioInSeconds: Double,
+        val audioOutSeconds: Double,
+        val audioTotalSeconds: Double,
+        val estimatedCostEur: Double,
+        val topTools: List<UsageToolCount>,
+    ) : Scene
 }
+
+/** Una entrada de "tool más usada" dentro de [Scene.UsageStats]. */
+data class UsageToolCount(val name: String, val count: Int)
 
 /**
  * Un artículo de la lista de la compra. Reutiliza la misma forma que
