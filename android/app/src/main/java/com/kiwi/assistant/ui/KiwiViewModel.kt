@@ -184,7 +184,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             if (event.allDay) continue
             val startMs = runCatching {
                 java.time.OffsetDateTime.parse(event.startsAt).toInstant().toEpochMilli()
-            }.getOrElse { continue }
+            }.getOrNull() ?: continue
             val deltaMs = startMs - nowMs
             if (deltaMs !in 0..EVENT_SOON_LEAD_MS) continue
             val key = "${event.title}|${event.startsAt}"
