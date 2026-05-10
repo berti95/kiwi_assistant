@@ -7,6 +7,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,10 +74,19 @@ fun TimerScene(scene: Scene.Timer, onDismiss: () -> Unit) {
         Alarm()
     }
 
+    val tapSink = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(if (expired) Color(0xFF2B0F0F) else Color.Black)
+            // Modal: ningún tap fuera de Cancelar/Apagar debe abrir
+            // conversación con Kiwi. Mismo motivo que en
+            // AlarmRingingScene.
+            .clickable(
+                interactionSource = tapSink,
+                indication = null,
+                onClick = {},
+            )
             .padding(48.dp),
         contentAlignment = Alignment.Center,
     ) {

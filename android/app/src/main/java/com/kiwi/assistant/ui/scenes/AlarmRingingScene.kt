@@ -7,6 +7,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,10 +59,20 @@ fun AlarmRingingScene(
     onSnooze: (alarmId: String, minutes: Int) -> Unit,
 ) {
     Alarm()
+    val tapSink = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF2B0F0F))
+            // Modal: cualquier tap fuera de los botones no debe abrir
+            // conversación con Kiwi. Sin esto, un dedo torpe en el
+            // borde del botón Posponer dispara también el
+            // combinedClickable raíz y arranca a escuchar.
+            .clickable(
+                interactionSource = tapSink,
+                indication = null,
+                onClick = {},
+            )
             .padding(48.dp),
         contentAlignment = Alignment.Center,
     ) {
