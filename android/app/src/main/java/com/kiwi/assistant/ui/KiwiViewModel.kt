@@ -277,6 +277,18 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Abre la lista de despertadores desde el chip de la home. Sin
+     * red: la lista la tenemos cacheada en homeSnapshot porque viene
+     * con cada /api/home. Si por algo el snapshot está vacío,
+     * abrimos la escena con lista vacía — el chip ni siquiera se
+     * pinta entonces, así que llegar aquí en ese estado sería raro.
+     */
+    fun onOpenAlarmList() {
+        val items = _homeSnapshot.value?.alarms.orEmpty()
+        _scene.value = Scene.AlarmList(items = items)
+    }
+
+    /**
      * Abre la pantalla de uso/costes desde la home (chip "Uso").
      * Hace el fetch a /api/stats en background y empuja
      * [Scene.UsageStats]; si la red falla, empuja una escena con

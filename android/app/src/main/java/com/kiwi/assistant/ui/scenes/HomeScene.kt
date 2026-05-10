@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -85,11 +86,18 @@ fun HomeScene(
     snapshot: HomeSnapshot?,
     onOpenTodoList: () -> Unit = {},
     onOpenUsageStats: () -> Unit = {},
+    onOpenAlarmList: () -> Unit = {},
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
     val hasNowPlaying = snapshot?.nowPlaying != null
     val hasContent = hasAgenda || hasTodos || hasNowPlaying
+
+    val nextAlarmMs = snapshot?.alarms
+        ?.map { it.firesAtMs }
+        ?.filter { it > System.currentTimeMillis() }
+        ?.minOrNull()
+    val alarmsCount = snapshot?.alarms?.size ?: 0
 
     Box(
         modifier = Modifier
@@ -100,12 +108,13 @@ fun HomeScene(
             ClockBlock(
                 modifier = Modifier.fillMaxSize().padding(40.dp),
                 weather = snapshot?.weather,
+                nextAlarmMs = nextAlarmMs,
             )
-            UsageChip(
-                onClick = onOpenUsageStats,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 16.dp, bottom = 16.dp),
+            BottomChips(
+                onOpenUsageStats = onOpenUsageStats,
+                onOpenAlarmList = onOpenAlarmList,
+                alarmsCount = alarmsCount,
+                modifier = Modifier.align(Alignment.BottomStart),
             )
             return@Box
         }
@@ -121,6 +130,7 @@ fun HomeScene(
                     .padding(bottom = 24.dp),
                 compact = true,
                 weather = snapshot?.weather,
+                nextAlarmMs = nextAlarmMs,
             )
 
             Row(
@@ -150,19 +160,50 @@ fun HomeScene(
             }
         }
 
-        UsageChip(
-            onClick = onOpenUsageStats,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 16.dp, bottom = 16.dp),
+        BottomChips(
+            onOpenUsageStats = onOpenUsageStats,
+            onOpenAlarmList = onOpenAlarmList,
+            alarmsCount = alarmsCount,
+            modifier = Modifier.align(Alignment.BottomStart),
         )
     }
 }
 
 @Composable
-private fun UsageChip(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun BottomChips(
+    onOpenUsageStats: () -> Unit,
+    onOpenAlarmList: () -> Unit,
+    alarmsCount: Int,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        modifier = modifier
+        modifier = modifier.padding(start = 16.dp, bottom = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconLabelChip(
+            icon = Icons.Default.QueryStats,
+            label = "Uso",
+            onClick = onOpenUsageStats,
+        )
+        if (alarmsCount > 0) {
+            IconLabelChip(
+                icon = Icons.Default.Alarm,
+                label = if (alarmsCount == 1) "1 alarma" else "$alarmsCount alarmas",
+                onClick = onOpenAlarmList,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IconLabelChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(Color.White.copy(alpha = 0.05f))
             .clickable { onClick() }
@@ -170,14 +211,14 @@ private fun UsageChip(onClick: () -> Unit, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = Icons.Default.QueryStats,
+            imageVector = icon,
             contentDescription = null,
             tint = Color.White.copy(alpha = 0.45f),
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            text = "Uso",
+            text = label,
             color = Color.White.copy(alpha = 0.45f),
             style = MaterialTheme.typography.bodySmall,
         )
@@ -189,6 +230,7 @@ private fun ClockBlock(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     weather: WeatherInfo? = null,
+    nextAlarmMs: Long? = null,
 ) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
 
@@ -227,8 +269,34 @@ private fun ClockBlock(
                 Spacer(Modifier.height(if (compact) 6.dp else 12.dp))
                 WeatherLine(weather = weather, compact = compact)
             }
+            if (nextAlarmMs != null) {
+                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                NextAlarmLine(firesAtMs = nextAlarmMs, compact = compact)
+            }
         }
     }
+}
+
+@Composable
+private fun NextAlarmLine(firesAtMs: Long, compact: Boolean) {
+    val instant = java.time.Instant.ofEpochMilli(firesAtMs)
+    val zoned = instant.atZone(java.time.ZoneId.systemDefault())
+    val time = zoned.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+    val date = zoned.toLocalDate()
+    val today = java.time.LocalDate.now()
+    val dayPart = when (date) {
+        today -> ""
+        today.plusDays(1) -> "mañana "
+        else -> date.format(
+            java.time.format.DateTimeFormatter.ofPattern("EEEE d ", SPANISH)
+        )
+    }
+    Text(
+        text = "🔔 Próxima alarma ${dayPart}${time}".trim(),
+        color = Color.White.copy(alpha = 0.55f),
+        style = if (compact) MaterialTheme.typography.titleMedium
+        else MaterialTheme.typography.headlineSmall,
+    )
 }
 
 @Composable
