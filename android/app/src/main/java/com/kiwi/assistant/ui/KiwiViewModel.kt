@@ -14,6 +14,7 @@ import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import com.kiwi.assistant.network.TodoApi
+import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -132,6 +133,87 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * BrowseYouTube, NowPlaying) are explicitly excluded — the user is
      * still using them even if no input arrives.
      */
+    /**
+     * Banner-style "el evento X empieza pronto" overlay. Null cuando
+     * no hay aviso activo. La UI lo renderiza por encima de la escena
+     * actual sin reemplazarla.
+     */
+    private val _eventSoonBanner = MutableStateFlow<EventSoonBanner?>(null)
+    val eventSoonBanner: StateFlow<EventSoonBanner?> = _eventSoonBanner.asStateFlow()
+
+    /**
+     * Eventos para los que ya hemos disparado el banner en este
+     * proceso. Reseteo en init / al cruzar medianoche para que un
+     * mismo evento no pite dos veces seguidas, pero sí pueda volver a
+     * pitar si la app se reinicia.
+     */
+    private val notifiedEventKeys: MutableSet<String> = mutableSetOf()
+    private var notifiedEventDay: Int = -1
+
+    /**
+     * Tick cada 30 s revisando ``homeSnapshot.eventsToday``: si algún
+     * evento timed empieza dentro de los próximos
+     * [EVENT_SOON_LEAD_MS] y aún no lo hemos avisado, dispara el
+     * banner. Auto-cierra el banner tras
+     * [EVENT_SOON_DISPLAY_MS] o cuando el usuario pulsa X.
+     */
+    private val eventSoonJob: Job = viewModelScope.launch {
+        while (true) {
+            try {
+                checkUpcomingEvents()
+            } catch (e: Exception) {
+                KLog.w(TAG, "eventSoon tick failed: ${e::class.simpleName}: ${e.message}")
+            }
+            delay(EVENT_SOON_TICK_MS)
+        }
+    }
+
+    private fun checkUpcomingEvents() {
+        // Reset diario del set de notificados — sin esto, un evento
+        // que se posponga ("oh, mañana hay reunión a las mismas") no
+        // pitaría porque su key (title|starts_at) seguiría aquí.
+        val today = LocalDate.now().toEpochDay().toInt()
+        if (today != notifiedEventDay) {
+            notifiedEventKeys.clear()
+            notifiedEventDay = today
+        }
+
+        val events = _homeSnapshot.value?.eventsToday ?: return
+        val nowMs = System.currentTimeMillis()
+        for (event in events) {
+            if (event.allDay) continue
+            val startMs = runCatching {
+                java.time.OffsetDateTime.parse(event.startsAt).toInstant().toEpochMilli()
+            }.getOrElse { continue }
+            val deltaMs = startMs - nowMs
+            if (deltaMs !in 0..EVENT_SOON_LEAD_MS) continue
+            val key = "${event.title}|${event.startsAt}"
+            if (key in notifiedEventKeys) continue
+            notifiedEventKeys.add(key)
+            _eventSoonBanner.value = EventSoonBanner(
+                title = event.title,
+                startsAt = event.startsAt,
+                location = event.location,
+            )
+            // Auto-cierre del banner tras X segundos para no
+            // monopolizar la pantalla.
+            viewModelScope.launch {
+                delay(EVENT_SOON_DISPLAY_MS)
+                if (_eventSoonBanner.value?.startsAt == event.startsAt) {
+                    _eventSoonBanner.value = null
+                }
+            }
+            // Sólo un evento por tick — si hay dos casi simultáneos,
+            // el segundo aparece en el próximo tick.
+            return
+        }
+    }
+
+    /** El usuario cierra el banner manualmente (X). */
+    fun onDismissEventBanner() {
+        _eventSoonBanner.value = null
+    }
+
     private val sceneAutoCloseJob: Job = viewModelScope.launch {
         combine(scene, pipeline) { s, p -> s to p }
             .collectLatest { (currentScene, currentPipeline) ->
@@ -831,6 +913,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         playbackWorker.cancel()
         homePollerJob.cancel()
         sceneAutoCloseJob.cancel()
+        eventSoonJob.cancel()
         if (detectorLazy.isInitialized()) {
             runCatching { detectorLazy.value.close() }
         }
@@ -878,5 +961,16 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // margen para leer una agenda densa o una lista de videos sin
         // sentirse pillado por el tiempo.
         const val SCENE_AUTO_CLOSE_MS = 90_000L
+
+        // Pre-aviso de evento de calendario: ventana en la que se
+        // dispara el banner antes del start time. 5 min cubre el
+        // típico "ya casi" sin saturar al usuario con alertas.
+        const val EVENT_SOON_LEAD_MS = 5L * 60_000L
+        // Cada cuánto revisamos los eventos próximos. Más fino que el
+        // refresh de homeSnapshot (5 min), porque necesitamos pillar
+        // la transición a "<5 min" antes de que pase.
+        const val EVENT_SOON_TICK_MS = 30_000L
+        // Cuánto deja el banner visible una vez disparado.
+        const val EVENT_SOON_DISPLAY_MS = 30_000L
     }
 }

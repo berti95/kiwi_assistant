@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -72,6 +73,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val pipeline by viewModel.pipeline.collectAsState()
     val scene by viewModel.scene.collectAsState()
     val homeSnapshot by viewModel.homeSnapshot.collectAsState()
+    val eventBanner by viewModel.eventSoonBanner.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
 
     Box(
@@ -172,6 +174,87 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 .align(Alignment.BottomEnd)
                 .padding(12.dp),
         )
+
+        // Event-soon banner: top-anchored, encima de la escena pero
+        // por debajo de los overlays fullscreen del pipeline. Aparece
+        // cuando un evento del calendario empieza en <5 min y se
+        // auto-cierra a los 30 s. La X manual también limpia.
+        eventBanner?.let { banner ->
+            EventSoonBannerView(
+                banner = banner,
+                onDismiss = viewModel::onDismissEventBanner,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp, start = 16.dp, end = 16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EventSoonBannerView(
+    banner: EventSoonBanner,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val time = remember(banner.startsAt) {
+        runCatching {
+            java.time.OffsetDateTime.parse(banner.startsAt)
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        }.getOrDefault("")
+    }
+    val nowMs = System.currentTimeMillis()
+    val startMs = remember(banner.startsAt) {
+        runCatching {
+            java.time.OffsetDateTime.parse(banner.startsAt).toInstant().toEpochMilli()
+        }.getOrDefault(0L)
+    }
+    val minutesUntil = if (startMs > 0) {
+        ((startMs - nowMs).coerceAtLeast(0L) / 60_000L).toInt()
+    } else 0
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF1E3A5F))
+            .padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (minutesUntil <= 0) "Empieza ahora" else "Empieza en $minutesUntil min",
+                color = Color.White.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                text = listOfNotNull(
+                    time.takeIf { it.isNotBlank() }?.let { "$it · ${banner.title}" }
+                        ?: banner.title,
+                ).first(),
+                color = Color.White.copy(alpha = 0.95f),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            banner.location?.takeIf { it.isNotBlank() }?.let { loc ->
+                Text(
+                    text = loc,
+                    color = Color.White.copy(alpha = 0.65f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Cerrar aviso",
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

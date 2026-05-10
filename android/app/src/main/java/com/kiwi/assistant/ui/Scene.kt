@@ -142,6 +142,19 @@ data class ShoppingItem(
 )
 
 /**
+ * Banner overlay para "evento empieza pronto". Se renderiza encima de
+ * la escena activa (sin reemplazarla) cuando un evento del calendario
+ * está dentro de los próximos 5 min y no se ha notificado aún. Se
+ * dispara desde una coroutine en el ViewModel basada en
+ * [HomeSnapshot.eventsToday]; auto-se-cierra tras 30 s o al pulsar la X.
+ */
+data class EventSoonBanner(
+    val title: String,
+    val startsAt: String,  // ISO 8601 con offset, mismo wire format que CalendarEvent
+    val location: String?,
+)
+
+/**
  * Despertador one-shot que el backend persiste en GCS. ``firesAtMs``
  * es el momento absoluto en epoch-ms; el tablet usa AlarmManager.
  * setAlarmClock para programarlo localmente.
