@@ -161,6 +161,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         is Scene.PlaylistList,
         is Scene.TodoList,
         is Scene.AlarmList,
+        is Scene.ShoppingList,
         -> true
         is Scene.VideoPlayer,
         is Scene.BrowseYouTube,
@@ -261,6 +262,26 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 _scene.value = Scene.TodoList(items = updated)
             }
             refreshHomeSnapshot()
+        }
+    }
+
+    /**
+     * Tap-to-toggle para la escena de la compra. Mismo modelo que
+     * [onTodoTap]: pendiente → comprado, comprado → eliminado.
+     */
+    fun onShoppingTap(item: ShoppingItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dtoList = if (!item.completed) {
+                todoApi.completeShopping(item.id)
+            } else {
+                todoApi.removeShopping(item.id)
+            } ?: return@launch
+            val mapped = dtoList.map {
+                ShoppingItem(id = it.id, text = it.text, completed = it.completed)
+            }
+            if (_scene.value is Scene.ShoppingList) {
+                _scene.value = Scene.ShoppingList(items = mapped)
+            }
         }
     }
 

@@ -37,6 +37,51 @@ class TodoApi(
 
     suspend fun remove(id: String): List<TodoItem>? = post("$id/remove")
 
+    /** Mark a shopping item as bought (server returns updated list). */
+    suspend fun completeShopping(id: String): List<ShoppingItemDto>? =
+        postShopping("$id/complete")
+
+    /** Remove a shopping item outright. */
+    suspend fun removeShopping(id: String): List<ShoppingItemDto>? =
+        postShopping("$id/remove")
+
+    /** Tipo intermedio para no introducir circular dep con ui.* aquí. */
+    data class ShoppingItemDto(val id: String, val text: String, val completed: Boolean)
+
+    private fun postShopping(suffix: String): List<ShoppingItemDto>? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/shopping/$suffix?token=$devToken"
+        val request = Request.Builder().url(url).post(EMPTY_BODY).build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "POST $url returned ${response.code}")
+                    return null
+                }
+                parseShoppingItems(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    private fun parseShoppingItems(body: String): List<ShoppingItemDto>? {
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }
+            .getOrNull() ?: return null
+        val arr = root["items"] as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            ShoppingItemDto(
+                id = (obj["id"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null,
+                text = (obj["text"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                completed = (obj["completed"] as? JsonPrimitive)
+                    ?.booleanOrNull ?: false,
+            )
+        }
+    }
+
     /**
      * Cancel the active backend timer. Fire-and-forget — if the call
      * fails the timer expires on its own (current() drops expired

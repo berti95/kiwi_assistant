@@ -122,7 +122,24 @@ sealed interface Scene {
         val label: String,
         val firesAtMs: Long,
     ) : Scene
+
+    /**
+     * Lista de la compra. Mismo patrón que TodoList: tap en pendiente
+     * lo marca como comprado, tap en comprado lo elimina; "Kiwi ya he
+     * hecho la compra" la vacía entera vía tool.
+     */
+    data class ShoppingList(val items: List<ShoppingItem>) : Scene
 }
+
+/**
+ * Un artículo de la lista de la compra. Reutiliza la misma forma que
+ * TodoItem porque, en práctica, los renderers son hermanos.
+ */
+data class ShoppingItem(
+    val id: String,
+    val text: String,
+    val completed: Boolean,
+)
 
 /**
  * Despertador one-shot que el backend persiste en GCS. ``firesAtMs``

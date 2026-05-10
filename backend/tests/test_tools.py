@@ -1223,3 +1223,104 @@ def test_alarm_list_returns_active(fake_alarms_blob) -> None:  # noqa: ARG001
     assert result["count"] == 1
     assert pushed[0]["type"] == "alarm_list"
     assert pushed[0]["items"][0]["label"] == "uno"
+
+
+# ---- shopping tools ------------------------------------------------
+
+
+@_pt.fixture
+def fake_shopping_blob(monkeypatch: _pt.MonkeyPatch) -> dict:
+    from kiwi_backend import state_store
+
+    blobs: dict = {}
+
+    def fake_read(path, default):
+        return blobs.get(path, default)
+
+    def fake_write(path, payload):
+        blobs[path] = payload
+
+    monkeypatch.setattr(state_store, "read_json", fake_read)
+    monkeypatch.setattr(state_store, "write_json", fake_write)
+    return blobs
+
+
+def test_shopping_tools_are_registered() -> None:
+    names = tools.registered_names()
+    for n in (
+        "shopping_add",
+        "shopping_list",
+        "shopping_complete",
+        "shopping_remove",
+        "shopping_clear",
+    ):
+        assert n in names
+
+
+def test_shopping_add_pushes_scene(fake_shopping_blob) -> None:  # noqa: ARG001
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("shopping_add", {"text": "leche"}, on_scene=sink))
+    assert result["added"]["text"] == "leche"
+    assert pushed[0]["type"] == "shopping_list"
+    assert pushed[0]["items"][0]["text"] == "leche"
+
+
+def test_shopping_complete_marks_item(fake_shopping_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("shopping_add", {"text": "leche"}))
+    _run(tools.dispatch("shopping_add", {"text": "pan"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("shopping_complete", {"match": "leche"}, on_scene=sink),
+    )
+    assert "completed" in result
+    by_text = {it["text"]: it for it in pushed[-1]["items"]}
+    assert by_text["leche"]["completed"] is True
+    assert by_text["pan"]["completed"] is False
+
+
+def test_shopping_complete_unknown_returns_pending_list(
+    fake_shopping_blob,  # noqa: ARG001
+) -> None:
+    _run(tools.dispatch("shopping_add", {"text": "pan"}))
+    result = _run(tools.dispatch("shopping_complete", {"match": "manzana"}))
+    assert "error" in result
+    assert "pan" in result["error"]
+
+
+def test_shopping_remove_drops_item(fake_shopping_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("shopping_add", {"text": "borrame"}))
+    _run(tools.dispatch("shopping_add", {"text": "quedate"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("shopping_remove", {"match": "borrame"}, on_scene=sink),
+    )
+    assert result["removed"]["text"] == "borrame"
+    assert [it["text"] for it in pushed[-1]["items"]] == ["quedate"]
+
+
+def test_shopping_clear_empties_list(fake_shopping_blob) -> None:  # noqa: ARG001
+    _run(tools.dispatch("shopping_add", {"text": "uno"}))
+    _run(tools.dispatch("shopping_add", {"text": "dos"}))
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("shopping_clear", None, on_scene=sink))
+    assert result["cleared"] == 2
+    assert pushed[-1]["items"] == []

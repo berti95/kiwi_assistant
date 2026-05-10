@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from . import alarms, log_buffer, timer, todos, tools, weather
+from . import alarms, log_buffer, shopping, timer, todos, tools, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -278,6 +278,50 @@ async def get_home(token: str = "") -> dict[str, object]:
         "weather": current_weather,
         "alarms": alarm_items,
     }
+
+
+@app.get("/api/shopping")
+async def get_shopping(token: str = "") -> dict[str, object]:
+    """Read-only listing of the shopping list (dev-token gated)."""
+    _require_dev_token(token)
+    items = await asyncio.to_thread(shopping.list_all)
+    return {"items": shopping.to_wire(items)}
+
+
+@app.post("/api/shopping/{item_id}/complete")
+async def complete_shopping(item_id: str, token: str = "") -> dict[str, object]:
+    """Mark a shopping item as bought (tablet tap-to-check path)."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(shopping.complete, item_id)
+    except shopping.ShoppingItemNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"shopping item not found: {item_id}",
+        ) from exc
+    items = await asyncio.to_thread(shopping.list_all)
+    return {"items": shopping.to_wire(items)}
+
+
+@app.post("/api/shopping/{item_id}/remove")
+async def remove_shopping(item_id: str, token: str = "") -> dict[str, object]:
+    """Delete a shopping item (second tap on completed)."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(shopping.remove, item_id)
+    except shopping.ShoppingItemNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"shopping item not found: {item_id}",
+        ) from exc
+    items = await asyncio.to_thread(shopping.list_all)
+    return {"items": shopping.to_wire(items)}
+
+
+@app.post("/api/shopping/clear")
+async def clear_shopping(token: str = "") -> dict[str, object]:
+    """Clear the entire shopping list ("ya he hecho la compra")."""
+    _require_dev_token(token)
+    cleared = await asyncio.to_thread(shopping.clear_all)
+    return {"cleared": cleared, "items": []}
 
 
 @app.post("/api/alarms/{alarm_id}/dismiss")

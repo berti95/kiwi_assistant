@@ -203,6 +203,61 @@ def test_alarms_endpoints_require_dev_token(client: TestClient) -> None:
     assert client.post(f"/api/alarms/{aid}/snooze").status_code == 403
 
 
+# ---- shopping endpoints ---------------------------------------------
+
+
+def test_get_shopping_returns_empty_initially(client: TestClient) -> None:
+    body = client.get(f"/api/shopping?token={DEV_TOKEN}").json()
+    assert body == {"items": []}
+
+
+def test_get_shopping_lists_items(client: TestClient) -> None:
+    from kiwi_backend import shopping
+    shopping.add("leche")
+    shopping.add("pan")
+    body = client.get(f"/api/shopping?token={DEV_TOKEN}").json()
+    assert [it["text"] for it in body["items"]] == ["leche", "pan"]
+
+
+def test_complete_shopping_endpoint(client: TestClient) -> None:
+    from kiwi_backend import shopping
+    item = shopping.add("leche")
+    body = client.post(
+        f"/api/shopping/{item.id}/complete?token={DEV_TOKEN}",
+    ).json()
+    assert body["items"][0]["completed"] is True
+
+
+def test_complete_shopping_unknown_returns_404(client: TestClient) -> None:
+    response = client.post(f"/api/shopping/phantom/complete?token={DEV_TOKEN}")
+    assert response.status_code == 404
+
+
+def test_remove_shopping_endpoint(client: TestClient) -> None:
+    from kiwi_backend import shopping
+    shopping.add("uno")
+    item = shopping.add("dos")
+    body = client.post(
+        f"/api/shopping/{item.id}/remove?token={DEV_TOKEN}",
+    ).json()
+    assert [it["text"] for it in body["items"]] == ["uno"]
+
+
+def test_clear_shopping_endpoint(client: TestClient) -> None:
+    from kiwi_backend import shopping
+    shopping.add("a")
+    shopping.add("b")
+    body = client.post(f"/api/shopping/clear?token={DEV_TOKEN}").json()
+    assert body == {"cleared": 2, "items": []}
+
+
+def test_shopping_endpoints_require_dev_token(client: TestClient) -> None:
+    assert client.get("/api/shopping").status_code == 403
+    assert client.post("/api/shopping/x/complete").status_code == 403
+    assert client.post("/api/shopping/x/remove").status_code == 403
+    assert client.post("/api/shopping/clear").status_code == 403
+
+
 # ---- /api/home ------------------------------------------------------
 
 
