@@ -80,10 +80,14 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            // Tap en el fondo no hace nada — abrir conversación
+            // requiere pulsar explícitamente el botón "Habla con
+            // Kiwi". Long-press se mantiene como atajo "vuelve a
+            // home" desde cualquier escena.
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = viewModel::onTap,
+                onClick = {},
                 onLongClick = viewModel::onLongPress,
             ),
     ) {
@@ -103,37 +107,31 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             onOpenAlarmList = viewModel::onOpenAlarmList,
         )
 
-        // Overlay layer. Two modes:
+        // Overlay layer. Cuatro estados disjuntos:
         //
-        // 1. Scene is Idle (the clock) → fullscreen overlay covers
-        //    everything. Same UX as before scenes existed.
-        // 2. Scene is non-Idle (calendar, now-playing, …) → compact
-        //    HUD pinned at the bottom so the scene stays visible
-        //    while the user converses about it. Errors still take
-        //    over fullscreen — they're meant to interrupt.
-        // Reconnecting + Error are "important" enough that we always
-        // take over the canvas with a fullscreen overlay, even if a
-        // scene was visible — the user needs to know connectivity is
-        // bad before they keep trying to talk to Kiwi.
+        // - Error / Reconnecting → siempre overlay fullscreen, sea
+        //   cual sea la escena: el usuario tiene que ver el problema
+        //   antes de seguir intentando hablar con Kiwi.
+        // - Pipeline Idle → botón "Habla con Kiwi" siempre visible
+        //   en bottom-center. Es la ÚNICA forma de arrancar
+        //   conversación (junto con el wake word "hola kiwi"); el
+        //   tap-anywhere ya no abre nada.
+        // - Pipeline activo + scene Idle (home) → fullscreen overlay
+        //   con Listening / Processing / Responding como antes.
+        // - Pipeline activo + scene no-Idle → HUD compacto abajo
+        //   para que la escena (agenda, video, etc.) siga visible.
         val pipelineWantsFullscreen =
             pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting
-        if (scene is Scene.Idle || pipelineWantsFullscreen) {
-            PipelineFullscreenOverlay(pipeline)
-        } else if (pipeline !is PipelineState.Idle) {
-            PipelineHud(
-                state = pipeline,
-                onClose = viewModel::onCloseConversation,
+        when {
+            pipelineWantsFullscreen -> PipelineFullscreenOverlay(pipeline)
+            pipeline is PipelineState.Idle -> TalkAffordance(
+                onTap = viewModel::onTap,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
-        } else {
-            // Non-Idle scene + Idle pipeline = the user is consuming
-            // content (calendar, video, NowPlaying, …) without an
-            // active conversation. The wake word ("hola kiwi") still
-            // works in the background but it's neither obvious nor
-            // 100% reliable over playback audio. Surface a tappable
-            // chip so the user has a guaranteed way to re-engage.
-            TalkAffordance(
-                onTap = viewModel::onTap,
+            scene is Scene.Idle -> PipelineFullscreenOverlay(pipeline)
+            else -> PipelineHud(
+                state = pipeline,
+                onClose = viewModel::onCloseConversation,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

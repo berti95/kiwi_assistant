@@ -992,12 +992,11 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_CONNECT_ATTEMPTS = 3
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
-        // PlaylistList / TodoList): si el usuario las deja en pantalla
-        // sin tocar y sin volver a hablar con Kiwi durante este tiempo,
-        // el tablet vuelve a la home automáticamente. 90 s deja
-        // margen para leer una agenda densa o una lista de videos sin
-        // sentirse pillado por el tiempo.
-        const val SCENE_AUTO_CLOSE_MS = 90_000L
+        // PlaylistList / TodoList / AlarmList / ShoppingList /
+        // UsageStats): si el usuario las deja en pantalla sin tocar y
+        // sin volver a hablar con Kiwi durante este tiempo, el tablet
+        // vuelve a la home automáticamente.
+        const val SCENE_AUTO_CLOSE_MS = 30_000L
 
         // Pre-aviso de evento de calendario: ventana en la que se
         // dispara el banner antes del start time. 5 min cubre el

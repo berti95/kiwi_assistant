@@ -109,6 +109,7 @@ fun HomeScene(
                 modifier = Modifier.fillMaxSize().padding(40.dp),
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
+                onNextAlarmTap = onOpenAlarmList,
             )
             BottomChips(
                 onOpenUsageStats = onOpenUsageStats,
@@ -131,6 +132,7 @@ fun HomeScene(
                 compact = true,
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
+                onNextAlarmTap = onOpenAlarmList,
             )
 
             Row(
@@ -186,13 +188,17 @@ private fun BottomChips(
             label = "Uso",
             onClick = onOpenUsageStats,
         )
-        if (alarmsCount > 0) {
-            IconLabelChip(
-                icon = Icons.Default.Alarm,
-                label = if (alarmsCount == 1) "1 alarma" else "$alarmsCount alarmas",
-                onClick = onOpenAlarmList,
-            )
-        }
+        // Siempre presente — sin contador si está vacío para que el
+        // usuario pueda entrar a programar la primera alarma.
+        IconLabelChip(
+            icon = Icons.Default.Alarm,
+            label = when (alarmsCount) {
+                0 -> "Alarmas"
+                1 -> "1 alarma"
+                else -> "$alarmsCount alarmas"
+            },
+            onClick = onOpenAlarmList,
+        )
     }
 }
 
@@ -231,6 +237,7 @@ private fun ClockBlock(
     compact: Boolean = false,
     weather: WeatherInfo? = null,
     nextAlarmMs: Long? = null,
+    onNextAlarmTap: () -> Unit = {},
 ) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
 
@@ -271,14 +278,22 @@ private fun ClockBlock(
             }
             if (nextAlarmMs != null) {
                 Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
-                NextAlarmLine(firesAtMs = nextAlarmMs, compact = compact)
+                NextAlarmLine(
+                    firesAtMs = nextAlarmMs,
+                    compact = compact,
+                    onTap = onNextAlarmTap,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun NextAlarmLine(firesAtMs: Long, compact: Boolean) {
+private fun NextAlarmLine(
+    firesAtMs: Long,
+    compact: Boolean,
+    onTap: () -> Unit,
+) {
     val instant = java.time.Instant.ofEpochMilli(firesAtMs)
     val zoned = instant.atZone(java.time.ZoneId.systemDefault())
     val time = zoned.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
@@ -296,6 +311,10 @@ private fun NextAlarmLine(firesAtMs: Long, compact: Boolean) {
         color = Color.White.copy(alpha = 0.55f),
         style = if (compact) MaterialTheme.typography.titleMedium
         else MaterialTheme.typography.headlineSmall,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onTap() }
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
 
