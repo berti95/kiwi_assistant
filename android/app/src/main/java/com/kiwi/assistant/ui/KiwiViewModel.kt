@@ -777,6 +777,17 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 when {
                     current is PipelineState.Error -> Unit
                     current is PipelineState.Idle -> Unit
+                    event.code == 1000 -> {
+                        // Cierre limpio iniciado por el server
+                        // (típicamente la tool end_conversation):
+                        // volvemos a Idle como en cualquier cierre
+                        // normal, sin pantalla de error.
+                        KLog.i(
+                            TAG,
+                            "WS closed cleanly by server (reason=${event.reason})",
+                        )
+                        closeConversation(resetScene = false)
+                    }
                     else -> {
                         val reason = event.reason.takeIf { it.isNotBlank() }
                         val msg = if (reason != null) {

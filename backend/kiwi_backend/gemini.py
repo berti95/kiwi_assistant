@@ -145,6 +145,7 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                             "closing WS tras este turno",
                             turn_index,
                         )
+                        await _safe_close(ws, code=1000, reason="ended by tool")
                         return
             except _TurnCancelledError:
                 log.info("turn %d: cancelled by tablet (no speech)", turn_index)
@@ -506,4 +507,21 @@ async def _safe_send(ws: WebSocket, payload: dict) -> None:
     except RuntimeError:
         # Starlette raises RuntimeError if you try to send on a socket
         # that has already been closed by the framework.
+        pass
+
+
+async def _safe_close(
+    ws: WebSocket, code: int = 1000, reason: str = "",
+) -> None:
+    """Best-effort close con frame limpio.
+
+    Sin esto, retornar de ``proxy`` deja a Starlette cerrar el WS sin
+    close frame y OkHttp del cliente lo interpreta como EOFException
+    → pantalla de error. Mandar close 1000 hace que el cliente
+    reciba ``onClosed(code=1000)`` y trate la salida como intencional.
+    Tolerante a "ya cerrado" (RuntimeError / WebSocketDisconnect).
+    """
+    try:
+        await ws.close(code=code, reason=reason)
+    except (WebSocketDisconnect, RuntimeError):
         pass
