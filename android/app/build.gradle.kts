@@ -150,11 +150,15 @@ dependencies {
     // scenes. Disk + memory caching, drop-in AsyncImage composable.
     implementation(libs.coil.compose)
     implementation(libs.android.vad.silero)
-    // The Silero VAD AAR pulls onnxruntime-android in transitively but
-    // declares it as runtime scope, so the wake-word code that calls
-    // OrtEnvironment / OnnxTensor directly needs it as a real
-    // compile-time dependency too.
+    // Silero VAD AAR pulls onnxruntime-android transitively pero como
+    // runtime scope; mantenemos la dep explícita por si en el futuro
+    // queremos llamar OrtEnvironment / OnnxTensor directamente desde
+    // otro sitio (hoy sólo lo usa la propia AAR de Silero).
     implementation(libs.onnxruntime.android)
+    // Vosk ASR offline en español. Reemplaza a openWakeWord para el
+    // wake-word: ASR de verdad en lugar de classifier basado en
+    // embedding inglés.
+    implementation(libs.vosk.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

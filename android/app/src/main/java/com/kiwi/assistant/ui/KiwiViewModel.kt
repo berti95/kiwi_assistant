@@ -8,7 +8,7 @@ import com.kiwi.assistant.audio.AudioCaptureManager
 import com.kiwi.assistant.audio.AudioPlaybackManager
 import com.kiwi.assistant.audio.SpeechActivityDetector
 import com.kiwi.assistant.alarm.AlarmScheduler
-import com.kiwi.assistant.audio.WakeWordListener
+import com.kiwi.assistant.audio.VoskKeywordListener
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSession
@@ -416,13 +416,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         SpeechActivityDetector(application)
     }
     private val detector: SpeechActivityDetector get() = detectorLazy.value
-    // Wake-word listener (openWakeWord, "hey jarvis"). Owns the mic
-    // continuously while the app is in Idle, releases it for the
-    // session capture path the moment a wake word lands or the user
-    // taps to start manually. Only one AudioRecord can be active per
-    // process for the same source, so the start/stop dance has to be
-    // disciplined — see openSession() / endSession() for the choreography.
-    private val wakeWordListener = WakeWordListener(application)
+    // Wake-word listener (Vosk ASR offline en español, "hola kiwi" /
+    // "alexa" / etc.). Posee el micro mientras la app está Idle y lo
+    // libera al disparar el wake word o cuando el usuario toca para
+    // arrancar manualmente. Sólo un AudioRecord puede estar activo
+    // por proceso para la misma fuente → el start/stop dance tiene
+    // que ser disciplinado, ver openSession() / endSession().
+    private val wakeWordListener = VoskKeywordListener(application)
     private var session: KiwiSession? = null
 
     /**
