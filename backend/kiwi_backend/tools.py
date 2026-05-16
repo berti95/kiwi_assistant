@@ -1021,7 +1021,23 @@ def _spotify_send(method: str, path: str, json_body: dict | None = None) -> dict
         if response.status_code == 404 and "device" in response.text.lower():
             raise SpotifyNoDeviceError()
         response.raise_for_status()
-    return response.json() if response.text else {}
+    # Defensive parse: algunos endpoints de playback control devuelven
+    # 200 OK con cuerpo vacío o no-JSON (visto en producción con
+    # /me/player/next: status 200, body vacío → JSONDecodeError). Si
+    # ya pasamos response.ok, la acción se ejecutó; un cuerpo no
+    # parseable equivale a un response.json() == {} para nuestros
+    # callers.
+    body = response.text.strip() if response.text else ""
+    if not body:
+        return {}
+    try:
+        return response.json()
+    except (ValueError, requests.exceptions.JSONDecodeError):
+        log.info(
+            "spotify %s %s: 200 body no es JSON (%r); tratado como vacío",
+            method, path, body[:200],
+        )
+        return {}
 
 
 class SpotifyNoDeviceError(RuntimeError):
