@@ -754,20 +754,36 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             KiwiSessionEvent.ResponseEnd -> {
-                if (isPassiveConsumptionScene(_scene.value)) {
-                    // The user just told Kiwi to play something
-                    // (video or song). Once Kiwi finishes saying
-                    // "ahora reproduciendo X" there is no point
-                    // re-opening the mic for another turn — we'd
-                    // either pick up the playback as input or sit
-                    // burning input tokens for 15 s until the
-                    // no-speech timeout fires. Close cleanly so the
-                    // HUD vanishes the moment Kiwi stops talking.
-                    KLog.i(TAG, "response.end on playback scene → drain + close")
-                    waitForAudioAndCloseConversation()
-                } else {
-                    KLog.i(TAG, "response.end → drain → next turn")
-                    waitForAudioAndStartNextTurn()
+                val kiwiTranscript = when (val s = _pipeline.value) {
+                    is PipelineState.Responding -> s.kiwiTranscript
+                    else -> ""
+                }
+                val goodbye = looksLikeGoodbye(kiwiTranscript)
+                when {
+                    isPassiveConsumptionScene(_scene.value) -> {
+                        // The user just told Kiwi to play something
+                        // (video or song). Once Kiwi finishes saying
+                        // "ahora reproduciendo X" there is no point
+                        // re-opening the mic for another turn.
+                        KLog.i(TAG, "response.end on playback scene → drain + close")
+                        waitForAudioAndCloseConversation()
+                    }
+                    goodbye -> {
+                        // Kiwi acaba de despedirse ("hasta luego" /
+                        // "adiós" / etc.) tras un "nada más" del
+                        // usuario. No tiene sentido reabrir el mic;
+                        // cerramos en cuanto termina de hablar.
+                        KLog.i(
+                            TAG,
+                            "response.end with goodbye " +
+                                "(transcript=${kiwiTranscript.take(60)}) → close",
+                        )
+                        waitForAudioAndCloseConversation()
+                    }
+                    else -> {
+                        KLog.i(TAG, "response.end → drain → next turn")
+                        waitForAudioAndStartNextTurn()
+                    }
                 }
             }
 
@@ -903,6 +919,26 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Heurística: ¿la respuesta de Kiwi parece una despedida final?
+     *
+     * Combina dos señales para evitar falsos positivos:
+     *  - Respuesta CORTA: ≤ [FAREWELL_MAX_WORDS] palabras. "Vale, te
+     *    apunto X" tiene "vale" pero no es despedida.
+     *  - Contiene al menos una de las frases de [FAREWELL_KEYWORDS].
+     *
+     * El prompt instruye a Kiwi a despedirse con 1-3 palabras cuando
+     * el usuario diga "nada más" / "ya está" / etc., así que en la
+     * práctica la respuesta de cierre cae limpia bajo este filtro.
+     */
+    private fun looksLikeGoodbye(transcript: String): Boolean {
+        val normalized = transcript.lowercase().trim()
+        if (normalized.isEmpty()) return false
+        val wordCount = normalized.split(Regex("\\s+")).size
+        if (wordCount > FAREWELL_MAX_WORDS) return false
+        return FAREWELL_KEYWORDS.any { it in normalized }
+    }
+
+    /**
      * Whether the active scene is one where the user is consuming
      * media passively and we should NOT keep listening after Kiwi's
      * response. Add new scenes here when they become "media-playing"
@@ -979,17 +1015,41 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
         // How long Listening can stay open WITHOUT any speech being
         // detected before we auto-close the conversation. Listening
-        // streams PCM to Gemini Live continuously, so each second of
-        // open-mic-no-one-talking burns input audio tokens. 15s gives
-        // the user time to think after Kiwi answers; once they speak,
-        // the regular VAD path takes over and this timer is cancelled.
-        const val NO_SPEECH_TIMEOUT_MS = 15_000L
+        // streams PCM to Gemini Live continuously, así que cada
+        // segundo de mic-abierto-y-nadie-hablando quema tokens de
+        // input audio. 6 s deja margen para "lo voy a pensar un
+        // momento" pero corta rápido cuando ya acabaste; la detección
+        // de despedida de Kiwi (looksLikeGoodbye) cubre el caso
+        // explícito "nada más" cerrando antes incluso del timeout.
+        const val NO_SPEECH_TIMEOUT_MS = 6_000L
 
         // Total handshake attempts before we surface PipelineState.Error.
         // First attempt + 2 retries with 1s/3s backoff covers the
         // typical post-Doze stale-socket case (~3 s for the WiFi/4G
         // stack to stabilise) without making real outages drag on.
         const val MAX_CONNECT_ATTEMPTS = 3
+
+        // Heurística "Kiwi acaba de despedirse" tras response.end.
+        // El prompt instruye respuestas de 1-3 palabras al cierre, así
+        // que un cap superior generoso (5 palabras) atrapa "Vale,
+        // hasta luego" sin pillar respuestas largas que casualmente
+        // contengan "vale".
+        const val FAREWELL_MAX_WORDS = 5
+        val FAREWELL_KEYWORDS = setOf(
+            "hasta luego",
+            "hasta pronto",
+            "hasta mañana",
+            "adiós",
+            "adios",
+            "buenas noches",
+            "buen día",
+            "buenas",
+            "chao",
+            "chau",
+            "nos vemos",
+            "que descanses",
+            "que vaya bien",
+        )
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
         // PlaylistList / TodoList / AlarmList / ShoppingList /
