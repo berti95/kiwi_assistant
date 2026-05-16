@@ -754,36 +754,21 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             KiwiSessionEvent.ResponseEnd -> {
-                val kiwiTranscript = when (val s = _pipeline.value) {
-                    is PipelineState.Responding -> s.kiwiTranscript
-                    else -> ""
-                }
-                val goodbye = looksLikeGoodbye(kiwiTranscript)
-                when {
-                    isPassiveConsumptionScene(_scene.value) -> {
-                        // The user just told Kiwi to play something
-                        // (video or song). Once Kiwi finishes saying
-                        // "ahora reproduciendo X" there is no point
-                        // re-opening the mic for another turn.
-                        KLog.i(TAG, "response.end on playback scene → drain + close")
-                        waitForAudioAndCloseConversation()
-                    }
-                    goodbye -> {
-                        // Kiwi acaba de despedirse ("hasta luego" /
-                        // "adiós" / etc.) tras un "nada más" del
-                        // usuario. No tiene sentido reabrir el mic;
-                        // cerramos en cuanto termina de hablar.
-                        KLog.i(
-                            TAG,
-                            "response.end with goodbye " +
-                                "(transcript=${kiwiTranscript.take(60)}) → close",
-                        )
-                        waitForAudioAndCloseConversation()
-                    }
-                    else -> {
-                        KLog.i(TAG, "response.end → drain → next turn")
-                        waitForAudioAndStartNextTurn()
-                    }
+                if (isPassiveConsumptionScene(_scene.value)) {
+                    // The user just told Kiwi to play something
+                    // (video or song). Once Kiwi finishes saying
+                    // "ahora reproduciendo X" there is no point
+                    // re-opening the mic for another turn.
+                    KLog.i(TAG, "response.end on playback scene → drain + close")
+                    waitForAudioAndCloseConversation()
+                } else {
+                    // Despedidas explícitas las decide Gemini llamando
+                    // a la tool end_conversation; el backend cierra el
+                    // WS tras este turno y aquí caerá el Closed event
+                    // que ya manejamos. No hay heurísticas de keyword
+                    // en el cliente — todo decisión generativa.
+                    KLog.i(TAG, "response.end → drain → next turn")
+                    waitForAudioAndStartNextTurn()
                 }
             }
 
@@ -919,26 +904,6 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Heurística: ¿la respuesta de Kiwi parece una despedida final?
-     *
-     * Combina dos señales para evitar falsos positivos:
-     *  - Respuesta CORTA: ≤ [FAREWELL_MAX_WORDS] palabras. "Vale, te
-     *    apunto X" tiene "vale" pero no es despedida.
-     *  - Contiene al menos una de las frases de [FAREWELL_KEYWORDS].
-     *
-     * El prompt instruye a Kiwi a despedirse con 1-3 palabras cuando
-     * el usuario diga "nada más" / "ya está" / etc., así que en la
-     * práctica la respuesta de cierre cae limpia bajo este filtro.
-     */
-    private fun looksLikeGoodbye(transcript: String): Boolean {
-        val normalized = transcript.lowercase().trim()
-        if (normalized.isEmpty()) return false
-        val wordCount = normalized.split(Regex("\\s+")).size
-        if (wordCount > FAREWELL_MAX_WORDS) return false
-        return FAREWELL_KEYWORDS.any { it in normalized }
-    }
-
-    /**
      * Whether the active scene is one where the user is consuming
      * media passively and we should NOT keep listening after Kiwi's
      * response. Add new scenes here when they become "media-playing"
@@ -1028,28 +993,6 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // typical post-Doze stale-socket case (~3 s for the WiFi/4G
         // stack to stabilise) without making real outages drag on.
         const val MAX_CONNECT_ATTEMPTS = 3
-
-        // Heurística "Kiwi acaba de despedirse" tras response.end.
-        // El prompt instruye respuestas de 1-3 palabras al cierre, así
-        // que un cap superior generoso (5 palabras) atrapa "Vale,
-        // hasta luego" sin pillar respuestas largas que casualmente
-        // contengan "vale".
-        const val FAREWELL_MAX_WORDS = 5
-        val FAREWELL_KEYWORDS = setOf(
-            "hasta luego",
-            "hasta pronto",
-            "hasta mañana",
-            "adiós",
-            "adios",
-            "buenas noches",
-            "buen día",
-            "buenas",
-            "chao",
-            "chau",
-            "nos vemos",
-            "que descanses",
-            "que vaya bien",
-        )
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
         // PlaylistList / TodoList / AlarmList / ShoppingList /

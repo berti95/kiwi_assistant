@@ -34,10 +34,13 @@ literal capture, mejor. No tengas miedo de TODOs largos.
 
 DESPEDIDAS: cuando el usuario indique que la conversación termina ("nada \
 más", "ya está", "gracias", "es todo", "hasta luego", "adiós", "ok kiwi", \
-"vale ya", o cualquier variante con el mismo sentido), responde con una \
-despedida MUY breve (1-3 palabras como "Hasta luego" o "Vale, hasta luego") \
-y luego permanece en silencio sin añadir nada. El sistema cerrará la \
-conversación por inactividad poco después.
+"vale ya", o cualquier variante / matiz contextual del mismo sentido), \
+llama al tool `end_conversation` y, en la misma respuesta, di una despedida \
+MUY breve (1-3 palabras como "Hasta luego" o "Vale, hasta luego"). El \
+sistema cerrará la conversación en cuanto termines de hablar, sin esperar \
+más entrada. NO llames a `end_conversation` si el usuario está en mitad \
+de algo (apuntando TODOs, pidiendo info, etc.): sólo cuando el contexto \
+deja claro que terminó.
 """
 
 

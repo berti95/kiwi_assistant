@@ -114,6 +114,18 @@ def gemini_tools() -> list[types.Tool]:
     ]
 
 
+class SessionEndRequested(RuntimeError):  # noqa: N818  — semantic name fits better than EndError
+    """Una tool ha decidido que la conversación termina.
+
+    Lanzada por p.ej. ``end_conversation``. ``dispatch`` la re-lanza
+    intencionadamente (no la convierte en ``{"error": ...}``) para que
+    el caller — ``gemini.proxy`` — la capture y cierre el WS tras
+    terminar este turno. El control de cierre vive en el caller, no
+    en la tool, para que Gemini pueda terminar de hablar antes de que
+    el proxy salga del bucle.
+    """
+
+
 async def dispatch(
     name: str,
     args: dict[str, Any] | None,
@@ -128,7 +140,10 @@ async def dispatch(
 
     Errors are caught and returned as ``{"error": "..."}`` so Gemini
     can communicate the problem back to the user instead of the proxy
-    crashing mid-turn.
+    crashing mid-turn. ``SessionEndRequested`` se re-lanza
+    intencionadamente: indica un fin de sesión solicitado por la
+    propia conversación (vía la tool ``end_conversation``) y el
+    caller la maneja.
     """
     args = args or {}
     tool = _REGISTRY.get(name)
@@ -139,6 +154,8 @@ async def dispatch(
         result = tool.handler(**args)
         if inspect.isawaitable(result):
             result = await result
+    except SessionEndRequested:
+        raise
     except Exception as exc:  # noqa: BLE001  — we surface anything to the LLM
         log.exception("tool %r raised", name)
         return {"error": f"{type(exc).__name__}: {exc}"}
@@ -2216,6 +2233,38 @@ async def _usage_stats(period: str = "today") -> ToolResult:
         response=payload,
         scene={"type": "usage_stats", **payload},
     )
+
+
+async def _end_conversation() -> dict[str, Any]:
+    """Marca la conversación para cierre tras este turno.
+
+    No cerramos aquí mismo: lanzamos [SessionEndRequested] que
+    [dispatch] re-lanza al caller (gemini.proxy). El proxy deja que
+    Gemini termine de hablar y luego rompe el bucle, así Kiwi puede
+    decir "hasta luego" sin que el WS se corte a media frase.
+    """
+    raise SessionEndRequested()
+
+
+register(
+    name="end_conversation",
+    description=(
+        "Termina la conversación con el usuario. Llama a este tool "
+        "cuando entiendas que el usuario quiere acabar: 'nada más', "
+        "'ya está', 'gracias', 'es todo', 'hasta luego', 'adiós', "
+        "'vale ya', 'ok kiwi', o cualquier matiz contextual que "
+        "indique cierre (también un agradecimiento final, una "
+        "despedida implícita, etc.). Después de llamarlo, di una "
+        "despedida MUY breve (1-3 palabras como 'Hasta luego' o "
+        "'Vale, hasta luego') y para. El sistema cerrará la "
+        "conversación tras tu respuesta sin esperar más entrada. "
+        "NO llames a este tool si el usuario está en mitad de algo "
+        "(añadiendo TODOs, pidiendo info, etc.) — sólo cuando el "
+        "contexto deja claro que terminó."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_end_conversation,
+)
 
 
 register(

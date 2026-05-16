@@ -131,7 +131,7 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                     await gemini_session.send_realtime_input(
                         activity_start=types.ActivityStart(),
                     )
-                    user_text, kiwi_text = await asyncio.wait_for(
+                    user_text, kiwi_text, end_requested = await asyncio.wait_for(
                         _run_one_turn(ws, gemini_session, turn_index, stats),
                         timeout=_PER_TURN_HARD_TIMEOUT_S,
                     )
@@ -139,6 +139,13 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                         {"user": user_text.strip(), "kiwi": kiwi_text.strip()},
                     )
                     stats.turn_count += 1
+                    if end_requested:
+                        log.info(
+                            "turn %d: end_conversation tool fired → "
+                            "closing WS tras este turno",
+                            turn_index,
+                        )
+                        return
             except _TurnCancelledError:
                 log.info("turn %d: cancelled by tablet (no speech)", turn_index)
                 # Drop the upstream session, keep the WebSocket open,
@@ -284,18 +291,21 @@ async def _run_one_turn(
     gemini_session,
     turn_index: int,
     stats: usage.ProxyStats,
-) -> tuple[str, str]:
+) -> tuple[str, str, bool]:
     """Drive one user turn against the current Gemini session.
 
-    Returns ``(user_transcript, kiwi_transcript)`` so the proxy loop
-    can append them to the conversation history that will be threaded
-    into the next session's system instruction. Acumula contadores en
-    ``stats`` para el log de uso al cerrar la conversación.
+    Returns ``(user_transcript, kiwi_transcript, end_requested)``:
+    los dos primeros sirven para enhebrar la conversación en el
+    siguiente system_instruction; el tercero indica si alguna tool
+    pidió cerrar la sesión (vía ``end_conversation``), señal que
+    el caller usa para romper el bucle tras terminar el turno.
+    Acumula contadores en ``stats`` para el log de uso al cerrar.
     """
     user_text_parts: list[str] = []
     kiwi_text_parts: list[str] = []
     audio_chunks_in = 0
     audio_bytes_out = 0
+    end_requested = False
 
     async def tablet_to_gemini() -> None:
         nonlocal audio_chunks_in
@@ -336,7 +346,7 @@ async def _run_one_turn(
                 raise _SessionEndError()
 
     async def gemini_to_tablet() -> None:
-        nonlocal audio_bytes_out
+        nonlocal audio_bytes_out, end_requested
         first_chunk_logged = False
         async for response in gemini_session.receive():
             audio = getattr(response, "data", None)
@@ -358,9 +368,11 @@ async def _run_one_turn(
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call is not None:
-                await _handle_tool_call(
+                nonlocal_end = await _handle_tool_call(
                     ws, gemini_session, tool_call, turn_index, stats,
                 )
+                if nonlocal_end:
+                    end_requested = True
 
             sc = getattr(response, "server_content", None)
             if sc is None:
@@ -405,7 +417,7 @@ async def _run_one_turn(
     # bit). Output: 24 kHz mono 16-bit = 48 000 bytes por segundo.
     stats.audio_in_seconds += audio_chunks_in * 0.05
     stats.audio_out_seconds += audio_bytes_out / 48_000.0
-    return "".join(user_text_parts), "".join(kiwi_text_parts)
+    return "".join(user_text_parts), "".join(kiwi_text_parts), end_requested
 
 
 async def _handle_tool_call(
@@ -414,8 +426,13 @@ async def _handle_tool_call(
     tool_call,
     turn_index: int,
     stats: usage.ProxyStats,
-) -> None:
+) -> bool:
     """Run each requested tool and ship the responses back to Gemini.
+
+    Returns True si alguna tool pidió cerrar la conversación (lanzó
+    ``SessionEndRequested``). El caller espera a ``turn_complete``
+    para que Gemini termine de hablar y luego rompe el bucle —
+    nunca se corta a media frase.
 
     Gemini batches function calls into a single ``tool_call`` event
     even when only one is requested, so we always iterate. The dispatch
@@ -429,7 +446,7 @@ async def _handle_tool_call(
     """
     function_calls = list(getattr(tool_call, "function_calls", None) or [])
     if not function_calls:
-        return
+        return False
 
     async def scene_sink(scene: dict) -> None:
         log.info("turn %d: scene push type=%r", turn_index, scene.get("type"))
@@ -438,6 +455,7 @@ async def _handle_tool_call(
             {"type": protocol.TYPE_SCENE_SET, "scene": scene},
         )
 
+    end_session_after_turn = False
     responses: list[types.FunctionResponse] = []
     for fc in function_calls:
         name = fc.name or ""
@@ -445,7 +463,14 @@ async def _handle_tool_call(
         log.info("turn %d: tool call %r args=%r", turn_index, name, args)
         if name:
             stats.tool_call_names.append(name)
-        result = await tools.dispatch(name, args, on_scene=scene_sink)
+        try:
+            result = await tools.dispatch(name, args, on_scene=scene_sink)
+        except tools.SessionEndRequested:
+            log.info("turn %d: tool %r requested session end", turn_index, name)
+            end_session_after_turn = True
+            # Damos a Gemini un response neutro para que cierre la
+            # function-call y siga generando la despedida hablada.
+            result = {"ended": True}
         log.info("turn %d: tool %r result=%r", turn_index, name, result)
         responses.append(
             types.FunctionResponse(
@@ -463,6 +488,7 @@ async def _handle_tool_call(
             ),
         )
     await gemini_session.send_tool_response(function_responses=responses)
+    return end_session_after_turn
 
 
 async def _safe_send(ws: WebSocket, payload: dict) -> None:
