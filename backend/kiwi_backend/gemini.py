@@ -25,6 +25,8 @@ import asyncio
 import base64
 import logging
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
@@ -32,6 +34,11 @@ from google.genai import types
 
 from . import protocol, tools, usage
 from .settings import Settings
+
+# Mismo TZ que usan las tools de calendario / agenda; mantener
+# alineado para que Gemini razone con una sola "hora actual"
+# coherente entre el system prompt y los tools.
+_DEFAULT_TZ = "Europe/Madrid"
 
 log = logging.getLogger(__name__)
 
@@ -190,25 +197,57 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
                 log.exception("usage.log_conversation failed")
 
 
+_SPANISH_WEEKDAYS = [
+    "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo",
+]
+_SPANISH_MONTHS = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _now_line() -> str:
+    """Frase con la hora local actual, embebida en el system prompt.
+
+    Le ahorra a Gemini llamar a ``get_current_time`` para responder
+    cosas tan triviales como "qué hora es", "qué día es hoy" o para
+    razonar sobre tiempos relativos ("mañana a las 7" → fecha exacta).
+    Se construye por turno porque rotamos sesión Gemini cada turno,
+    así la hora siempre está fresca.
+    """
+    now = datetime.now(ZoneInfo(_DEFAULT_TZ))
+    weekday = _SPANISH_WEEKDAYS[now.weekday()]
+    month = _SPANISH_MONTHS[now.month - 1]
+    return (
+        "Momento actual: "
+        f"{weekday} {now.day} de {month} de {now.year}, "
+        f"{now.strftime('%H:%M')} hora local ({_DEFAULT_TZ}). "
+        "Si el usuario pregunta por la hora o el día, responde a partir "
+        "de esto sin llamar a ningún tool."
+    )
+
+
 def _build_config(
     settings: Settings,
     history: list[dict[str, str]],
 ) -> types.LiveConnectConfig:
     """Build a per-turn LiveConnectConfig with the prior turns inlined."""
     base_prompt = settings.gemini_system_prompt
+    now_line = _now_line()
     if history:
         formatted = "\n\n".join(
             f"Usuario: {h['user']}\nKiwi: {h['kiwi']}" for h in history
         )
         system_text = (
             f"{base_prompt}\n\n"
+            f"{now_line}\n\n"
             f"Hasta ahora la conversación con el usuario en esta misma "
             f"sesión ha sido:\n\n{formatted}\n\n"
             f"Continúa la conversación con coherencia, recordando lo "
             f"anterior, sin saludarle de nuevo ni presentarte otra vez."
         )
     else:
-        system_text = base_prompt
+        system_text = f"{base_prompt}\n\n{now_line}"
 
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
