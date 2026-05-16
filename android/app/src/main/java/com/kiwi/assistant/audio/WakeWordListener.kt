@@ -5,6 +5,9 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import com.kiwi.assistant.log.KLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -16,27 +19,43 @@ import kotlinx.coroutines.withContext
 /**
  * Owns the microphone while the app is in the Idle state and listens
  * continuously for the wake word, firing [onDetected] when openWakeWord
- * crosses the threshold for [debounceFrames] consecutive ~80 ms windows.
+ * crosses the **per-model** threshold for [debounceFrames] consecutive
+ * ~80 ms windows.
  *
  * Audio resource model: only one [AudioRecord] can be active for the
  * same source at a time, so the ViewModel must call [stop] before
  * starting [AudioCaptureManager] for a Kiwi session, and call [start]
  * again once the session ends.
  *
- * Lifecycle: detector + recorder are created on [start] and released
- * on [stop]. The detector's ONNX models load ~3 MB on first start;
- * subsequent starts re-load them but it's still <100 ms on the
- * Pixel Tablet so we keep the lifecycle simple.
+ * Lifecycle: detector + recorder + audio effects are created on
+ * [start] and released on [stop]. The detector's ONNX models load ~3
+ * MB on first start; subsequent starts re-load them but it's still
+ * <100 ms on the Pixel Tablet so we keep the lifecycle simple.
  */
 class WakeWordListener(
     private val context: Context,
+    /**
+     * Default threshold used when a model isn't listed in
+     * [perModelThresholds]. ~0.4 was the safe global level when both
+     * heads were noisy; ahora cada uno tiene su propio nivel óptimo
+     * en función de su distribución observada en producción.
+     */
     private val threshold: Float = DEFAULT_THRESHOLD,
+    /**
+     * Override por modelo. `alexa` baja a 0.3 porque su distribución
+     * es bimodal limpia (ruido <0.1, hits ≥0.9) y subir el listón
+     * estaba comiendo invocaciones legítimas que se quedaban en
+     * 0.35-0.4. `kiwi` se queda en el global hasta que se reentrene
+     * con voces reales — bajarlo ahora sólo metería falsos positivos.
+     */
+    private val perModelThresholds: Map<String, Float> = mapOf("alexa" to 0.3f),
     private val debounceFrames: Int = DEFAULT_DEBOUNCE_FRAMES,
 ) {
 
     private var job: Job? = null
     private var recorder: AudioRecord? = null
     private var detector: WakeWordDetector? = null
+    private val activeEffects = mutableListOf<AudioEffect>()
 
     @Volatile private var stopRequested = false
 
@@ -72,22 +91,51 @@ class WakeWordListener(
             return false
         }
 
+        // Audio effects: si el dispositivo los soporta, los aplicamos
+        // al AudioSession. NoiseSuppressor recorta ruido de fondo
+        // (lavadora, TV) y AutomaticGainControl empuja la señal
+        // cuando el usuario habla bajo o lejos. Ambos mejoran lo que
+        // llega al modelo sin tocar ONNX. Si el OEM no los expone se
+        // sigue funcionando sin ellos.
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(rec.audioSessionId) }
+                .getOrNull()?.let { fx ->
+                    fx.enabled = true
+                    activeEffects.add(fx)
+                    KLog.i(TAG, "NoiseSuppressor enabled")
+                }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            runCatching { AutomaticGainControl.create(rec.audioSessionId) }
+                .getOrNull()?.let { fx ->
+                    fx.enabled = true
+                    activeEffects.add(fx)
+                    KLog.i(TAG, "AutomaticGainControl enabled")
+                }
+        }
+
         val det = try {
             WakeWordDetector(context)
         } catch (e: Exception) {
             KLog.e(TAG, "Failed to initialise WakeWordDetector", e)
             rec.release()
+            releaseEffects()
             return false
         }
 
         recorder = rec
         detector = det
         rec.startRecording()
-        KLog.i(TAG, "Wake-word listener started (threshold=$threshold)")
+        KLog.i(
+            TAG,
+            "Wake-word listener started (default=$threshold, " +
+                "per-model=$perModelThresholds)",
+        )
 
         job = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(CHUNK_SAMPLES)
             var aboveThreshold = 0
+            var winnerModel: String? = null
             // Track the peak per model so the periodic log shows
             // which classifier is responsible (kiwi vs alexa).
             val peakPerModel = mutableMapOf<String, Float>()
@@ -124,14 +172,30 @@ class WakeWordListener(
                         lastPeakLogMs = now
                     }
 
-                    val maxScore = scores.max
-                    if (maxScore >= threshold) {
-                        aboveThreshold += 1
+                    // Per-model threshold: cada head pasa su propio
+                    // listón. El "ganador" es el primer modelo que
+                    // pasa su threshold; si dos modelos pasan a la
+                    // vez, gana el de mayor score absoluto.
+                    val triggered = scores.perModel.entries
+                        .filter { (name, score) ->
+                            score >= (perModelThresholds[name] ?: threshold)
+                        }
+                        .maxByOrNull { it.value }
+                    if (triggered != null) {
+                        if (winnerModel != triggered.key) {
+                            // Cambió el ganador entre frames consecutivos —
+                            // reset del debounce para no contar ráfagas
+                            // de modelos distintos como una sola detección.
+                            aboveThreshold = 1
+                            winnerModel = triggered.key
+                        } else {
+                            aboveThreshold += 1
+                        }
                         if (aboveThreshold >= debounceFrames) {
                             KLog.i(
                                 TAG,
-                                "Wake word DETECTED (winner=${scores.winner}, " +
-                                    "score=${"%.3f".format(maxScore)})",
+                                "Wake word DETECTED (winner=${triggered.key}, " +
+                                    "score=${"%.3f".format(triggered.value)})",
                             )
                             // Release the mic + ONNX sessions BEFORE
                             // notifying the caller so the session
@@ -150,6 +214,7 @@ class WakeWordListener(
                         }
                     } else {
                         aboveThreshold = 0
+                        winnerModel = null
                     }
                 }
             } catch (e: CancellationException) {
@@ -178,6 +243,16 @@ class WakeWordListener(
         recorder = null
         detector?.let { runCatching { it.close() } }
         detector = null
+        releaseEffects()
+    }
+
+    @Synchronized
+    private fun releaseEffects() {
+        for (fx in activeEffects) {
+            runCatching { fx.enabled = false }
+            runCatching { fx.release() }
+        }
+        activeEffects.clear()
     }
 
     fun stop() {
@@ -199,14 +274,9 @@ class WakeWordListener(
         // hop. Anything else still works (the detector buffers) but
         // this minimises end-to-end latency.
         const val CHUNK_SAMPLES = 1_280
-        // Probability above which we count the frame as a "yes". The
-        // openWakeWord README suggests 0.5 as a sane default; we run
-        // a notch lower because in practice 0.5 was missing too many
-        // legitimate "hola/hey/oye/eh kiwi" especially when the user
-        // is more than ~1 m from the dock or speaks softly. The
-        // 2-frame debounce below already filters out single-frame
-        // spikes, so dropping the threshold without raising the
-        // debounce keeps false positives in check.
+        // Probability above which we count the frame as a "yes" para
+        // el fallback global. Los modelos con override propio (alexa
+        // = 0.3) usan el suyo; el resto (kiwi de momento) este.
         const val DEFAULT_THRESHOLD = 0.4f
         // Single-frame triggers used to be filtered out by a 2-frame
         // debounce, but real-world testing showed that ~30 % of
