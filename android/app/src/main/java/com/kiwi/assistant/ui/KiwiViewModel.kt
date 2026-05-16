@@ -1,6 +1,7 @@
 package com.kiwi.assistant.ui
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
@@ -753,6 +754,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            is KiwiSessionEvent.DeviceCommand -> {
+                KLog.i(
+                    TAG,
+                    "device_command: ${event.command} pkg=${event.packageName}",
+                )
+                handleDeviceCommand(event)
+            }
+
             KiwiSessionEvent.ResponseEnd -> {
                 if (isPassiveConsumptionScene(_scene.value)) {
                     // The user just told Kiwi to play something
@@ -915,6 +924,57 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * Ejecuta un comando enviado por una tool (despertar Spotify,
+     * subir volumen, etc.). Patrón Waze: lanza un Intent al app
+     * target, espera unos segundos para que el SO acabe el
+     * cambio, y vuelve automáticamente a Kiwi en foreground para
+     * que la conversación siga viva.
+     *
+     * Defensivo: si el paquete no está instalado o startActivity
+     * falla, log + sigue. La conversación no se rompe; en el peor
+     * caso Kiwi le dirá al usuario que abra la app a mano.
+     */
+    private fun handleDeviceCommand(event: KiwiSessionEvent.DeviceCommand) {
+        when (event.command) {
+            "open_app_then_return" -> {
+                val pkg = event.packageName ?: return
+                openAppAndReturnToKiwi(pkg)
+            }
+            else -> KLog.w(TAG, "unknown device_command: ${event.command}")
+        }
+    }
+
+    private fun openAppAndReturnToKiwi(packageName: String) {
+        val ctx = getApplication<Application>().applicationContext
+        val pm = ctx.packageManager
+        val launchIntent = pm.getLaunchIntentForPackage(packageName)
+        if (launchIntent == null) {
+            KLog.w(TAG, "package $packageName not installed; cannot launch")
+            return
+        }
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { ctx.startActivity(launchIntent) }.onFailure {
+            KLog.w(TAG, "startActivity($packageName) failed: ${it.message}")
+            return
+        }
+        // Tras un breve delay, volvemos a Kiwi en foreground para
+        // que la conversación (que sigue activa) no se quede
+        // atrapada detrás de la app que acabamos de lanzar. El
+        // backend está esperando ~4 s para reintentar el play, así
+        // que con 2 s nos da tiempo a que Spotify se registre como
+        // Connect device y aún terminamos antes del retry.
+        viewModelScope.launch {
+            delay(RETURN_TO_KIWI_DELAY_MS)
+            val kiwiIntent = pm.getLaunchIntentForPackage(ctx.packageName)
+            kiwiIntent?.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+            )
+            runCatching { kiwiIntent?.let { ctx.startActivity(it) } }
+        }
+    }
+
+    /**
      * Whether the active scene is one where the user is consuming
      * media passively and we should NOT keep listening after Kiwi's
      * response. Add new scenes here when they become "media-playing"
@@ -1004,6 +1064,16 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // typical post-Doze stale-socket case (~3 s for the WiFi/4G
         // stack to stabilise) without making real outages drag on.
         const val MAX_CONNECT_ATTEMPTS = 3
+
+        // Tras un device_command tipo "open_app_then_return" lanzamos
+        // la app target con un Intent y, transcurrido este delay,
+        // volvemos a Kiwi en foreground. El backend que disparó el
+        // comando suele esperar ~4 s antes de reintentar la acción
+        // (p.ej. spotify_play tras despertar Spotify); 2 s da
+        // tiempo a que la app target se inicialice + se registre
+        // (como Connect device en Spotify) sin alargar la
+        // experiencia del usuario.
+        const val RETURN_TO_KIWI_DELAY_MS = 2_000L
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
         // PlaylistList / TodoList / AlarmList / ShoppingList /

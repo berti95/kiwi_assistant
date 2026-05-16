@@ -48,6 +48,18 @@ sealed interface KiwiSessionEvent {
      * Carries the parsed [Scene] ready for the ViewModel to set.
      */
     data class SceneSet(val scene: Scene) : KiwiSessionEvent
+
+    /**
+     * Comando de dispositivo enviado por una tool ("abre Spotify",
+     * "sube el volumen", etc.). Llega por el mismo canal que las
+     * escenas pero NO se renderiza — el ViewModel decide qué hacer
+     * según [command] / [package].
+     */
+    data class DeviceCommand(
+        val command: String,
+        val packageName: String?,
+    ) : KiwiSessionEvent
+
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
 
     /**
@@ -219,6 +231,20 @@ class KiwiSession(
             Protocol.TYPE_SCENE_SET -> {
                 val sceneObj = (obj["scene"] as? JsonObject) ?: run {
                     KLog.w(TAG, "scene.set without scene payload")
+                    return
+                }
+                // Algunos "scene" payloads son en realidad device
+                // commands (despertar app de Spotify, ajustar volumen,
+                // etc.) — no renderizan nada, sólo disparan una
+                // acción local. Los desviamos a un evento distinto
+                // para que el ViewModel decida.
+                if (sceneObj.string("type") == "device_command") {
+                    val command = sceneObj.string("command") ?: run {
+                        KLog.w(TAG, "device_command without 'command' field")
+                        return
+                    }
+                    val pkg = sceneObj.string("package")
+                    onEvent(KiwiSessionEvent.DeviceCommand(command, pkg))
                     return
                 }
                 parseScene(sceneObj)?.let { onEvent(KiwiSessionEvent.SceneSet(it)) }

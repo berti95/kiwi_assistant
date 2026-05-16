@@ -1102,6 +1102,99 @@ def test_spotify_transfer_to_no_match_returns_error(monkeypatch) -> None:
     assert "error" in result
 
 
+# ---- spotify_play auto-wake ---------------------------------------
+
+
+def test_spotify_play_auto_wakes_when_no_device(monkeypatch) -> None:
+    """1ª llamada falla con 'no active device' → push device_command
+    + sleep + retry. 2ª llamada éxito → resultado feliz."""
+    calls: list[tuple[str | None, str | None]] = []
+
+    def fake_blocking(uri, query):
+        calls.append((uri, query))
+        if len(calls) == 1:
+            return (
+                {"error": "no active spotify device. Abre Spotify…"},
+                None,
+            )
+        return (
+            {"started": "spotify:track:abc", "track": {}},
+            {"type": "now_playing", "title": "X", "artist": "Y",
+             "album": "", "album_art_url": None, "is_playing": True,
+             "duration_ms": 0, "progress_ms": 0},
+        )
+
+    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+    # Skip the 4 s wait — el test no quiere esperar de verdad.
+    monkeypatch.setattr(tools.asyncio, "sleep", _async_noop)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("spotify_play", {"query": "música"}, on_scene=sink),
+    )
+
+    assert len(calls) == 2, "should retry after waking"
+    assert pushed[0]["type"] == "device_command"
+    assert pushed[0]["command"] == "open_app_then_return"
+    assert pushed[0]["package"] == "com.spotify.music"
+    assert "started" in result
+
+
+def test_spotify_play_no_wake_if_first_call_succeeds(monkeypatch) -> None:
+    """Si la 1ª llamada va bien, no se empuja device_command."""
+    calls: list[int] = []
+
+    def fake_blocking(uri, query):  # noqa: ARG001
+        calls.append(1)
+        return (
+            {"started": "spotify:track:abc", "track": {}},
+            None,
+        )
+
+    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("spotify_play", {"query": "x"}, on_scene=sink),
+    )
+
+    assert len(calls) == 1
+    assert pushed == []  # no device_command
+    assert "started" in result
+
+
+def test_spotify_play_no_wake_when_sink_missing(monkeypatch) -> None:
+    """Sin sink (cliente sin recibir scenes), no intentamos despertar
+    para no quedarnos colgados esperando."""
+    calls: list[int] = []
+
+    def fake_blocking(uri, query):  # noqa: ARG001
+        calls.append(1)
+        return ({"error": "no active spotify device"}, None)
+
+    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+    # Sleep should NOT be called — protege contra el caso de que
+    # alguien añada wake en un path sin sink.
+    monkeypatch.setattr(tools.asyncio, "sleep", _async_noop)
+
+    result = _run(tools.dispatch("spotify_play", {"query": "x"}))
+
+    assert len(calls) == 1
+    assert "error" in result
+
+
+async def _async_noop(*_args, **_kwargs) -> None:
+    return None
+
+
 # ---- alarm tools ---------------------------------------------------
 
 

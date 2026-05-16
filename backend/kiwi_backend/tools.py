@@ -146,12 +146,26 @@ async def dispatch(
     caller la maneja.
     """
     args = args or {}
+    # Defensive: el modelo no debería incluir on_scene como argumento
+    # (no está en su schema) pero filtrarlo evita que un input
+    # malicioso pueda inyectarlo y suplantar nuestro sink.
+    args.pop("on_scene", None)
     tool = _REGISTRY.get(name)
     if tool is None:
         log.warning("unknown tool requested: %r", name)
         return {"error": f"unknown tool: {name}"}
     try:
-        result = tool.handler(**args)
+        # Si el handler declara ``on_scene`` (sólo unas pocas tools
+        # lo necesitan para orquestar push+espera+retry dentro de
+        # una misma llamada — p.ej. spotify_play despierta Spotify
+        # en el tablet antes de reintentar), se lo inyectamos aquí.
+        # El resto de handlers no lo declaran y por tanto no lo
+        # reciben — siguen siendo funciones puras de sus args.
+        call_args = dict(args)
+        sig = inspect.signature(tool.handler)
+        if on_scene is not None and "on_scene" in sig.parameters:
+            call_args["on_scene"] = on_scene
+        result = tool.handler(**call_args)
         if inspect.isawaitable(result):
             result = await result
     except SessionEndRequested:
@@ -1267,11 +1281,51 @@ def _spotify_play_blocking(
     return {"started": target_uri, "track": track_meta}, scene
 
 
+_SPOTIFY_PACKAGE = "com.spotify.music"
+_SPOTIFY_WAKE_DELAY_S = 4.0
+
+
+def _looks_like_no_active_device(response: dict[str, Any]) -> bool:
+    err = str(response.get("error") or "").lower()
+    return "no active" in err and "device" in err
+
+
 async def _spotify_play(
     uri: str | None = None,
     query: str | None = None,
+    *,
+    on_scene: SceneSink | None = None,
 ) -> ToolResult:
+    """Reproduce algo en Spotify; si no hay device activo, "despierta"
+    la app de Spotify en el tablet y reintenta una vez.
+
+    El flow auto-wake imita lo que hace Waze: si no hay nadie
+    escuchando, le pedimos al tablet que lance la app de Spotify
+    (Intent ``launchIntentForPackage``), esperamos a que Spotify se
+    registre como Connect device (~3-4 s), y volvemos a reproducir.
+    El cliente además vuelve a Kiwi en foreground tras un breve
+    delay para que la conversación siga viva.
+
+    Una sola llamada a la tool orquesta todo, así que Kiwi sólo
+    habla una vez (con el resultado final) en lugar de pedir al
+    usuario que abra Spotify a mano.
+    """
     response, scene = await asyncio.to_thread(_spotify_play_blocking, uri, query)
+
+    if _looks_like_no_active_device(response) and on_scene is not None:
+        log.info("spotify_play: no active device → waking Spotify on tablet")
+        try:
+            await on_scene({
+                "type": "device_command",
+                "command": "open_app_then_return",
+                "package": _SPOTIFY_PACKAGE,
+            })
+        except Exception:  # noqa: BLE001
+            log.exception("device_command push failed")
+        await asyncio.sleep(_SPOTIFY_WAKE_DELAY_S)
+        log.info("spotify_play: retrying after wake")
+        response, scene = await asyncio.to_thread(_spotify_play_blocking, uri, query)
+
     return ToolResult(response=response, scene=scene)
 
 

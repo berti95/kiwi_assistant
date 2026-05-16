@@ -22,6 +22,16 @@
     <uses-permission android:name="android.permission.INSTALL_PACKAGES"
         tools:ignore="ProtectedPermissions" />
 
+    <!--
+      Android 11+ requiere declarar visibilidad de paquetes terceros
+      que vayamos a lanzar con PackageManager.getLaunchIntentForPackage.
+      Sin esto, la llamada devuelve null aunque la app esté instalada.
+      Añadir aquí cada paquete que orquestamos vía device_command.
+    -->
+    <queries>
+        <package android:name="com.spotify.music" />
+    </queries>
+
     <application
         android:name=".KiwiApplication"
         android:allowBackup="false"
