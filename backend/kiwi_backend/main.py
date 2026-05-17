@@ -1,12 +1,17 @@
 import asyncio
 import logging
+import secrets
+import time
 from datetime import UTC, datetime
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket
+import requests
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import alarms, log_buffer, shopping, timer, todos, tools, usage, weather
+from . import alarms, google_auth, log_buffer, shopping, timer, todos, tools, usage, weather
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -202,8 +207,11 @@ async def get_home(token: str = "") -> dict[str, object]:
     """
     _require_dev_token(token)
 
-    # Calendar: today's events.
+    # Calendar: today's events. Errors surface to the tablet so it
+    # can show "Agenda no disponible" instead of pretending the day
+    # is empty (silent degradation hid OAuth revocations for days).
     events_today: list[dict] = []
+    events_today_error: str | None = None
     try:
         creds = await asyncio.to_thread(tools.google_auth.credentials)
         tz = ZoneInfo(tools.DEFAULT_TIMEZONE)
@@ -214,7 +222,13 @@ async def get_home(token: str = "") -> dict[str, object]:
             events_today = await asyncio.to_thread(
                 tools._list_events_blocking, creds, time_min, time_max, 10,
             )
+    except tools.google_auth.GoogleAuthUnavailableError as exc:
+        events_today_error = str(exc)
+        logging.getLogger(__name__).info(
+            "home: calendar unavailable (auth): %s", exc,
+        )
     except Exception as exc:  # noqa: BLE001
+        events_today_error = f"{type(exc).__name__}: {exc}"
         logging.getLogger(__name__).info(
             "home: calendar unavailable: %s: %s", type(exc).__name__, exc,
         )
@@ -273,6 +287,7 @@ async def get_home(token: str = "") -> dict[str, object]:
 
     return {
         "events_today": events_today,
+        "events_today_error": events_today_error,
         "todos": todo_items,
         "now_playing": now_playing,
         "weather": current_weather,
@@ -367,6 +382,187 @@ async def snooze_alarm(
         "fires_at_ms": updated.fires_at_ms,
         "items": alarms.to_wire(items),
     }
+
+
+# ---------- Google OAuth web flow -----------------------------------
+#
+# Cuando el refresh token de Google caduca / se revoca, el backend
+# se queda sin agenda (y sin tools de Calendar/YouTube). Antes había
+# que correr ``tools/oauth-bootstrap/`` en local; ahora ofrecemos
+# un flujo web que el usuario abre en cualquier navegador (incluido
+# el del tablet, vía el botón "Renovar Google").
+#
+# Flujo:
+#   GET /oauth/google/start?token=DEV  → redirige a accounts.google.com
+#   GET /oauth/google/callback?code=…  → intercambia, guarda en GCS
+#
+# La pieza sensible es que Google exige que ``redirect_uri`` esté
+# pre-registrada en la consola del OAuth client. Hay que añadir
+# ``https://<cloud-run-url>/oauth/google/callback`` a Authorized
+# redirect URIs del client_secret.json original.
+
+_OAUTH_STATES: dict[str, float] = {}
+_OAUTH_STATE_TTL_S = 600.0  # 10 min
+
+
+def _prune_oauth_states() -> None:
+    """Drop expired entries so the in-memory dict no crece sin parar."""
+    now = time.time()
+    expired = [k for k, ts in _OAUTH_STATES.items() if now - ts > _OAUTH_STATE_TTL_S]
+    for k in expired:
+        _OAUTH_STATES.pop(k, None)
+
+
+@app.get("/oauth/google/start")
+async def oauth_google_start(token: str = "", request: Request = None):  # type: ignore[assignment]
+    """Inicia el flujo OAuth — redirige al consent de Google."""
+    _require_dev_token(token)
+    try:
+        cfg = google_auth.client_config()
+    except google_auth.GoogleAuthUnavailableError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    _prune_oauth_states()
+    state = secrets.token_urlsafe(24)
+    _OAUTH_STATES[state] = time.time()
+
+    base_url = str(request.base_url).rstrip("/") if request is not None else ""
+    redirect_uri = f"{base_url}/oauth/google/callback"
+    auth_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
+    params = {
+        "client_id": cfg["client_id"],
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": " ".join(cfg["scopes"]),
+        # ``access_type=offline`` + ``prompt=consent`` fuerza a Google
+        # a emitir refresh_token incluso si el usuario ya había dado
+        # consent antes — sin esto el callback recibe access_token
+        # pero no refresh_token, que es justo lo que necesitamos.
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    return RedirectResponse(f"{auth_endpoint}?{urlencode(params)}")
+
+
+@app.get("/oauth/google/callback")
+async def oauth_google_callback(
+    code: str = "", state: str = "", error: str = "", request: Request = None,  # type: ignore[assignment]
+):
+    """Recibe el code de Google, lo intercambia y guarda el bundle."""
+    if error:
+        return HTMLResponse(
+            _oauth_html("Error de Google", f"Google devolvió un error: {error}"),
+            status_code=400,
+        )
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="missing code/state")
+    _prune_oauth_states()
+    if _OAUTH_STATES.pop(state, None) is None:
+        raise HTTPException(status_code=400, detail="invalid or expired state")
+
+    try:
+        cfg = google_auth.client_config()
+    except google_auth.GoogleAuthUnavailableError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    base_url = str(request.base_url).rstrip("/") if request is not None else ""
+    redirect_uri = f"{base_url}/oauth/google/callback"
+    try:
+        response = await asyncio.to_thread(
+            requests.post,
+            cfg["token_uri"],
+            data={
+                "code": code,
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        return HTMLResponse(
+            _oauth_html("Error de red", f"No se pudo contactar a Google: {exc}"),
+            status_code=502,
+        )
+    if not response.ok:
+        return HTMLResponse(
+            _oauth_html(
+                "Google rechazó el code",
+                f"Status {response.status_code}: {response.text[:300]}",
+            ),
+            status_code=502,
+        )
+    payload = response.json()
+    refresh_token = payload.get("refresh_token")
+    if not refresh_token:
+        # Sin refresh_token estamos peor que antes — Google sólo lo
+        # emite cuando access_type=offline+prompt=consent y el usuario
+        # no lo había concedido antes. Surface el error en vez de
+        # guardar un bundle incompleto.
+        return HTMLResponse(
+            _oauth_html(
+                "Sin refresh_token",
+                "Google devolvió access_token pero no refresh_token. "
+                "Probable: el client no pide access_type=offline. "
+                "Revisa la configuración del OAuth client.",
+            ),
+            status_code=500,
+        )
+
+    new_bundle = {
+        "refresh_token": refresh_token,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "token_uri": cfg["token_uri"],
+        "scopes": cfg["scopes"],
+    }
+    try:
+        await asyncio.to_thread(google_auth.save_bundle, new_bundle)
+    except Exception as exc:  # noqa: BLE001
+        return HTMLResponse(
+            _oauth_html("Error guardando", f"{type(exc).__name__}: {exc}"),
+            status_code=500,
+        )
+    # Fuerza un primer refresh para que la cache quede caliente y
+    # cualquier error de credenciales malformadas explote aquí, no
+    # en el siguiente /api/home del tablet.
+    try:
+        await asyncio.to_thread(google_auth.credentials)
+    except google_auth.GoogleAuthUnavailableError as exc:
+        return HTMLResponse(
+            _oauth_html(
+                "Guardado pero refresh falló",
+                f"El bundle se persistió pero el primer refresh dio: {exc}",
+            ),
+            status_code=500,
+        )
+    return HTMLResponse(
+        _oauth_html(
+            "Listo",
+            "Refresh token renovado correctamente. Puedes cerrar esta "
+            "pestaña y volver al tablet — la agenda volverá a aparecer "
+            "en la siguiente actualización.",
+        ),
+    )
+
+
+def _oauth_html(title: str, body: str) -> str:
+    """Tiny self-contained HTML for the OAuth result page."""
+    return (
+        f"<!doctype html><html lang='es'><head><meta charset='utf-8'>"
+        f"<title>Kiwi · {title}</title>"
+        "<style>body{font-family:system-ui,sans-serif;background:#0a0a0a;"
+        "color:#eee;display:flex;min-height:100vh;align-items:center;"
+        "justify-content:center;margin:0;padding:24px;box-sizing:border-box}"
+        ".card{max-width:540px;background:#111;border:1px solid #222;"
+        "border-radius:16px;padding:32px}"
+        "h1{margin:0 0 16px;font-weight:300;font-size:32px}"
+        "p{line-height:1.5;opacity:0.85}</style></head><body>"
+        f"<div class='card'><h1>{title}</h1><p>{body}</p></div>"
+        "</body></html>"
+    )
 
 
 @app.websocket("/ws/session")

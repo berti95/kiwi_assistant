@@ -341,6 +341,10 @@ def test_get_home_happy_path_with_todos_and_no_calendar_no_spotify(
 
     body = client.get(f"/api/home?token={DEV_TOKEN}").json()
     assert body["events_today"] == []
+    # Calendar failure surfaces so the tablet shows "no disponible"
+    # en vez de fingir un día tranquilo.
+    assert body["events_today_error"] is not None
+    assert "not configured" in body["events_today_error"]
     assert [it["text"] for it in body["todos"]] == ["uno"]
     assert body["now_playing"] is None
 
