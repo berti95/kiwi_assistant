@@ -1195,6 +1195,52 @@ async def _async_noop(*_args, **_kwargs) -> None:
     return None
 
 
+# ---- set_volume tool -----------------------------------------------
+
+
+def test_set_volume_is_registered() -> None:
+    assert "set_volume" in tools.registered_names()
+
+
+def test_set_volume_absolute_pushes_device_command() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(tools.dispatch("set_volume", {"level": 50}, on_scene=sink))
+    assert result["ok"] is True
+    assert pushed[0]["type"] == "device_command"
+    assert pushed[0]["command"] == "set_volume"
+    assert pushed[0]["level"] == 50
+
+
+def test_set_volume_relative_delta_pushes_device_command() -> None:
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    _run(tools.dispatch("set_volume", {"delta": -10}, on_scene=sink))
+    assert pushed[0]["command"] == "set_volume"
+    assert pushed[0]["delta"] == -10
+    assert "level" not in pushed[0]
+
+
+def test_set_volume_no_args_returns_error() -> None:
+    result = _run(tools.dispatch("set_volume", {}))
+    assert "error" in result
+
+
+def test_set_volume_level_out_of_range() -> None:
+    assert "error" in _run(tools.dispatch("set_volume", {"level": -5}))
+    assert "error" in _run(tools.dispatch("set_volume", {"level": 150}))
+
+
+def test_set_volume_delta_out_of_range() -> None:
+    assert "error" in _run(tools.dispatch("set_volume", {"delta": 200}))
+
+
 # ---- alarm tools ---------------------------------------------------
 
 

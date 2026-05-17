@@ -53,11 +53,13 @@ sealed interface KiwiSessionEvent {
      * Comando de dispositivo enviado por una tool ("abre Spotify",
      * "sube el volumen", etc.). Llega por el mismo canal que las
      * escenas pero NO se renderiza — el ViewModel decide qué hacer
-     * según [command] / [package].
+     * según [command] y los campos opcionales que acompañan.
      */
     data class DeviceCommand(
         val command: String,
-        val packageName: String?,
+        val packageName: String? = null,
+        val level: Int? = null,
+        val delta: Int? = null,
     ) : KiwiSessionEvent
 
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
@@ -243,8 +245,16 @@ class KiwiSession(
                         KLog.w(TAG, "device_command without 'command' field")
                         return
                     }
-                    val pkg = sceneObj.string("package")
-                    onEvent(KiwiSessionEvent.DeviceCommand(command, pkg))
+                    onEvent(
+                        KiwiSessionEvent.DeviceCommand(
+                            command = command,
+                            packageName = sceneObj.string("package"),
+                            level = (sceneObj["level"] as? JsonPrimitive)
+                                ?.contentOrNull?.toIntOrNull(),
+                            delta = (sceneObj["delta"] as? JsonPrimitive)
+                                ?.contentOrNull?.toIntOrNull(),
+                        ),
+                    )
                     return
                 }
                 parseScene(sceneObj)?.let { onEvent(KiwiSessionEvent.SceneSet(it)) }

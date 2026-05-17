@@ -1,7 +1,9 @@
 package com.kiwi.assistant.ui
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
@@ -940,8 +942,56 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 val pkg = event.packageName ?: return
                 openAppAndReturnToKiwi(pkg)
             }
+            "set_volume" -> applyVolume(level = event.level, delta = event.delta)
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
+    }
+
+    /**
+     * Ajusta el volumen multimedia. `level` (0-100) gana sobre
+     * `delta` (-100..+100) si ambos vienen. Sin nada útil, no-op.
+     * El rango user-facing 0-100 se mapea a STREAM_MUSIC del SO,
+     * que típicamente va 0..maxStreamVolume (15 en Pixel) — así
+     * el usuario no tiene que pensar en "puntos del slider del SO"
+     * sino en porcentaje.
+     */
+    private fun applyVolume(level: Int?, delta: Int?) {
+        val ctx = getApplication<Application>().applicationContext
+        val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (audio == null) {
+            KLog.w(TAG, "AudioManager unavailable; volume command ignored")
+            return
+        }
+        val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) {
+            KLog.w(TAG, "STREAM_MUSIC max volume <= 0; ignoring")
+            return
+        }
+        val current = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+
+        val targetSteps: Int = when {
+            level != null -> ((level.coerceIn(0, 100) * max) + 50) / 100
+            delta != null -> {
+                val currentPct = (current * 100 + max / 2) / max
+                val newPct = (currentPct + delta).coerceIn(0, 100)
+                ((newPct * max) + 50) / 100
+            }
+            else -> return
+        }
+        runCatching {
+            audio.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                targetSteps,
+                AudioManager.FLAG_SHOW_UI,
+            )
+        }.onFailure {
+            KLog.w(TAG, "setStreamVolume($targetSteps) failed: ${it.message}")
+        }
+        KLog.i(
+            TAG,
+            "volume: ${current}/${max} → ${targetSteps}/${max} " +
+                "(level=$level, delta=$delta)",
+        )
     }
 
     private fun openAppAndReturnToKiwi(packageName: String) {

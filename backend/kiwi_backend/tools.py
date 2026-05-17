@@ -2337,6 +2337,80 @@ register(
 )
 
 
+# ---- volumen del tablet --------------------------------------------
+
+
+async def _set_volume(
+    level: int | None = None,
+    delta: int | None = None,
+    *,
+    on_scene: SceneSink | None = None,
+) -> ToolResult:
+    """Ajusta el volumen multimedia del tablet (stream MUSIC)."""
+    if level is None and delta is None:
+        return ToolResult(
+            response={"error": "pasa level (0-100) o delta (-100..+100)"},
+        )
+    if level is not None and not 0 <= int(level) <= 100:
+        return ToolResult(
+            response={"error": f"level fuera de 0-100: {level}"},
+        )
+    if delta is not None and not -100 <= int(delta) <= 100:
+        return ToolResult(
+            response={"error": f"delta fuera de -100..+100: {delta}"},
+        )
+
+    payload: dict[str, Any] = {
+        "type": "device_command",
+        "command": "set_volume",
+    }
+    if level is not None:
+        payload["level"] = int(level)
+    if delta is not None:
+        payload["delta"] = int(delta)
+
+    if on_scene is not None:
+        try:
+            await on_scene(payload)
+        except Exception:  # noqa: BLE001
+            log.exception("device_command set_volume push failed")
+    return ToolResult(response={"ok": True, **payload})
+
+
+register(
+    name="set_volume",
+    description=(
+        "Ajusta el volumen multimedia del tablet (música, vídeo, "
+        "alarmas — todo va al mismo stream). Pasa SÓLO uno de los "
+        "dos parámetros:\n"
+        "  - `level` (0-100): volumen absoluto. 0 = silencio, 100 = "
+        "máximo. Para 'silencia' / 'mute' usa level=0; para "
+        "'volumen al 50%' usa level=50.\n"
+        "  - `delta` (-100..+100): subir/bajar en puntos sobre el "
+        "valor actual. Para 'sube el volumen' usa delta=15; para "
+        "'baja un poco' usa delta=-10; para 'mucho más alto' usa "
+        "delta=30. Ajusta la magnitud al matiz del usuario."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "level": types.Schema(
+                type=types.Type.INTEGER,
+                description="Volumen absoluto 0-100. Combinable con delta=None.",
+            ),
+            "delta": types.Schema(
+                type=types.Type.INTEGER,
+                description=(
+                    "Cambio relativo en puntos (-100..+100). Positivo "
+                    "= sube, negativo = baja."
+                ),
+            ),
+        },
+    ),
+    handler=_set_volume,
+)
+
+
 register(
     name="usage_stats",
     description=(
