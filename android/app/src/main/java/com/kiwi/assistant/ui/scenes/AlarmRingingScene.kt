@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -74,7 +76,7 @@ fun AlarmRingingScene(
                 indication = null,
                 onClick = {},
             )
-            .padding(48.dp),
+            .padding(KiwiSpacing.xxl),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -86,7 +88,7 @@ fun AlarmRingingScene(
                 color = Color.White.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.headlineSmall,
             )
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(KiwiSpacing.lg - 4.dp))
             Text(
                 text = formatTime(scene.firesAtMs),
                 color = Color.White.copy(alpha = 0.95f),
@@ -96,23 +98,26 @@ fun AlarmRingingScene(
                 ),
             )
             if (scene.label.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(KiwiSpacing.sm))
                 Text(
                     text = scene.label.replaceFirstChar { it.uppercase() },
                     color = Color.White.copy(alpha = 0.7f),
                     style = MaterialTheme.typography.titleLarge,
                 )
             }
-            Spacer(Modifier.height(40.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Spacer(Modifier.height(KiwiSpacing.xl + KiwiSpacing.sm))
+            Row(horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.md)) {
                 FilledTonalButton(
                     onClick = { onSnooze(scene.alarmId, 10) },
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(KiwiRadii.lg),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = Color.White.copy(alpha = 0.12f),
                         contentColor = Color.White,
                     ),
-                    contentPadding = PaddingValues(horizontal = 28.dp, vertical = 14.dp),
+                    contentPadding = PaddingValues(
+                        horizontal = KiwiSpacing.lg + KiwiSpacing.xs,
+                        vertical = KiwiSpacing.sm + 6.dp,
+                    ),
                 ) {
                     Text(
                         text = "Posponer 10 min",
@@ -121,12 +126,15 @@ fun AlarmRingingScene(
                 }
                 FilledTonalButton(
                     onClick = { onDismiss(scene.alarmId) },
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(KiwiRadii.lg),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = Color.White.copy(alpha = 0.20f),
                         contentColor = Color.White,
                     ),
-                    contentPadding = PaddingValues(horizontal = 28.dp, vertical = 14.dp),
+                    contentPadding = PaddingValues(
+                        horizontal = KiwiSpacing.lg + KiwiSpacing.xs,
+                        vertical = KiwiSpacing.sm + 6.dp,
+                    ),
                 ) {
                     Text(
                         text = "Apagar",

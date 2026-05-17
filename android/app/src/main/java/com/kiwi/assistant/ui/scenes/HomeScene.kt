@@ -44,6 +44,9 @@ import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -106,7 +109,7 @@ fun HomeScene(
     ) {
         if (!hasContent) {
             ClockBlock(
-                modifier = Modifier.fillMaxSize().padding(40.dp),
+                modifier = Modifier.fillMaxSize().padding(KiwiSpacing.xl + KiwiSpacing.sm),
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
                 onNextAlarmTap = onOpenAlarmList,
@@ -123,12 +126,12 @@ fun HomeScene(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 36.dp),
+                .padding(horizontal = KiwiSpacing.xl, vertical = KiwiSpacing.xl + KiwiSpacing.xs),
         ) {
             ClockBlock(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp),
+                    .padding(bottom = KiwiSpacing.lg),
                 compact = true,
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
@@ -139,7 +142,7 @@ fun HomeScene(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.lg - 4.dp),
             ) {
                 AgendaCard(
                     events = snapshot?.eventsToday.orEmpty(),
@@ -157,7 +160,7 @@ fun HomeScene(
             }
 
             snapshot?.nowPlaying?.let { chip ->
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(KiwiSpacing.md))
                 NowPlayingBar(chip)
             }
         }
@@ -179,8 +182,8 @@ private fun BottomChips(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.padding(start = 16.dp, bottom = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.padding(start = KiwiSpacing.md, bottom = KiwiSpacing.md),
+        horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconLabelChip(
@@ -210,22 +213,22 @@ private fun IconLabelChip(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(KiwiRadii.sm))
             .background(Color.White.copy(alpha = 0.05f))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = KiwiSpacing.sm + KiwiSpacing.xs, vertical = KiwiSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.45f),
+            tint = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
             modifier = Modifier.size(16.dp),
         )
         Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.45f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -260,7 +263,7 @@ private fun ClockBlock(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = time,
-                color = Color.White.copy(alpha = 0.92f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 style = MaterialTheme.typography.displayLarge.copy(
                     fontSize = timeSize,
                     fontWeight = FontWeight.Thin,
@@ -308,13 +311,13 @@ private fun NextAlarmLine(
     }
     Text(
         text = "🔔 Próxima alarma ${dayPart}${time}".trim(),
-        color = Color.White.copy(alpha = 0.55f),
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
         style = if (compact) MaterialTheme.typography.titleMedium
         else MaterialTheme.typography.headlineSmall,
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(KiwiSpacing.sm))
             .clickable { onTap() }
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = KiwiSpacing.sm, vertical = KiwiSpacing.xs),
     )
 }
 
@@ -328,7 +331,7 @@ private fun WeatherLine(weather: WeatherInfo, compact: Boolean) {
     ).filter { it.isNotBlank() }.joinToString("  ")
     Text(
         text = text,
-        color = Color.White.copy(alpha = 0.55f),
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
         style = if (compact) MaterialTheme.typography.titleMedium
         else MaterialTheme.typography.headlineSmall,
     )
@@ -355,12 +358,12 @@ private fun weatherEmoji(icon: String): String = when (icon) {
 private fun AgendaCard(events: List<CalendarEvent>, modifier: Modifier = Modifier) {
     DashboardCard(modifier = modifier) {
         CardTitle("Hoy", subtitle = subtitleForAgenda(events))
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
         if (events.isEmpty()) {
             CardEmpty("Nada en la agenda.")
             return@DashboardCard
         }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + 2.dp)) {
             events.take(MAX_AGENDA_ROWS).forEach { event ->
                 EventRow(event)
             }
@@ -381,12 +384,12 @@ private fun TodosCard(
             subtitle = if (pending.isEmpty()) "Sin tareas" else
                 if (pending.size == 1) "1 pendiente" else "${pending.size} pendientes",
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
         if (items.isEmpty()) {
             CardEmpty("Nada apuntado.")
             return@DashboardCard
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm)) {
             // Pending first; if there's room, fill with recently
             // completed so the card feels lived-in.
             val display = (pending + items.filter { it.completed }).take(MAX_TODO_ROWS)
@@ -400,15 +403,15 @@ private fun NowPlayingBar(chip: NowPlayingChip) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
                 .size(40.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(KiwiSpacing.sm))
                 .background(Color.White.copy(alpha = 0.08f)),
         ) {
             chip.albumArtUrl?.let { url ->
@@ -420,7 +423,7 @@ private fun NowPlayingBar(chip: NowPlayingChip) {
                 )
             }
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "Suena ahora",
@@ -432,7 +435,7 @@ private fun NowPlayingBar(chip: NowPlayingChip) {
                     chip.title.takeIf { it.isNotBlank() },
                     chip.artist.takeIf { it.isNotBlank() },
                 ).joinToString(" · "),
-                color = Color.White.copy(alpha = 0.92f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -447,9 +450,9 @@ private fun NowPlayingBar(chip: NowPlayingChip) {
 private fun DashboardCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .padding(20.dp),
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
+            .padding(KiwiSpacing.lg - 4.dp),
     ) {
         content()
     }
@@ -459,7 +462,7 @@ private fun DashboardCard(modifier: Modifier = Modifier, content: @Composable ()
 private fun CardTitle(title: String, subtitle: String) {
     Text(
         text = title,
-        color = Color.White.copy(alpha = 0.92f),
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
         style = MaterialTheme.typography.headlineSmall.copy(
             fontWeight = FontWeight.Light,
         ),
@@ -479,9 +482,9 @@ private fun CardEmpty(text: String) {
     ) {
         Text(
             text = text,
-            color = Color.White.copy(alpha = 0.45f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(vertical = 16.dp),
+            modifier = Modifier.padding(vertical = KiwiSpacing.md),
         )
     }
 }
@@ -491,12 +494,12 @@ private fun EventRow(event: CalendarEvent) {
     Column {
         Text(
             text = formatEventSlot(event),
-            color = Color.White.copy(alpha = 0.55f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
             style = MaterialTheme.typography.labelLarge,
         )
         Text(
             text = event.title,
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
             style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -518,10 +521,12 @@ private fun TodoRow(item: TodoItem) {
                     else Color.White.copy(alpha = 0.6f),
                 ),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
         Text(
             text = item.text,
-            color = Color.White.copy(alpha = if (item.completed) 0.4f else 0.92f),
+            color = Color.White.copy(
+                alpha = if (item.completed) KiwiOpacity.TEXT_TERTIARY else KiwiOpacity.TEXT_PRIMARY,
+            ),
             style = MaterialTheme.typography.bodyLarge.copy(
                 textDecoration = if (item.completed) TextDecoration.LineThrough else null,
             ),

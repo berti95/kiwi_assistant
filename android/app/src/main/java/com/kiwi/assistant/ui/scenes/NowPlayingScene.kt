@@ -31,6 +31,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
+import com.kiwi.assistant.ui.theme.spotifyGreen
 
 /**
  * Spotify NowPlaying card. Album art is the centerpiece — large
@@ -45,7 +49,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .padding(horizontal = 48.dp, vertical = 56.dp),
+            .padding(horizontal = KiwiSpacing.xxl, vertical = KiwiSpacing.huge),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -56,7 +60,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
                 url = scene.albumArtUrl,
                 isPlaying = scene.isPlaying,
             )
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(KiwiSpacing.lg + KiwiSpacing.xs))
             Text(
                 text = scene.title,
                 color = Color.White.copy(alpha = 0.95f),
@@ -71,7 +75,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = scene.artist,
-                    color = Color.White.copy(alpha = 0.78f),
+                    color = Color.White.copy(alpha = KiwiOpacity.OVERLAY),
                     style = MaterialTheme.typography.titleLarge,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
@@ -82,7 +86,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = scene.album,
-                    color = Color.White.copy(alpha = 0.45f),
+                    color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
@@ -90,7 +94,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
                 )
             }
             if (scene.durationMs > 0) {
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(KiwiSpacing.lg - 4.dp))
                 ProgressBar(
                     progressMs = scene.progressMs,
                     durationMs = scene.durationMs,
@@ -106,8 +110,8 @@ private fun AlbumArt(url: String?, isPlaying: Boolean) {
         modifier = Modifier
             .fillMaxWidth(0.55f)
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.06f)),
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG)),
         contentAlignment = Alignment.Center,
     ) {
         if (url != null) {
@@ -148,7 +152,7 @@ private fun ProgressBar(progressMs: Long, durationMs: Long) {
     ) {
         LinearProgressIndicator(
             progress = { pct },
-            color = Color(0xFF1DB954),  // Spotify green
+            color = MaterialTheme.colorScheme.spotifyGreen,
             trackColor = Color.White.copy(alpha = 0.12f),
             modifier = Modifier
                 .fillMaxWidth()
@@ -161,13 +165,13 @@ private fun ProgressBar(progressMs: Long, durationMs: Long) {
         ) {
             Text(
                 text = formatMs(progressMs),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.align(Alignment.CenterStart),
             )
             Text(
                 text = formatMs(durationMs),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.align(Alignment.CenterEnd),
             )

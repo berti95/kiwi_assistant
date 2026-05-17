@@ -36,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import kotlin.math.max
 import kotlinx.coroutines.delay
 
@@ -87,7 +89,7 @@ fun TimerScene(scene: Scene.Timer, onDismiss: () -> Unit) {
                 indication = null,
                 onClick = {},
             )
-            .padding(48.dp),
+            .padding(KiwiSpacing.xxl),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -100,7 +102,7 @@ fun TimerScene(scene: Scene.Timer, onDismiss: () -> Unit) {
                     color = Color.White.copy(alpha = if (expired) 0.95f else 0.65f),
                     style = MaterialTheme.typography.headlineSmall,
                 )
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(KiwiSpacing.lg - 4.dp))
             }
             Text(
                 text = if (expired) "¡Tiempo!" else formatRemaining(remainingMs),
@@ -110,16 +112,16 @@ fun TimerScene(scene: Scene.Timer, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.Light,
                 ),
             )
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(KiwiSpacing.xl + KiwiSpacing.sm))
             FilledTonalButton(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(KiwiRadii.lg),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = Color.White.copy(alpha = if (expired) 0.18f else 0.12f),
                     contentColor = Color.White,
                 ),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 28.dp, vertical = 14.dp,
+                    horizontal = KiwiSpacing.lg + KiwiSpacing.xs, vertical = KiwiSpacing.sm + 6.dp,
                 ),
             ) {
                 Text(

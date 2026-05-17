@@ -30,6 +30,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.VideoItem
+import com.kiwi.assistant.ui.components.EmptyState
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 
 /**
  * Renders a list of YouTube videos — used for both search results
@@ -42,59 +47,22 @@ import com.kiwi.assistant.ui.VideoItem
  */
 @Composable
 fun VideoListScene(scene: Scene.VideoList) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 40.dp, vertical = 48.dp),
+    SceneScaffold(
+        title = scene.title.ifBlank { "Videos" },
+        subtitle = if (scene.videos.size == 1) "1 video" else "${scene.videos.size} videos",
+        horizontalPadding = KiwiSpacing.xl + KiwiSpacing.xs,
+        verticalPadding = KiwiSpacing.xxl,
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(title = scene.title, count = scene.videos.size)
-            Spacer(Modifier.height(20.dp))
-            if (scene.videos.isEmpty()) {
-                EmptyVideos()
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    itemsIndexed(scene.videos) { index, video ->
-                        VideoRow(position = index + 1, video = video)
-                    }
+        Spacer(Modifier.size(KiwiSpacing.xs))
+        if (scene.videos.isEmpty()) {
+            EmptyState(message = "No hay videos.")
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
+                itemsIndexed(scene.videos) { index, video ->
+                    VideoRow(position = index + 1, video = video)
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Header(title: String, count: Int) {
-    Column {
-        Text(
-            text = title.ifBlank { "Videos" },
-            color = Color.White.copy(alpha = 0.92f),
-            style = MaterialTheme.typography.displaySmall.copy(
-                fontWeight = FontWeight.Light,
-            ),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = if (count == 1) "1 video" else "$count videos",
-            color = Color.White.copy(alpha = 0.55f),
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}
-
-@Composable
-private fun EmptyVideos() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "No hay videos.",
-            color = Color.White.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.headlineSmall,
-        )
     }
 }
 
@@ -103,15 +71,15 @@ private fun VideoRow(position: Int, video: VideoItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(12.dp),
+            .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PositionBadge(position)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
         Thumbnail(url = video.thumbnailUrl, duration = video.durationLabel)
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(KiwiSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = video.title,
@@ -121,10 +89,10 @@ private fun VideoRow(position: Int, video: VideoItem) {
                 overflow = TextOverflow.Ellipsis,
             )
             if (video.channel.isNotBlank()) {
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(KiwiSpacing.xs))
                 Text(
                     text = video.channel,
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -149,7 +117,7 @@ private fun PositionBadge(position: Int) {
     ) {
         Text(
             text = position.toString(),
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.SemiBold,
             ),
@@ -179,7 +147,7 @@ private fun Thumbnail(url: String?, duration: String?) {
                 modifier = Modifier
                     .padding(6.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.78f))
+                    .background(Color.Black.copy(alpha = KiwiOpacity.OVERLAY))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             ) {
                 Text(

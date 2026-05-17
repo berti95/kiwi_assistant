@@ -5,9 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,7 +15,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -25,6 +22,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.components.EmptyState
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -46,40 +48,16 @@ private val EVENT_TIME_FORMATTER: DateTimeFormatter =
  */
 @Composable
 fun CalendarScene(scene: Scene.Calendar) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 48.dp, vertical = 56.dp),
+    SceneScaffold(
+        title = "Agenda",
+        subtitle = subtitleFor(scene.period, scene.events.size),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(period = scene.period, count = scene.events.size)
-            Spacer(Modifier.height(24.dp))
-
-            if (scene.events.isEmpty()) {
-                EmptyEvents(period = scene.period)
-            } else {
-                EventList(events = scene.events)
-            }
+        Spacer(Modifier.size(KiwiSpacing.sm))
+        if (scene.events.isEmpty()) {
+            EmptyState(message = emptyMessageFor(scene.period))
+        } else {
+            EventList(events = scene.events)
         }
-    }
-}
-
-@Composable
-private fun Header(period: String, count: Int) {
-    Column {
-        Text(
-            text = "Agenda",
-            color = Color.White.copy(alpha = 0.92f),
-            style = MaterialTheme.typography.displaySmall.copy(
-                fontWeight = FontWeight.Light,
-            ),
-        )
-        Text(
-            text = subtitleFor(period, count),
-            color = Color.White.copy(alpha = 0.55f),
-            style = MaterialTheme.typography.titleMedium,
-        )
     }
 }
 
@@ -99,7 +77,7 @@ private fun EventList(events: List<CalendarEvent>) {
         // sorted by startTime — so chronological ordering survives.
         events.groupBy { dayKeyFor(it) }
     }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm)) {
         grouped.forEach { (day, dayEvents) ->
             item(key = "header-${day ?: "unknown"}") {
                 DaySectionHeader(day)
@@ -124,7 +102,11 @@ private fun DaySectionHeader(day: LocalDate?) {
         style = MaterialTheme.typography.titleSmall.copy(
             fontWeight = FontWeight.SemiBold,
         ),
-        modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp),
+        modifier = Modifier.padding(
+            start = KiwiSpacing.xs,
+            top = KiwiSpacing.sm + KiwiSpacing.xs,
+            bottom = KiwiSpacing.xs,
+        ),
     )
 }
 
@@ -147,35 +129,21 @@ private fun dayLabel(day: LocalDate): String {
 }
 
 @Composable
-private fun EmptyEvents(period: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = emptyMessageFor(period),
-            color = Color.White.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.headlineSmall,
-        )
-    }
-}
-
-@Composable
 private fun EventRow(event: CalendarEvent) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(horizontal = KiwiSpacing.lg - 4.dp, vertical = KiwiSpacing.md),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = formatEventTime(event),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.labelLarge,
             )
-            Spacer(Modifier.size(4.dp))
+            Spacer(Modifier.size(KiwiSpacing.xs))
             Text(
                 text = event.title,
                 color = Color.White.copy(alpha = 0.95f),
@@ -185,7 +153,7 @@ private fun EventRow(event: CalendarEvent) {
                 Spacer(Modifier.size(2.dp))
                 Text(
                     text = loc,
-                    color = Color.White.copy(alpha = 0.55f),
+                    color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

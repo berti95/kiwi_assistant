@@ -28,6 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.UsageToolCount
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import kotlin.math.roundToInt
 
 /**
@@ -42,19 +46,12 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun UsageStatsScene(scene: Scene.UsageStats) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 48.dp, vertical = 56.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(period = scene.period)
-            Spacer(Modifier.height(28.dp))
-            BigNumbers(scene = scene)
-            Spacer(Modifier.height(32.dp))
-            TopToolsBlock(tools = scene.topTools)
-        }
+    SceneScaffold {
+        Header(period = scene.period)
+        Spacer(Modifier.height(KiwiSpacing.lg + KiwiSpacing.xs))
+        BigNumbers(scene = scene)
+        Spacer(Modifier.height(KiwiSpacing.xl))
+        TopToolsBlock(tools = scene.topTools)
     }
 }
 
@@ -71,22 +68,22 @@ private fun Header(period: String) {
             Icon(
                 imageVector = Icons.Default.QueryStats,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.92f),
+                tint = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 modifier = Modifier.size(26.dp),
             )
         }
-        Spacer(Modifier.width(20.dp))
+        Spacer(Modifier.width(KiwiSpacing.lg - 4.dp))
         Column {
             Text(
                 text = "Uso de Kiwi",
-                color = Color.White.copy(alpha = 0.92f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 style = MaterialTheme.typography.displaySmall.copy(
                     fontWeight = FontWeight.Light,
                 ),
             )
             Text(
                 text = labelForPeriod(period),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
@@ -102,7 +99,7 @@ private fun labelForPeriod(period: String): String = when (period) {
 
 @Composable
 private fun BigNumbers(scene: Scene.UsageStats) {
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.md)) {
         StatCard(
             modifier = Modifier.weight(1f),
             value = scene.conversationCount.toString(),
@@ -119,8 +116,8 @@ private fun BigNumbers(scene: Scene.UsageStats) {
             label = "coste aprox.",
         )
     }
-    Spacer(Modifier.height(12.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
+    Row(horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.md)) {
         StatCard(
             modifier = Modifier.weight(1f),
             value = scene.turnCount.toString(),
@@ -151,9 +148,9 @@ private fun StatCard(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(horizontal = KiwiSpacing.lg - 4.dp, vertical = KiwiSpacing.md + 2.dp),
     ) {
         Text(
             text = value,
@@ -161,10 +158,10 @@ private fun StatCard(
             style = if (small) MaterialTheme.typography.headlineMedium
             else MaterialTheme.typography.displaySmall,
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(KiwiSpacing.xs))
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.55f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -179,23 +176,23 @@ private fun TopToolsBlock(tools: List<UsageToolCount>) {
             fontWeight = FontWeight.SemiBold,
         ),
     )
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
     if (tools.isEmpty()) {
         Text(
             text = "Sin actividad en este periodo.",
-            color = Color.White.copy(alpha = 0.45f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
             style = MaterialTheme.typography.bodyLarge,
         )
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm)) {
         for (t in tools) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White.copy(alpha = 0.04f))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .clip(RoundedCornerShape(KiwiRadii.sm))
+                    .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
+                    .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(

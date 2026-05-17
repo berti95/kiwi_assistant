@@ -30,6 +30,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.components.EmptyState
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 
 /**
  * Renders the user's own YouTube playlists. Voice flow: user asks
@@ -39,57 +44,22 @@ import com.kiwi.assistant.ui.Scene
  */
 @Composable
 fun PlaylistListScene(scene: Scene.PlaylistList) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 40.dp, vertical = 48.dp),
+    SceneScaffold(
+        title = "Tus playlists",
+        subtitle = if (scene.playlists.size == 1) "1 playlist" else "${scene.playlists.size} playlists",
+        horizontalPadding = KiwiSpacing.xl + KiwiSpacing.xs,
+        verticalPadding = KiwiSpacing.xxl,
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(count = scene.playlists.size)
-            Spacer(Modifier.height(20.dp))
-            if (scene.playlists.isEmpty()) {
-                EmptyPlaylists()
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    itemsIndexed(scene.playlists) { idx, p ->
-                        PlaylistRow(position = idx + 1, playlist = p)
-                    }
+        Spacer(Modifier.size(KiwiSpacing.xs))
+        if (scene.playlists.isEmpty()) {
+            EmptyState(message = "No tienes playlists guardadas.")
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
+                itemsIndexed(scene.playlists) { idx, p ->
+                    PlaylistRow(position = idx + 1, playlist = p)
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Header(count: Int) {
-    Column {
-        Text(
-            text = "Tus playlists",
-            color = Color.White.copy(alpha = 0.92f),
-            style = MaterialTheme.typography.displaySmall.copy(
-                fontWeight = FontWeight.Light,
-            ),
-        )
-        Text(
-            text = if (count == 1) "1 playlist" else "$count playlists",
-            color = Color.White.copy(alpha = 0.55f),
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}
-
-@Composable
-private fun EmptyPlaylists() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "No tienes playlists guardadas.",
-            color = Color.White.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.headlineSmall,
-        )
     }
 }
 
@@ -98,13 +68,13 @@ private fun PlaylistRow(position: Int, playlist: PlaylistItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(12.dp),
+            .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PositionBadge(position)
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
         Box(
             modifier = Modifier
                 .size(width = 140.dp, height = 80.dp)
@@ -120,7 +90,7 @@ private fun PlaylistRow(position: Int, playlist: PlaylistItem) {
                 )
             }
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(KiwiSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = playlist.title,
@@ -129,11 +99,11 @@ private fun PlaylistRow(position: Int, playlist: PlaylistItem) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(KiwiSpacing.xs))
             Text(
                 text = if (playlist.itemCount == 1) "1 video"
                        else "${playlist.itemCount} videos",
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -151,7 +121,7 @@ private fun PositionBadge(position: Int) {
     ) {
         Text(
             text = position.toString(),
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.SemiBold,
             ),
