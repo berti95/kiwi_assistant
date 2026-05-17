@@ -18,7 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -90,6 +93,9 @@ fun HomeScene(
     onOpenTodoList: () -> Unit = {},
     onOpenUsageStats: () -> Unit = {},
     onOpenAlarmList: () -> Unit = {},
+    onOpenCalendar: () -> Unit = {},
+    onOpenNowPlaying: () -> Unit = {},
+    onOpenShoppingList: () -> Unit = {},
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
@@ -102,32 +108,23 @@ fun HomeScene(
         ?.minOrNull()
     val alarmsCount = snapshot?.alarms?.size ?: 0
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .padding(horizontal = KiwiSpacing.xl, vertical = KiwiSpacing.xl + KiwiSpacing.xs),
     ) {
+        // Empty home: clock takes most of the screen, quick
+        // actions still pinned at the bottom so the user can
+        // navigate into Compra / Alarmas / etc. without voice.
         if (!hasContent) {
             ClockBlock(
-                modifier = Modifier.fillMaxSize().padding(KiwiSpacing.xl + KiwiSpacing.sm),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
                 onNextAlarmTap = onOpenAlarmList,
             )
-            BottomChips(
-                onOpenUsageStats = onOpenUsageStats,
-                onOpenAlarmList = onOpenAlarmList,
-                alarmsCount = alarmsCount,
-                modifier = Modifier.align(Alignment.BottomStart),
-            )
-            return@Box
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = KiwiSpacing.xl, vertical = KiwiSpacing.xl + KiwiSpacing.xs),
-        ) {
+        } else {
             ClockBlock(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -146,6 +143,7 @@ fun HomeScene(
             ) {
                 AgendaCard(
                     events = snapshot?.eventsToday.orEmpty(),
+                    onOpen = onOpenCalendar,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
@@ -161,39 +159,61 @@ fun HomeScene(
 
             snapshot?.nowPlaying?.let { chip ->
                 Spacer(Modifier.height(KiwiSpacing.md))
-                NowPlayingBar(chip)
+                NowPlayingBar(chip = chip, onOpen = onOpenNowPlaying)
             }
         }
 
-        BottomChips(
-            onOpenUsageStats = onOpenUsageStats,
+        Spacer(Modifier.height(KiwiSpacing.md))
+        QuickActionsRow(
+            onOpenShoppingList = onOpenShoppingList,
+            onOpenCalendar = onOpenCalendar,
             onOpenAlarmList = onOpenAlarmList,
+            onOpenUsageStats = onOpenUsageStats,
             alarmsCount = alarmsCount,
-            modifier = Modifier.align(Alignment.BottomStart),
         )
     }
 }
 
+/**
+ * Fila de accesos directos en la parte baja de la home. Cinco chips
+ * con icono + label corto, espaciados uniformemente, para entrar a
+ * scenes que antes solo eran accesibles por voz (Compra, Calendar
+ * completo) o que vivían como chips sueltos arriba-izquierda
+ * (Alarmas, Uso).
+ *
+ * Cada chip es siempre tap-eable — el contador de alarmas se
+ * muestra solo si > 0; el resto siempre llevan a su scene aunque
+ * esté vacía (para poder programar la primera tarea por voz desde
+ * ahí, etc.).
+ */
 @Composable
-private fun BottomChips(
-    onOpenUsageStats: () -> Unit,
+private fun QuickActionsRow(
+    onOpenShoppingList: () -> Unit,
+    onOpenCalendar: () -> Unit,
     onOpenAlarmList: () -> Unit,
+    onOpenUsageStats: () -> Unit,
     alarmsCount: Int,
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.padding(start = KiwiSpacing.md, bottom = KiwiSpacing.md),
-        horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.sm),
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(
+            KiwiSpacing.sm + KiwiSpacing.xs,
+            Alignment.CenterHorizontally,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconLabelChip(
-            icon = Icons.Default.QueryStats,
-            label = "Uso",
-            onClick = onOpenUsageStats,
+        QuickActionChip(
+            icon = Icons.Default.ShoppingCart,
+            label = "Compra",
+            onClick = onOpenShoppingList,
         )
-        // Siempre presente — sin contador si está vacío para que el
-        // usuario pueda entrar a programar la primera alarma.
-        IconLabelChip(
+        QuickActionChip(
+            icon = Icons.Default.CalendarMonth,
+            label = "Agenda",
+            onClick = onOpenCalendar,
+        )
+        QuickActionChip(
             icon = Icons.Default.Alarm,
             label = when (alarmsCount) {
                 0 -> "Alarmas"
@@ -202,11 +222,16 @@ private fun BottomChips(
             },
             onClick = onOpenAlarmList,
         )
+        QuickActionChip(
+            icon = Icons.Default.QueryStats,
+            label = "Uso",
+            onClick = onOpenUsageStats,
+        )
     }
 }
 
 @Composable
-private fun IconLabelChip(
+private fun QuickActionChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
@@ -214,22 +239,22 @@ private fun IconLabelChip(
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(KiwiRadii.sm))
-            .background(Color.White.copy(alpha = 0.05f))
+            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
             .clickable { onClick() }
-            .padding(horizontal = KiwiSpacing.sm + KiwiSpacing.xs, vertical = KiwiSpacing.sm),
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
-            modifier = Modifier.size(16.dp),
+            tint = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+            modifier = Modifier.size(20.dp),
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm))
         Text(
             text = label,
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
-            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+            style = MaterialTheme.typography.bodyMedium,
         )
     }
 }
@@ -355,8 +380,12 @@ private fun weatherEmoji(icon: String): String = when (icon) {
 }
 
 @Composable
-private fun AgendaCard(events: List<CalendarEvent>, modifier: Modifier = Modifier) {
-    DashboardCard(modifier = modifier) {
+private fun AgendaCard(
+    events: List<CalendarEvent>,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    DashboardCard(modifier = modifier.clickable { onOpen() }) {
         CardTitle("Hoy", subtitle = subtitleForAgenda(events))
         Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
         if (events.isEmpty()) {
@@ -399,12 +428,13 @@ private fun TodosCard(
 }
 
 @Composable
-private fun NowPlayingBar(chip: NowPlayingChip) {
+private fun NowPlayingBar(chip: NowPlayingChip, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(KiwiRadii.md))
             .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .clickable { onOpen() }
             .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {

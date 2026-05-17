@@ -49,6 +49,29 @@ class TodoApi(
     suspend fun removeShopping(id: String): List<ShoppingItemDto>? =
         postShopping("$id/remove")
 
+    /**
+     * GET la lista actual de la compra. Usado por la home cuando el
+     * usuario abre Compra desde la quick-actions row. Null si la red
+     * falla o el token no es válido — el caller pinta vacío.
+     */
+    suspend fun fetchShoppingList(): List<ShoppingItemDto>? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/shopping?token=$devToken"
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "GET $url returned ${response.code}")
+                    return null
+                }
+                parseShoppingItems(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "GET $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
     /** Tipo intermedio para no introducir circular dep con ui.* aquí. */
     data class ShoppingItemDto(val id: String, val text: String, val completed: Boolean)
 

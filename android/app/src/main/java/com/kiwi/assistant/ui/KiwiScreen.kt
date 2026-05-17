@@ -108,6 +108,9 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             onShoppingTap = viewModel::onShoppingTap,
             onOpenUsageStats = { viewModel.onOpenUsageStats() },
             onOpenAlarmList = viewModel::onOpenAlarmList,
+            onOpenCalendar = viewModel::onOpenCalendar,
+            onOpenNowPlaying = viewModel::onOpenNowPlaying,
+            onOpenShoppingList = viewModel::onOpenShoppingList,
         )
 
         // Overlay layer. Cuatro estados disjuntos:
@@ -300,6 +303,9 @@ private fun SceneLayer(
     onShoppingTap: (ShoppingItem) -> Unit,
     onOpenUsageStats: () -> Unit,
     onOpenAlarmList: () -> Unit,
+    onOpenCalendar: () -> Unit,
+    onOpenNowPlaying: () -> Unit,
+    onOpenShoppingList: () -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -307,6 +313,9 @@ private fun SceneLayer(
             onOpenTodoList = onOpenTodoList,
             onOpenUsageStats = onOpenUsageStats,
             onOpenAlarmList = onOpenAlarmList,
+            onOpenCalendar = onOpenCalendar,
+            onOpenNowPlaying = onOpenNowPlaying,
+            onOpenShoppingList = onOpenShoppingList,
         )
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)

@@ -355,11 +355,59 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Dismiss the active TimerScene from the tablet (Cancelar / Apagar
-     * button). Notifies the backend so a follow-up "cuánto queda"
-     * voice query reports "no active timer" instead of stale state,
-     * then exits the scene back to home.
+     * Abre la escena de calendario desde la home con la agenda de hoy
+     * que ya tenemos cacheada en homeSnapshot. Sin red — la voz puede
+     * pedir periodos más amplios (esta semana / 7 días) por sí sola.
      */
+    fun onOpenCalendar() {
+        val events = _homeSnapshot.value?.eventsToday.orEmpty()
+        enterScene(Scene.Calendar(period = "today", events = events))
+    }
+
+    /**
+     * Tap en la barra "Suena ahora" del home → pantalla NowPlaying
+     * grande. Solo tiene sentido cuando ya hay música; en otro caso
+     * no se pinta la barra (no hay tap). El backend no expone HTTP
+     * para el estado completo de Spotify (es un voice tool) así que
+     * reconstruimos lo que podemos del chip: title, artist, carátula.
+     * Album / duración / progreso quedan vacíos y el composable los
+     * oculta (durationMs == 0 → sin progress bar).
+     */
+    fun onOpenNowPlaying() {
+        val chip = _homeSnapshot.value?.nowPlaying ?: return
+        enterScene(
+            Scene.NowPlaying(
+                title = chip.title,
+                artist = chip.artist,
+                album = "",
+                albumArtUrl = chip.albumArtUrl,
+                isPlaying = true,
+                durationMs = 0L,
+                progressMs = 0L,
+            ),
+        )
+    }
+
+    /**
+     * Abre la lista de la compra desde la quick-actions row. Fetch
+     * fresco a /api/shopping (no está en el snapshot del home) en
+     * background; mientras tanto entramos a la escena vacía para que
+     * la transición sea inmediata. Si la red falla, queda en vacío
+     * — un "tira otra vez" lo arregla.
+     */
+    fun onOpenShoppingList() {
+        // Empty scene first, then replace with fetched items.
+        enterScene(Scene.ShoppingList(items = emptyList()))
+        viewModelScope.launch(Dispatchers.IO) {
+            val items = todoApi.fetchShoppingList()?.map {
+                ShoppingItem(id = it.id, text = it.text, completed = it.completed)
+            } ?: return@launch
+            if (_scene.value is Scene.ShoppingList) {
+                enterScene(Scene.ShoppingList(items = items))
+            }
+        }
+    }
+
     fun onTimerDismiss() {
         viewModelScope.launch(Dispatchers.IO) { todoApi.cancelTimer() }
         if (_scene.value is Scene.Timer) {
