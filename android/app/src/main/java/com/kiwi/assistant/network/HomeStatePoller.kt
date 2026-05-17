@@ -115,6 +115,7 @@ class HomeStatePoller(
 
         return HomeSnapshot(
             eventsToday = events,
+            eventsTodayError = root.string("events_today_error"),
             todos = todos,
             nowPlaying = nowPlaying,
             weather = weather,

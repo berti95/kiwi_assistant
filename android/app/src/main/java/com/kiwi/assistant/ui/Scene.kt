@@ -41,6 +41,13 @@ sealed interface Scene {
     data class Calendar(
         val period: String,
         val events: List<CalendarEvent>,
+        /**
+         * Mensaje de error si el backend no pudo cargar los eventos
+         * (típicamente Google OAuth caducado). Null en caso normal.
+         * Si está presente, la UI muestra un empty state explicativo
+         * con un botón "Renovar Google" en vez de "Día tranquilo".
+         */
+        val error: String? = null,
     ) : Scene
 
     /**
@@ -234,6 +241,7 @@ data class WeatherInfo(
  */
 data class HomeSnapshot(
     val eventsToday: List<CalendarEvent>,
+    val eventsTodayError: String?,
     val todos: List<TodoItem>,
     val nowPlaying: NowPlayingChip?,
     val weather: WeatherInfo?,

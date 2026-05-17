@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,14 +12,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.Scene
@@ -47,17 +52,78 @@ private val EVENT_TIME_FORMATTER: DateTimeFormatter =
  * tool emitted; nothing here talks to Google directly.
  */
 @Composable
-fun CalendarScene(scene: Scene.Calendar) {
+fun CalendarScene(scene: Scene.Calendar, onRenovarGoogle: () -> Unit = {}) {
     SceneScaffold(
         title = "Agenda",
-        subtitle = subtitleFor(scene.period, scene.events.size),
+        subtitle = if (scene.error != null) "No disponible"
+                   else subtitleFor(scene.period, scene.events.size),
     ) {
         Spacer(Modifier.size(KiwiSpacing.sm))
-        if (scene.events.isEmpty()) {
+        if (scene.error != null) {
+            ErrorState(message = scene.error, onRenovarGoogle = onRenovarGoogle)
+        } else if (scene.events.isEmpty()) {
             EmptyState(message = emptyMessageFor(scene.period))
         } else {
             EventList(events = scene.events)
         }
+    }
+}
+
+@Composable
+private fun ErrorState(message: String, onRenovarGoogle: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.size(KiwiSpacing.xl))
+        Text(
+            text = "⚠️ Agenda no disponible",
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontWeight = FontWeight.Light,
+            ),
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.size(KiwiSpacing.md))
+        Text(
+            text = "El backend no pudo leer Google Calendar — el OAuth ha caducado o se ha revocado.",
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = KiwiSpacing.xl),
+        )
+        Spacer(Modifier.size(KiwiSpacing.md))
+        Text(
+            text = message,
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = KiwiSpacing.xl),
+        )
+        Spacer(Modifier.size(KiwiSpacing.xl))
+        FilledTonalButton(
+            onClick = onRenovarGoogle,
+            shape = RoundedCornerShape(KiwiRadii.lg),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = Color.White.copy(alpha = 0.16f),
+                contentColor = Color.White,
+            ),
+            contentPadding = PaddingValues(
+                horizontal = KiwiSpacing.xl,
+                vertical = KiwiSpacing.sm + 6.dp,
+            ),
+        ) {
+            Text(
+                text = "Renovar Google",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        Spacer(Modifier.size(KiwiSpacing.sm))
+        Text(
+            text = "Se abrirá el navegador para iniciar sesión con tu cuenta.",
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

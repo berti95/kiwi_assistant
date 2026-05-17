@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
@@ -433,8 +434,43 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * pedir periodos más amplios (esta semana / 7 días) por sí sola.
      */
     fun onOpenCalendar() {
-        val events = _homeSnapshot.value?.eventsToday.orEmpty()
-        enterScene(Scene.Calendar(period = "today", events = events))
+        val snapshot = _homeSnapshot.value
+        enterScene(
+            Scene.Calendar(
+                period = "today",
+                events = snapshot?.eventsToday.orEmpty(),
+                error = snapshot?.eventsTodayError,
+            ),
+        )
+    }
+
+    /**
+     * El usuario pulsó "Renovar Google" (típicamente en el empty
+     * state de Calendar cuando el OAuth caducó). Abre el flujo
+     * web del backend en el navegador del sistema; al volver de
+     * Google, el callback persiste el nuevo refresh token y el
+     * próximo /api/home ya trae la agenda otra vez.
+     *
+     * Si no hay navegador instalado se loggea pero no hacemos
+     * más — el flujo manual sigue funcionando vía móvil/PC.
+     */
+    fun onRenovarGoogleClick() {
+        val baseUrl = BuildConfig.CLOUD_RUN_URL.trimEnd('/')
+        val token = BuildConfig.DEV_LOGS_TOKEN
+        if (baseUrl.isEmpty() || token.isEmpty()) {
+            KLog.w(TAG, "onRenovarGoogleClick: missing CLOUD_RUN_URL or DEV_LOGS_TOKEN")
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$baseUrl/oauth/google/start?token=$token")).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            getApplication<Application>().startActivity(intent)
+        } catch (exc: Exception) {
+            // Tablet sin navegador (poco probable) — el flujo
+            // manual sigue funcionando desde móvil/PC.
+            KLog.w(TAG, "onRenovarGoogleClick: no browser? $exc")
+        }
     }
 
     /**

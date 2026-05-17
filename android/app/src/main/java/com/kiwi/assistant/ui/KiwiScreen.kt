@@ -145,6 +145,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenCalendar = viewModel::onOpenCalendar,
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
+                onRenovarGoogle = viewModel::onRenovarGoogleClick,
             )
         }
 
@@ -371,6 +372,7 @@ private fun SceneLayer(
     onOpenCalendar: () -> Unit,
     onOpenNowPlaying: () -> Unit,
     onOpenShoppingList: () -> Unit,
+    onRenovarGoogle: () -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -383,7 +385,7 @@ private fun SceneLayer(
             onOpenShoppingList = onOpenShoppingList,
         )
         Scene.Ambient -> AmbientHomeScene(snapshot = homeSnapshot)
-        is Scene.Calendar -> CalendarScene(scene)
+        is Scene.Calendar -> CalendarScene(scene, onRenovarGoogle = onRenovarGoogle)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)

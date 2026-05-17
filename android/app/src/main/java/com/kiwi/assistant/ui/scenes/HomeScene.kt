@@ -144,6 +144,7 @@ fun HomeScene(
             ) {
                 AgendaCard(
                     events = snapshot?.eventsToday.orEmpty(),
+                    error = snapshot?.eventsTodayError,
                     onOpen = onOpenCalendar,
                     modifier = Modifier
                         .weight(1f)
@@ -384,10 +385,22 @@ private fun weatherEmoji(icon: String): String = when (icon) {
 @Composable
 private fun AgendaCard(
     events: List<CalendarEvent>,
+    error: String?,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     DashboardCard(modifier = modifier.clickable { onOpen() }) {
+        if (error != null) {
+            // Estado de error: el backend no pudo leer la agenda
+            // (típicamente OAuth de Google caducado). Antes el
+            // tablet fingía un día tranquilo; ahora se ve claro
+            // que falla y el tap lleva a CalendarScene donde el
+            // botón "Renovar Google" hace el resto.
+            CardTitle("Agenda", subtitle = "Toca para renovar")
+            Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
+            CardEmpty("⚠️ No disponible")
+            return@DashboardCard
+        }
         CardTitle("Hoy", subtitle = subtitleForAgenda(events))
         Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
         if (events.isEmpty()) {
