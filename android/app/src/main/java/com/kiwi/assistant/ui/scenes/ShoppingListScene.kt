@@ -65,12 +65,24 @@ fun ShoppingListScene(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
                 itemsIndexed(pending, key = { _, it -> it.id }) { index, item ->
-                    ItemRow(position = index + 1, item = item, onTap = onItemTap)
+                    ItemRow(
+                        position = index + 1,
+                        item = item,
+                        onTap = onItemTap,
+                        modifier = Modifier.animateItem(),
+                    )
                 }
                 if (done.isNotEmpty()) {
-                    item(key = "done-header") { DoneHeader(count = done.size) }
+                    item(key = "done-header") {
+                        DoneHeader(count = done.size, modifier = Modifier.animateItem())
+                    }
                     itemsIndexed(done, key = { _, it -> it.id }) { _, item ->
-                        ItemRow(position = null, item = item, onTap = onItemTap)
+                        ItemRow(
+                            position = null,
+                            item = item,
+                            onTap = onItemTap,
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -139,14 +151,14 @@ private fun HelperHint(hasDone: Boolean, hasPending: Boolean) {
 }
 
 @Composable
-private fun DoneHeader(count: Int) {
+private fun DoneHeader(count: Int, modifier: Modifier = Modifier) {
     Text(
         text = if (count == 1) "En el carro" else "En el carro ($count)",
         color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
         style = MaterialTheme.typography.titleSmall.copy(
             fontWeight = FontWeight.SemiBold,
         ),
-        modifier = Modifier.padding(top = KiwiSpacing.lg, bottom = KiwiSpacing.xs),
+        modifier = modifier.padding(top = KiwiSpacing.lg, bottom = KiwiSpacing.xs),
     )
 }
 
@@ -155,9 +167,10 @@ private fun ItemRow(
     position: Int?,
     item: ShoppingItem,
     onTap: (ShoppingItem) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
             .background(

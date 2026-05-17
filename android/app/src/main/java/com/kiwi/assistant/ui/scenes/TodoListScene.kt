@@ -65,14 +65,27 @@ fun TodoListScene(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
                 itemsIndexed(pending, key = { _, it -> it.id }) { index, item ->
-                    TodoRow(position = index + 1, item = item, onTap = onTodoTap)
+                    TodoRow(
+                        position = index + 1,
+                        item = item,
+                        onTap = onTodoTap,
+                        modifier = Modifier.animateItem(),
+                    )
                 }
                 if (done.isNotEmpty()) {
                     item(key = "completed-header") {
-                        CompletedSectionHeader(count = done.size)
+                        CompletedSectionHeader(
+                            count = done.size,
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                     itemsIndexed(done, key = { _, it -> it.id }) { _, item ->
-                        TodoRow(position = null, item = item, onTap = onTodoTap)
+                        TodoRow(
+                            position = null,
+                            item = item,
+                            onTap = onTodoTap,
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -106,14 +119,14 @@ private fun subtitleFor(pending: Int, total: Int): String {
 }
 
 @Composable
-private fun CompletedSectionHeader(count: Int) {
+private fun CompletedSectionHeader(count: Int, modifier: Modifier = Modifier) {
     Text(
         text = if (count == 1) "Hecho" else "Hechas",
         color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
         style = MaterialTheme.typography.titleSmall.copy(
             fontWeight = FontWeight.SemiBold,
         ),
-        modifier = Modifier.padding(top = KiwiSpacing.lg, bottom = KiwiSpacing.xs),
+        modifier = modifier.padding(top = KiwiSpacing.lg, bottom = KiwiSpacing.xs),
     )
 }
 
@@ -122,9 +135,10 @@ private fun TodoRow(
     position: Int?,
     item: TodoItem,
     onTap: (TodoItem) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
             .background(

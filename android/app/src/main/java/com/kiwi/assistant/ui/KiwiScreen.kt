@@ -1,5 +1,13 @@
 package com.kiwi.assistant.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -95,23 +103,38 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             ),
     ) {
         // Base layer: the active scene (clock, calendar, video list,
-        // playback, browse). Each scene is full-screen.
-        SceneLayer(
-            scene = scene,
-            homeSnapshot = homeSnapshot,
-            onExitScene = viewModel::onExitScene,
-            onTodoTap = viewModel::onTodoTap,
-            onOpenTodoList = viewModel::onOpenTodoList,
-            onTimerDismiss = viewModel::onTimerDismiss,
-            onAlarmDismiss = viewModel::onAlarmDismiss,
-            onAlarmSnooze = viewModel::onAlarmSnooze,
-            onShoppingTap = viewModel::onShoppingTap,
-            onOpenUsageStats = { viewModel.onOpenUsageStats() },
-            onOpenAlarmList = viewModel::onOpenAlarmList,
-            onOpenCalendar = viewModel::onOpenCalendar,
-            onOpenNowPlaying = viewModel::onOpenNowPlaying,
-            onOpenShoppingList = viewModel::onOpenShoppingList,
-        )
+        // playback, browse). Each scene is full-screen. Envuelto en
+        // AnimatedContent para que cambiar de scene haga un cross-fade
+        // suave en vez del salto duro de antes. contentKey por clase
+        // → re-render de la misma scene (TodoList con datos nuevos)
+        // NO dispara animación; solo cambios de tipo de pantalla lo
+        // hacen.
+        AnimatedContent(
+            targetState = scene,
+            contentKey = { it::class },
+            transitionSpec = {
+                fadeIn(animationSpec = tween(220)) togetherWith
+                    fadeOut(animationSpec = tween(180))
+            },
+            label = "scene-fade",
+        ) { current ->
+            SceneLayer(
+                scene = current,
+                homeSnapshot = homeSnapshot,
+                onExitScene = viewModel::onExitScene,
+                onTodoTap = viewModel::onTodoTap,
+                onOpenTodoList = viewModel::onOpenTodoList,
+                onTimerDismiss = viewModel::onTimerDismiss,
+                onAlarmDismiss = viewModel::onAlarmDismiss,
+                onAlarmSnooze = viewModel::onAlarmSnooze,
+                onShoppingTap = viewModel::onShoppingTap,
+                onOpenUsageStats = { viewModel.onOpenUsageStats() },
+                onOpenAlarmList = viewModel::onOpenAlarmList,
+                onOpenCalendar = viewModel::onOpenCalendar,
+                onOpenNowPlaying = viewModel::onOpenNowPlaying,
+                onOpenShoppingList = viewModel::onOpenShoppingList,
+            )
+        }
 
         // Overlay layer. Cuatro estados disjuntos:
         //
@@ -211,14 +234,27 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         // por debajo de los overlays fullscreen del pipeline. Aparece
         // cuando un evento del calendario empieza en <5 min y se
         // auto-cierra a los 30 s. La X manual también limpia.
-        eventBanner?.let { banner ->
-            EventSoonBannerView(
-                banner = banner,
-                onDismiss = viewModel::onDismissEventBanner,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp, start = 16.dp, end = 16.dp),
-            )
+        // AnimatedVisibility para que entre/salga suave (expand+fade)
+        // en vez del aparecer/desaparecer brusco de antes.
+        AnimatedVisibility(
+            visible = eventBanner != null,
+            enter = expandVertically(animationSpec = tween(260)) +
+                fadeIn(animationSpec = tween(220)),
+            exit = shrinkVertically(animationSpec = tween(220)) +
+                fadeOut(animationSpec = tween(180)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp, start = 16.dp, end = 16.dp),
+        ) {
+            // Snapshot del banner cuando salta a null el composable
+            // mantiene el último valor durante el exit transition.
+            val current = eventBanner
+            if (current != null) {
+                EventSoonBannerView(
+                    banner = current,
+                    onDismiss = viewModel::onDismissEventBanner,
+                )
+            }
         }
     }
 }

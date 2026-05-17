@@ -1,5 +1,6 @@
 package com.kiwi.assistant.ui.scenes
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -241,6 +242,7 @@ private fun QuickActionChip(
             .clip(RoundedCornerShape(KiwiRadii.sm))
             .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
             .clickable { onClick() }
+            .animateContentSize()
             .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {

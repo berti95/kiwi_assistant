@@ -1,10 +1,14 @@
 package com.kiwi.assistant.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,8 +76,29 @@ fun PipelineHud(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            HudLeading(state)
-            HudCaption(state, modifier = Modifier.weight(1f, fill = false))
+            // contentKey por clase: Listening → Processing → Responding
+            // hace fade, pero las actualizaciones de transcript dentro
+            // del mismo estado (Processing.userTranscript creciendo)
+            // no — esas se reflejan instantáneas.
+            AnimatedContent(
+                targetState = state,
+                contentKey = { it::class },
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(180)) togetherWith
+                        fadeOut(animationSpec = tween(140))
+                },
+                label = "hud-leading",
+            ) { current -> HudLeading(current) }
+            AnimatedContent(
+                targetState = state,
+                contentKey = { it::class },
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(180)) togetherWith
+                        fadeOut(animationSpec = tween(140))
+                },
+                label = "hud-caption",
+                modifier = Modifier.weight(1f, fill = false),
+            ) { current -> HudCaption(current, modifier = Modifier) }
             // Stop button — labelled because the user repeatedly missed
             // the previous icon-only X. "Detener" + Mic-off makes it
             // clear that tapping stops the listening.
