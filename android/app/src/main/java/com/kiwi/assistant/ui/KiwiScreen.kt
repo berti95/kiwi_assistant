@@ -54,6 +54,8 @@ import com.kiwi.assistant.ui.scenes.TodoListScene
 import com.kiwi.assistant.ui.scenes.UsageStatsScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
 import com.kiwi.assistant.ui.scenes.VideoPlayerScene
+import com.kiwi.assistant.ui.theme.nightDim
+import com.kiwi.assistant.ui.theme.rememberNightModeActive
 import com.kiwi.assistant.ui.screens.ConnectingScreen
 import com.kiwi.assistant.ui.screens.ErrorScreen
 import com.kiwi.assistant.ui.screens.ListeningScreen
@@ -87,10 +89,15 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val eventBanner by viewModel.eventSoonBanner.collectAsState()
     val canGoBack by viewModel.canGoBack.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
+    // Modo nocturno: el tablet vive en pared cerca del dormitorio.
+    // Entre 22:00 y 07:00 aplicamos un overlay marrón cálido para
+    // que no moleste. La transición dura 1s al cruzar el umbral.
+    val nightActive = rememberNightModeActive()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .nightDim(nightActive)
             // Tap en el fondo no hace nada — abrir conversación
             // requiere pulsar explícitamente el botón "Habla con
             // Kiwi". Long-press se mantiene como atajo "vuelve a
