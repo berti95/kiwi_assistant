@@ -314,24 +314,33 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
             .distinctUntilChanged()
             .collect { isIdle ->
+                KLog.i(TAG, "ambient: idle-flag=$isIdle (scene=${_scene.value::class.simpleName}, pipeline=${_pipeline.value::class.simpleName})")
                 if (isIdle) scheduleAmbient() else cancelAmbient()
             }
     }
 
     private fun scheduleAmbient() {
         ambientTimerJob?.cancel()
+        KLog.i(TAG, "ambient: scheduling timer in ${AMBIENT_IDLE_DELAY_MS}ms")
         ambientTimerJob = viewModelScope.launch {
             delay(AMBIENT_IDLE_DELAY_MS)
             // Re-check: por si justo en este último delay el estado
             // cambió antes de que cancelAmbient corra (race con el
             // collect del flow combine).
-            if (_scene.value is Scene.Idle && _pipeline.value is PipelineState.Idle) {
+            val s = _scene.value
+            val p = _pipeline.value
+            KLog.i(TAG, "ambient: timer fired; recheck scene=${s::class.simpleName}, pipeline=${p::class.simpleName}")
+            if (s is Scene.Idle && p is PipelineState.Idle) {
+                KLog.i(TAG, "ambient: entering Scene.Ambient")
                 _scene.value = Scene.Ambient
             }
         }
     }
 
     private fun cancelAmbient() {
+        if (ambientTimerJob != null) {
+            KLog.i(TAG, "ambient: cancel timer")
+        }
         ambientTimerJob?.cancel()
         ambientTimerJob = null
     }
