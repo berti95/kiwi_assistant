@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -75,6 +77,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val scene by viewModel.scene.collectAsState()
     val homeSnapshot by viewModel.homeSnapshot.collectAsState()
     val eventBanner by viewModel.eventSoonBanner.collectAsState()
+    val canGoBack by viewModel.canGoBack.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
 
     Box(
@@ -136,30 +139,55 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             )
         }
 
-        // Close button: visible whenever there's something non-Idle to
-        // close (a session, a non-Idle scene, or both). Tap = go home,
-        // i.e. close the conversation if active AND reset the scene.
-        // Hidden on scenes that ship their own top-start back arrow
-        // (BrowseYouTube, VideoPlayer) so we don't stack two icons.
+        // Top-left chrome: back arrow (if there's a previous scene in
+        // the stack) + home button. Both stacked horizontally when the
+        // user is deep in navigation (Home → TodoList → Calendar). On
+        // scenes that ship their own back arrow (WebViews) we hide
+        // ours to avoid duplicate icons.
+        //
+        // - Back arrow → vm.onBack(): pop al histórico (TodoList →
+        //   Calendar → back vuelve a TodoList).
+        // - Home button → vm.onLongPress(): reset directo, hace el
+        //   mismo trabajo que el long-press en el fondo.
         val sessionActive =
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
         val sceneActive = scene !is Scene.Idle
         val sceneHasOwnBackButton =
             scene is Scene.BrowseYouTube || scene is Scene.VideoPlayer
         if ((sessionActive || sceneActive) && !sceneHasOwnBackButton) {
-            IconButton(
-                onClick = viewModel::onLongPress,
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .size(56.dp),
+                    .padding(8.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Volver al inicio",
-                    tint = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.size(32.dp),
-                )
+                if (canGoBack) {
+                    IconButton(
+                        onClick = viewModel::onBack,
+                        modifier = Modifier.size(56.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Atrás",
+                            tint = Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = viewModel::onLongPress,
+                    modifier = Modifier.size(56.dp),
+                ) {
+                    Icon(
+                        imageVector = if (canGoBack) {
+                            Icons.Default.Home
+                        } else {
+                            Icons.Default.Close
+                        },
+                        contentDescription = "Volver al inicio",
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
             }
         }
 

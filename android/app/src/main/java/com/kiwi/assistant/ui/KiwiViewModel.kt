@@ -69,6 +69,45 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private val _scene = MutableStateFlow<Scene>(Scene.Idle)
     val scene: StateFlow<Scene> = _scene.asStateFlow()
 
+    // Histórico de scenes para que el back arrow vuelva a la anterior
+    // (Home → TodoList → Calendar → back → TodoList → back → Home).
+    // Solo contiene scenes "pop-eables"; Idle nunca entra al stack
+    // (Home es siempre el suelo). Mutaciones serializadas por el hilo
+    // Main donde corren los call sites.
+    private val sceneStack: ArrayDeque<Scene> = ArrayDeque()
+    private val _canGoBack = MutableStateFlow(false)
+    val canGoBack: StateFlow<Boolean> = _canGoBack.asStateFlow()
+
+    /**
+     * Navega a [target] manteniendo histórico. Si la escena actual es
+     * Idle o del mismo tipo que [target] (re-render con datos nuevos)
+     * NO se mete en el stack — evita basura como pulsar 3 veces back
+     * para salir de una TodoList que se actualizó 3 veces.
+     */
+    private fun enterScene(target: Scene) {
+        val current = _scene.value
+        val sameType = current::class == target::class
+        if (current !is Scene.Idle && !sameType) {
+            sceneStack.addLast(current)
+        }
+        _scene.value = target
+        _canGoBack.value = sceneStack.isNotEmpty()
+    }
+
+    /** Vuelve a la escena anterior, o a Idle si no había. */
+    private fun popScene() {
+        val previous = sceneStack.removeLastOrNull()
+        _scene.value = previous ?: Scene.Idle
+        _canGoBack.value = sceneStack.isNotEmpty()
+    }
+
+    /** Salida limpia: vacía el stack y vuelve a Home. */
+    private fun resetToHome() {
+        sceneStack.clear()
+        _scene.value = Scene.Idle
+        _canGoBack.value = false
+    }
+
     // Snapshot rendered by the Idle/Home dashboard. Null until the
     // first /api/home fetch resolves, in which case [HomeScene] falls
     // back to a bare clock.
@@ -233,7 +272,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                         _pipeline.value is PipelineState.Idle
                     ) {
                         KLog.i(TAG, "auto-close: ${currentScene::class.simpleName} → home")
-                        _scene.value = Scene.Idle
+                        resetToHome()
                         triggerHomeRefresh()
                     }
                 }
@@ -276,7 +315,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onOpenTodoList() {
         val items = _homeSnapshot.value?.todos.orEmpty()
-        _scene.value = Scene.TodoList(items = items)
+        enterScene(Scene.TodoList(items = items))
     }
 
     /**
@@ -288,7 +327,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onOpenAlarmList() {
         val items = _homeSnapshot.value?.alarms.orEmpty()
-        _scene.value = Scene.AlarmList(items = items)
+        enterScene(Scene.AlarmList(items = items))
     }
 
     /**
@@ -311,7 +350,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                     estimatedCostEur = 0.0,
                     topTools = emptyList(),
                 )
-            _scene.value = stats
+            enterScene(stats)
         }
     }
 
@@ -324,7 +363,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     fun onTimerDismiss() {
         viewModelScope.launch(Dispatchers.IO) { todoApi.cancelTimer() }
         if (_scene.value is Scene.Timer) {
-            _scene.value = Scene.Idle
+            popScene()
         }
     }
 
@@ -335,10 +374,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onAlarmRing(alarmId: String, label: String, firesAtMs: Long) {
         KLog.i(TAG, "alarm ring: id=$alarmId label=$label")
-        _scene.value = Scene.AlarmRinging(
-            alarmId = alarmId,
-            label = label,
-            firesAtMs = firesAtMs,
+        enterScene(
+            Scene.AlarmRinging(
+                alarmId = alarmId,
+                label = label,
+                firesAtMs = firesAtMs,
+            ),
         )
     }
 
@@ -349,7 +390,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             refreshHomeSnapshot()
         }
         if (_scene.value is Scene.AlarmRinging) {
-            _scene.value = Scene.Idle
+            popScene()
         }
     }
 
@@ -364,7 +405,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             refreshHomeSnapshot()
         }
         if (_scene.value is Scene.AlarmRinging) {
-            _scene.value = Scene.Idle
+            popScene()
         }
     }
 
@@ -381,7 +422,10 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             // not required for StateFlow.value, but we trigger the
             // home refresh which needs to land too.
             if (_scene.value is Scene.TodoList) {
-                _scene.value = Scene.TodoList(items = updated)
+                // Mismo tipo de escena → enterScene replace sin meter
+                // basura en el stack (la TodoList previa no es una
+                // "página anterior", es el mismo screen actualizado).
+                enterScene(Scene.TodoList(items = updated))
             }
             refreshHomeSnapshot()
         }
@@ -402,7 +446,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 ShoppingItem(id = it.id, text = it.text, completed = it.completed)
             }
             if (_scene.value is Scene.ShoppingList) {
-                _scene.value = Scene.ShoppingList(items = mapped)
+                enterScene(Scene.ShoppingList(items = mapped))
             }
         }
     }
@@ -533,7 +577,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 // Wipe whatever scene a previous turn pushed too —
                 // recovering from an error returns the tablet to the
                 // clock, not to a stale calendar/now-playing view.
-                _scene.value = Scene.Idle
+                resetToHome()
                 // Re-arm the wake-word listener so the user can call
                 // Kiwi again without tapping.
                 startWakeWordListener()
@@ -550,9 +594,24 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * The wake-word listener is re-armed in case there isn't an
      * active conversation either — symmetric with [closeConversation].
      */
+    /**
+     * Back arrow del top-bar global. Vuelve a la escena anterior
+     * (stack pop). Llamado desde [KiwiScreen] cuando hay histórico.
+     * Si el stack queda vacío termina en Home; el caller decide qué
+     * hacer con la conversación activa.
+     */
+    fun onBack() {
+        if (_scene.value !is Scene.Idle) {
+            popScene()
+            triggerHomeRefresh()
+        }
+    }
+
     fun onExitScene() {
         if (_scene.value !is Scene.Idle) {
-            _scene.value = Scene.Idle
+            // Back arrow propio de WebViews — pop al histórico, no
+            // reset directo. Si stack está vacío vuelve a Idle igual.
+            popScene()
             if (_pipeline.value is PipelineState.Idle) {
                 startWakeWordListener()
             }
@@ -734,7 +793,10 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
             is KiwiSessionEvent.SceneSet -> {
                 KLog.i(TAG, "scene.set → ${event.scene::class.simpleName}")
-                _scene.value = event.scene
+                // enterScene maneja smart-push (mismo tipo = replace
+                // sin meter al stack), así que un tool que actualiza
+                // TodoList por voz no crea entrada de back redundante.
+                enterScene(event.scene)
                 // Voice-driven alarm tools push the full updated
                 // alarm list as Scene.AlarmList — reconcile the system
                 // scheduler immediately so a "ponme un despertador en
@@ -1045,7 +1107,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // (calendar / now-playing / …) so the user can keep reading
         // what was on screen. Long-press wipes scene too — the
         // gesture is the "go home" affordance.
-        if (resetScene) _scene.value = Scene.Idle
+        if (resetScene) resetToHome()
         // Re-arm the wake-word listener regardless: with the pipeline
         // closed, the user may still trigger Kiwi by saying the wake
         // word with the calendar (or whatever) still on screen.
