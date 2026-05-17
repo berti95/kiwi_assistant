@@ -310,7 +310,7 @@ def _stub_spotify_off(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_blocking() -> tuple[dict, dict | None]:
         return ({"playing": False, "track": None}, None)
 
-    monkeypatch.setattr(tools, "_spotify_currently_playing_blocking", fake_blocking)
+    monkeypatch.setattr(tools.spotify, "_spotify_currently_playing_blocking", fake_blocking)
 
 
 @pytest.fixture(autouse=True)

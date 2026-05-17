@@ -276,7 +276,7 @@ def test_calendar_list_events_happy_path(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(tools, "_list_events_blocking", fake_list_blocking)
+    monkeypatch.setattr(tools.calendar, "_list_events_blocking", fake_list_blocking)
 
     pushed: list[dict] = []
 
@@ -406,7 +406,7 @@ def test_youtube_search_happy_path(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(tools, "_youtube_search_blocking", fake_search_blocking)
+    monkeypatch.setattr(tools.youtube, "_youtube_search_blocking", fake_search_blocking)
 
     pushed: list[dict] = []
 
@@ -440,7 +440,7 @@ def test_youtube_search_caps_max_results() -> None:
 
     monkeypatch = _pt.MonkeyPatch()
     monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
-    monkeypatch.setattr(tools, "_youtube_search_blocking", fake_search_blocking)
+    monkeypatch.setattr(tools.youtube, "_youtube_search_blocking", fake_search_blocking)
     try:
         _run(tools.dispatch("youtube_search", {"query": "x", "max_results": 999}))
         assert captured["max_results"] == tools._YT_MAX_RESULTS_HARD_CAP
@@ -467,7 +467,7 @@ def test_youtube_my_playlists_happy_path(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(tools, "_youtube_my_playlists_blocking", fake_blocking)
+    monkeypatch.setattr(tools.youtube, "_youtube_my_playlists_blocking", fake_blocking)
 
     pushed: list[dict] = []
 
@@ -485,7 +485,7 @@ def test_youtube_my_playlists_happy_path(monkeypatch) -> None:
 def test_youtube_playlist_items_by_id(monkeypatch) -> None:
     monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
     monkeypatch.setattr(
-        tools, "_youtube_playlist_items_blocking",
+        tools.youtube, "_youtube_playlist_items_blocking",
         lambda creds, playlist_id, max_results: [  # noqa: ARG005
             {
                 "video_id": "v1",
@@ -538,8 +538,8 @@ def test_youtube_playlist_items_by_name_resolves(monkeypatch) -> None:
         captured_id["id"] = playlist_id
         return []
 
-    monkeypatch.setattr(tools, "_youtube_my_playlists_blocking", fake_my_playlists)
-    monkeypatch.setattr(tools, "_youtube_playlist_items_blocking", fake_items)
+    monkeypatch.setattr(tools.youtube, "_youtube_my_playlists_blocking", fake_my_playlists)
+    monkeypatch.setattr(tools.youtube, "_youtube_playlist_items_blocking", fake_items)
 
     result = _run(
         tools.dispatch(
@@ -555,7 +555,7 @@ def test_youtube_playlist_items_by_name_resolves(monkeypatch) -> None:
 def test_youtube_playlist_items_unknown_name_returns_error(monkeypatch) -> None:
     monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
     monkeypatch.setattr(
-        tools, "_youtube_my_playlists_blocking",
+        tools.youtube, "_youtube_my_playlists_blocking",
         lambda creds, max_results: [],  # noqa: ARG005
     )
     result = _run(
@@ -638,7 +638,7 @@ def test_youtube_watch_later_uses_configured_playlist(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(tools, "_youtube_playlist_items_blocking", fake_items)
+    monkeypatch.setattr(tools.youtube, "_youtube_playlist_items_blocking", fake_items)
 
     pushed: list[dict] = []
 
@@ -1019,7 +1019,7 @@ def test_spotify_play_here_finds_tablet_and_transfers(monkeypatch) -> None:
 
     monkeypatch.setattr(live, "kiwi_spotify_tablet_name", "tablet")
     monkeypatch.setattr(
-        tools, "_spotify_devices_blocking",
+        tools.spotify, "_spotify_devices_blocking",
         lambda: [
             {"id": "phone-id", "name": "Pixel 9"},
             {"id": "tablet-id", "name": "Pixel Tablet"},
@@ -1041,7 +1041,7 @@ def test_spotify_play_here_finds_tablet_and_transfers(monkeypatch) -> None:
             "progress_ms": 0,
         }
 
-    monkeypatch.setattr(tools, "_spotify_transfer_blocking", fake_transfer)
+    monkeypatch.setattr(tools.spotify, "_spotify_transfer_blocking", fake_transfer)
 
     pushed: list[dict] = []
 
@@ -1059,7 +1059,7 @@ def test_spotify_play_here_no_tablet_returns_error(monkeypatch) -> None:
 
     monkeypatch.setattr(live, "kiwi_spotify_tablet_name", "tablet")
     monkeypatch.setattr(
-        tools, "_spotify_devices_blocking",
+        tools.spotify, "_spotify_devices_blocking",
         lambda: [{"id": "phone-id", "name": "Pixel 9"}],
     )
     result = _run(tools.dispatch("spotify_play_here", None))
@@ -1069,7 +1069,7 @@ def test_spotify_play_here_no_tablet_returns_error(monkeypatch) -> None:
 
 def test_spotify_transfer_to_fuzzy_match(monkeypatch) -> None:
     monkeypatch.setattr(
-        tools, "_spotify_devices_blocking",
+        tools.spotify, "_spotify_devices_blocking",
         lambda: [
             {"id": "salon-id", "name": "Sonos Salón"},
             {"id": "movil-id", "name": "Pixel 9"},
@@ -1082,7 +1082,7 @@ def test_spotify_transfer_to_fuzzy_match(monkeypatch) -> None:
         captured["id"] = device_id
         return {"transferred_device_id": device_id}, None
 
-    monkeypatch.setattr(tools, "_spotify_transfer_blocking", fake_transfer)
+    monkeypatch.setattr(tools.spotify, "_spotify_transfer_blocking", fake_transfer)
 
     result = _run(
         tools.dispatch("spotify_transfer_to", {"target": "salon"}),
@@ -1093,7 +1093,7 @@ def test_spotify_transfer_to_fuzzy_match(monkeypatch) -> None:
 
 def test_spotify_transfer_to_no_match_returns_error(monkeypatch) -> None:
     monkeypatch.setattr(
-        tools, "_spotify_devices_blocking",
+        tools.spotify, "_spotify_devices_blocking",
         lambda: [{"id": "movil-id", "name": "Pixel 9"}],
     )
     result = _run(
@@ -1124,7 +1124,7 @@ def test_spotify_play_auto_wakes_when_no_device(monkeypatch) -> None:
              "duration_ms": 0, "progress_ms": 0},
         )
 
-    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+    monkeypatch.setattr(tools.spotify, "_spotify_play_blocking", fake_blocking)
     # Skip the 4 s wait — el test no quiere esperar de verdad.
     monkeypatch.setattr(tools.asyncio, "sleep", _async_noop)
 
@@ -1155,7 +1155,7 @@ def test_spotify_play_no_wake_if_first_call_succeeds(monkeypatch) -> None:
             None,
         )
 
-    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+    monkeypatch.setattr(tools.spotify, "_spotify_play_blocking", fake_blocking)
 
     pushed: list[dict] = []
 
@@ -1180,7 +1180,7 @@ def test_spotify_play_no_wake_when_sink_missing(monkeypatch) -> None:
         calls.append(1)
         return ({"error": "no active spotify device"}, None)
 
-    monkeypatch.setattr(tools, "_spotify_play_blocking", fake_blocking)
+    monkeypatch.setattr(tools.spotify, "_spotify_play_blocking", fake_blocking)
     # Sleep should NOT be called — protege contra el caso de que
     # alguien añada wake en un path sin sink.
     monkeypatch.setattr(tools.asyncio, "sleep", _async_noop)
