@@ -171,7 +171,14 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             scene === Scene.Ambient -> Unit
             pipeline is PipelineState.Idle -> TalkAffordance(
                 onTap = viewModel::onTap,
-                modifier = Modifier.align(Alignment.BottomCenter),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    // En Home la QuickActionsRow ya vive al fondo
+                    // (Compra · Agenda · Alarmas · Uso). Sin este
+                    // offset extra el TalkAffordance se le superpondría.
+                    // En otras scenes no hay nada abajo así que se
+                    // queda pegado al borde como antes.
+                    .padding(bottom = if (scene is Scene.Idle) 88.dp else 0.dp),
             )
             scene is Scene.Idle -> PipelineFullscreenOverlay(pipeline)
             else -> PipelineHud(
