@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /**
@@ -294,7 +295,57 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         is Scene.Timer,
         is Scene.AlarmRinging,  // sólo sale al pulsar Apagar / Posponer.
         Scene.Idle,
+        Scene.Ambient,  // sale solo con tap del usuario o wake word.
         -> false
+    }
+
+    /**
+     * "Vista de pared" — tras [AMBIENT_IDLE_DELAY_MS] en Idle sin que
+     * el usuario toque ni hable, el tablet entra a [Scene.Ambient]
+     * (reloj gigante + una sola pieza de info). El listener combina
+     * scene + pipeline: solo arma el timer cuando ambos están en Idle.
+     * Al salir de Idle (toque, wake word, scene push del backend) el
+     * timer se cancela; al volver, se rearma.
+     */
+    private var ambientTimerJob: Job? = null
+    private val ambientArmJob: Job = viewModelScope.launch {
+        combine(scene, pipeline) { s, p ->
+            s is Scene.Idle && p is PipelineState.Idle
+        }
+            .distinctUntilChanged()
+            .collect { isIdle ->
+                if (isIdle) scheduleAmbient() else cancelAmbient()
+            }
+    }
+
+    private fun scheduleAmbient() {
+        ambientTimerJob?.cancel()
+        ambientTimerJob = viewModelScope.launch {
+            delay(AMBIENT_IDLE_DELAY_MS)
+            // Re-check: por si justo en este último delay el estado
+            // cambió antes de que cancelAmbient corra (race con el
+            // collect del flow combine).
+            if (_scene.value is Scene.Idle && _pipeline.value is PipelineState.Idle) {
+                _scene.value = Scene.Ambient
+            }
+        }
+    }
+
+    private fun cancelAmbient() {
+        ambientTimerJob?.cancel()
+        ambientTimerJob = null
+    }
+
+    /**
+     * Tap-anywhere desde [Scene.Ambient] → vuelve al home normal y
+     * re-arma el timer. La wake word saca solo (cambio de pipeline
+     * dispara el cancelAmbient del flow).
+     */
+    fun exitAmbient() {
+        if (_scene.value === Scene.Ambient) {
+            _scene.value = Scene.Idle
+            triggerHomeRefresh()
+        }
     }
 
     /**
@@ -1241,6 +1292,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // sin volver a hablar con Kiwi durante este tiempo, el tablet
         // vuelve a la home automáticamente.
         const val SCENE_AUTO_CLOSE_MS = 30_000L
+
+        // "Vista de pared": tras este tiempo en Idle sin tocar, el
+        // tablet pasa a Ambient (reloj gigante + una sola pieza de
+        // info). 3 min equilibra "no quita la home si estás cerca"
+        // con "no tarda demasiado si dejas el tablet quieto".
+        const val AMBIENT_IDLE_DELAY_MS = 3L * 60_000L
 
         // Pre-aviso de evento de calendario: ventana en la que se
         // dispara el banner antes del start time. 5 min cubre el

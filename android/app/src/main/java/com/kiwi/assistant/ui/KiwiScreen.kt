@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.ui.scenes.AlarmListScene
 import com.kiwi.assistant.ui.scenes.AlarmRingingScene
+import com.kiwi.assistant.ui.scenes.AmbientHomeScene
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.HomeScene
@@ -100,12 +101,16 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             .nightDim(nightActive)
             // Tap en el fondo no hace nada — abrir conversación
             // requiere pulsar explícitamente el botón "Habla con
-            // Kiwi". Long-press se mantiene como atajo "vuelve a
-            // home" desde cualquier escena.
+            // Kiwi". Excepción: en Scene.Ambient un tap cualquiera
+            // saca al usuario de la vista de pared. Long-press se
+            // mantiene como atajo "vuelve a home" desde cualquier
+            // escena.
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = {},
+                onClick = {
+                    if (scene === Scene.Ambient) viewModel.exitAmbient()
+                },
                 onLongClick = viewModel::onLongPress,
             ),
     ) {
@@ -160,6 +165,10 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting
         when {
             pipelineWantsFullscreen -> PipelineFullscreenOverlay(pipeline)
+            // Ambient: pantalla "limpia" — no mostramos affordance del
+            // mic ni overlay alguno. Wake word sigue activa; tap fuera
+            // ya sale de Ambient.
+            scene === Scene.Ambient -> Unit
             pipeline is PipelineState.Idle -> TalkAffordance(
                 onTap = viewModel::onTap,
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -184,7 +193,9 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
         //   mismo trabajo que el long-press en el fondo.
         val sessionActive =
             pipeline !is PipelineState.Idle && pipeline !is PipelineState.Error
-        val sceneActive = scene !is Scene.Idle
+        // Ambient se trata como "sin scene activa" para el chrome:
+        // sin back arrow ni close X, sin contar como navegación.
+        val sceneActive = scene !is Scene.Idle && scene !== Scene.Ambient
         val sceneHasOwnBackButton =
             scene is Scene.BrowseYouTube || scene is Scene.VideoPlayer
         if ((sessionActive || sceneActive) && !sceneHasOwnBackButton) {
@@ -360,6 +371,7 @@ private fun SceneLayer(
             onOpenNowPlaying = onOpenNowPlaying,
             onOpenShoppingList = onOpenShoppingList,
         )
+        Scene.Ambient -> AmbientHomeScene(snapshot = homeSnapshot)
         is Scene.Calendar -> CalendarScene(scene)
         is Scene.VideoList -> VideoListScene(scene)
         is Scene.PlaylistList -> PlaylistListScene(scene)

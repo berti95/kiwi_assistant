@@ -23,6 +23,16 @@ sealed interface Scene {
     data object Idle : Scene
 
     /**
+     * "Vista de pared" — tras N min en Idle sin tocar, el tablet
+     * entra aquí: reloj gigante + una sola pieza de info útil
+     * (próxima alarma / evento / canción / clima). Cualquier toque o
+     * wake word lo saca. NO se mete al stack de navegación — es una
+     * deriva natural desde Idle, no una scene a la que vuelves con
+     * back.
+     */
+    data object Ambient : Scene
+
+    /**
      * Lista de próximos eventos del calendario primario, devuelta por
      * la tool ``calendar_list_events``. ``period`` es el filtro
      * solicitado ("today" / "tomorrow" / "this_week" / "next_7_days")
