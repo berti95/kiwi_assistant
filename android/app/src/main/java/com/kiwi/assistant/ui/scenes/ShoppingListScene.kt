@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +33,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.ShoppingItem
+import com.kiwi.assistant.ui.components.EmptyState
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 
 /**
  * Lista de la compra con tap-to-toggle.
@@ -52,29 +55,22 @@ fun ShoppingListScene(
     val pending = scene.items.filter { !it.completed }
     val done = scene.items.filter { it.completed }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 48.dp, vertical = 56.dp),
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(pending = pending.size, total = scene.items.size)
-            Spacer(Modifier.height(8.dp))
-            HelperHint(hasDone = done.isNotEmpty(), hasPending = pending.isNotEmpty())
-            Spacer(Modifier.height(16.dp))
-            if (scene.items.isEmpty()) {
-                Empty()
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    itemsIndexed(pending, key = { _, it -> it.id }) { index, item ->
-                        ItemRow(position = index + 1, item = item, onTap = onItemTap)
-                    }
-                    if (done.isNotEmpty()) {
-                        item(key = "done-header") { DoneHeader(count = done.size) }
-                        itemsIndexed(done, key = { _, it -> it.id }) { _, item ->
-                            ItemRow(position = null, item = item, onTap = onItemTap)
-                        }
+    SceneScaffold {
+        Header(pending = pending.size, total = scene.items.size)
+        Spacer(Modifier.size(KiwiSpacing.sm))
+        HelperHint(hasDone = done.isNotEmpty(), hasPending = pending.isNotEmpty())
+        Spacer(Modifier.size(KiwiSpacing.md))
+        if (scene.items.isEmpty()) {
+            EmptyState(message = "Nada en la lista de la compra.")
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
+                itemsIndexed(pending, key = { _, it -> it.id }) { index, item ->
+                    ItemRow(position = index + 1, item = item, onTap = onItemTap)
+                }
+                if (done.isNotEmpty()) {
+                    item(key = "done-header") { DoneHeader(count = done.size) }
+                    itemsIndexed(done, key = { _, it -> it.id }) { _, item ->
+                        ItemRow(position = null, item = item, onTap = onItemTap)
                     }
                 }
             }
@@ -95,22 +91,22 @@ private fun Header(pending: Int, total: Int) {
             Icon(
                 imageVector = Icons.Default.ShoppingCart,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.92f),
+                tint = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 modifier = Modifier.size(26.dp),
             )
         }
-        Spacer(Modifier.width(20.dp))
+        Spacer(Modifier.width(KiwiSpacing.lg - 4.dp))
         Column {
             Text(
                 text = "La compra",
-                color = Color.White.copy(alpha = 0.92f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 style = MaterialTheme.typography.displaySmall.copy(
                     fontWeight = FontWeight.Light,
                 ),
             )
             Text(
                 text = subtitleFor(pending = pending, total = total),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
@@ -137,7 +133,7 @@ private fun HelperHint(hasDone: Boolean, hasPending: Boolean) {
     if (text.isBlank()) return
     Text(
         text = text,
-        color = Color.White.copy(alpha = 0.4f),
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -146,26 +142,12 @@ private fun HelperHint(hasDone: Boolean, hasPending: Boolean) {
 private fun DoneHeader(count: Int) {
     Text(
         text = if (count == 1) "En el carro" else "En el carro ($count)",
-        color = Color.White.copy(alpha = 0.55f),
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
         style = MaterialTheme.typography.titleSmall.copy(
             fontWeight = FontWeight.SemiBold,
         ),
-        modifier = Modifier.padding(top = 24.dp, bottom = 4.dp),
+        modifier = Modifier.padding(top = KiwiSpacing.lg, bottom = KiwiSpacing.xs),
     )
-}
-
-@Composable
-private fun Empty() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Nada en la lista de la compra.",
-            color = Color.White.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.headlineSmall,
-        )
-    }
 }
 
 @Composable
@@ -177,21 +159,27 @@ private fun ItemRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = if (item.completed) 0.03f else 0.06f))
+            .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
+            .background(
+                Color.White.copy(
+                    alpha = if (item.completed) 0.03f else KiwiOpacity.ROW_BG,
+                ),
+            )
             .clickable { onTap(item) }
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = KiwiSpacing.lg - 4.dp, vertical = KiwiSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (position != null) {
             PositionBadge(position)
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(KiwiSpacing.md))
         } else {
-            Spacer(Modifier.width(36.dp + 16.dp))
+            Spacer(Modifier.width(36.dp + KiwiSpacing.md))
         }
         Text(
             text = item.text,
-            color = Color.White.copy(alpha = if (item.completed) 0.45f else 0.95f),
+            color = Color.White.copy(
+                alpha = if (item.completed) KiwiOpacity.TEXT_TERTIARY else 0.95f,
+            ),
             style = MaterialTheme.typography.titleMedium.copy(
                 textDecoration = if (item.completed) TextDecoration.LineThrough else null,
             ),
@@ -199,7 +187,7 @@ private fun ItemRow(
             overflow = TextOverflow.Visible,
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
         StatusBadge(completed = item.completed)
     }
 }
@@ -215,7 +203,7 @@ private fun PositionBadge(position: Int) {
     ) {
         Text(
             text = position.toString(),
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.SemiBold,
             ),
@@ -234,7 +222,9 @@ private fun StatusBadge(completed: Boolean) {
             )
             .border(
                 width = 1.5.dp,
-                color = Color.White.copy(alpha = if (completed) 0.4f else 0.45f),
+                color = Color.White.copy(
+                    alpha = if (completed) 0.4f else KiwiOpacity.ICON_DIM,
+                ),
                 shape = CircleShape,
             ),
         contentAlignment = Alignment.Center,

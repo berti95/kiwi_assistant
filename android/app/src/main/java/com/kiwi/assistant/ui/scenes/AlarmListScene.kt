@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,11 +24,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.components.EmptyState
+import com.kiwi.assistant.ui.components.SceneScaffold
+import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
+import com.kiwi.assistant.ui.theme.KiwiSpacing
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -50,55 +52,18 @@ private val DAY_FMT: DateTimeFormatter =
  */
 @Composable
 fun AlarmListScene(scene: Scene.AlarmList) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = 48.dp, vertical = 56.dp),
+    SceneScaffold(
+        title = "Despertadores",
+        subtitle = if (scene.items.size == 1) "1 activo" else "${scene.items.size} activos",
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Header(count = scene.items.size)
-            Spacer(Modifier.height(24.dp))
-            if (scene.items.isEmpty()) {
-                Empty()
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(scene.items, key = { it.id }) { AlarmRow(it) }
-                }
+        Spacer(Modifier.size(KiwiSpacing.sm))
+        if (scene.items.isEmpty()) {
+            EmptyState(message = "Sin despertadores activos.")
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + KiwiSpacing.xs)) {
+                items(scene.items, key = { it.id }) { AlarmRow(it) }
             }
         }
-    }
-}
-
-@Composable
-private fun Header(count: Int) {
-    Column {
-        Text(
-            text = "Despertadores",
-            color = Color.White.copy(alpha = 0.92f),
-            style = MaterialTheme.typography.displaySmall.copy(
-                fontWeight = FontWeight.Light,
-            ),
-        )
-        Text(
-            text = if (count == 1) "1 activo" else "$count activos",
-            color = Color.White.copy(alpha = 0.55f),
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}
-
-@Composable
-private fun Empty() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Sin despertadores activos.",
-            color = Color.White.copy(alpha = 0.7f),
-            style = MaterialTheme.typography.headlineSmall,
-        )
     }
 }
 
@@ -107,9 +72,9 @@ private fun AlarmRow(item: AlarmItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .clip(RoundedCornerShape(KiwiRadii.sm + 4.dp))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .padding(horizontal = KiwiSpacing.lg - 4.dp, vertical = KiwiSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -122,11 +87,11 @@ private fun AlarmRow(item: AlarmItem) {
             Icon(
                 imageVector = Icons.Default.Alarm,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.92f),
+                tint = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 modifier = Modifier.size(22.dp),
             )
         }
-        Spacer(Modifier.width(16.dp))
+        Spacer(Modifier.width(KiwiSpacing.md))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = formatTime(item.firesAtMs),
@@ -135,7 +100,7 @@ private fun AlarmRow(item: AlarmItem) {
             )
             Text(
                 text = formatDayLabel(item.firesAtMs, item.label),
-                color = Color.White.copy(alpha = 0.55f),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
