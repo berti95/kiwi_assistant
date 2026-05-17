@@ -263,20 +263,25 @@ class VoskKeywordListener(
          * + más preciso). Añadir / quitar entradas aquí sin
          * reentrenar nada.
          *
-         * Sólo formas con verbo de invocación — sin "kiwi" / "alexa"
-         * sueltas. Vosk con grammar restringido mapea cualquier
-         * sonido reconocible a una de las phrases o a "[unk]";
-         * dejar las palabras solas hacía que casi cualquier ruido
-         * con sílabas parecidas las activase. Forzar un prefijo
-         * ("hola", "oye", "hey") obliga al recognizer a acertar
-         * acústica de toda la frase antes de disparar.
+         * Sólo formas con verbo de invocación — sin "kiwi" suelta.
+         * Vosk con grammar restringido mapea cualquier sonido
+         * reconocible a una de las phrases o a "[unk]"; dejar
+         * "kiwi" sola hacía que casi cualquier ruido con sílabas
+         * parecidas la activase. Forzar un prefijo ("hola", "oye",
+         * "hey") obliga al recognizer a acertar acústica de toda
+         * la frase antes de disparar.
+         *
+         * Las phrases con "alexa" se quitaron tras ver en producción
+         * que "alexa" actuaba como atractor en el grammar: incluso
+         * cuando el usuario decía "hola kiwi" se mapeaba a "hola
+         * alexa" porque "alexa" es más común en el modelo acústico
+         * español. Falsos positivos con TV de fondo + mis-detecciones
+         * de la palabra real del usuario.
          */
         val DEFAULT_PHRASES = listOf(
             "hola kiwi",
             "oye kiwi",
             "hey kiwi",
-            "hola alexa",
-            "hey alexa",
         )
     }
 }
