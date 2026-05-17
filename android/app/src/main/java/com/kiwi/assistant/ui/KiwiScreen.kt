@@ -165,10 +165,14 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting
         when {
             pipelineWantsFullscreen -> PipelineFullscreenOverlay(pipeline)
-            // Ambient: pantalla "limpia" — no mostramos affordance del
-            // mic ni overlay alguno. Wake word sigue activa; tap fuera
-            // ya sale de Ambient.
-            scene === Scene.Ambient -> Unit
+            // Ambient con todo en reposo: pantalla "limpia" — sin
+            // affordance del mic ni overlay. Wake word sigue activa;
+            // tap o palabra disparan el ViewModel, que saca de Ambient.
+            // OJO: solo suprimimos cuando el pipeline ESTÁ Idle. Si
+            // arrancó una conversación (wake word desde la vista de
+            // pared) hay que dejar pasar el flow normal para que se
+            // pinte Listening/Processing/Responding por encima.
+            scene === Scene.Ambient && pipeline is PipelineState.Idle -> Unit
             pipeline is PipelineState.Idle -> TalkAffordance(
                 onTap = viewModel::onTap,
                 modifier = Modifier

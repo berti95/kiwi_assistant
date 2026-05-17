@@ -88,7 +88,13 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun enterScene(target: Scene) {
         val current = _scene.value
         val sameType = current::class == target::class
-        if (current !is Scene.Idle && !sameType) {
+        // Ambient se trata como Idle a efectos del stack — es una
+        // deriva pasiva, no una "página" a la que el back debería
+        // volver. Sin esto, pulsar back desde Calendar te llevaría
+        // a la vista de pared en vez de a Home, lo cual no tiene
+        // sentido.
+        val pushable = current !is Scene.Idle && current !== Scene.Ambient
+        if (pushable && !sameType) {
             sceneStack.addLast(current)
         }
         _scene.value = target
@@ -316,6 +322,22 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             .collect { isIdle ->
                 if (isIdle) scheduleAmbient() else cancelAmbient()
             }
+    }
+
+    /**
+     * Si estamos en Ambient (vista de pared) y el pipeline arranca
+     * (wake word, tap del usuario, scene push del backend), salimos
+     * de Ambient automáticamente — el reloj gigante no debe pisar
+     * la conversación. Tras cerrar la conversación el usuario
+     * vuelve a Home, no a la vista de pared (el timer la re-armará
+     * tras otros 3 min de inactividad).
+     */
+    private val ambientExitOnActivityJob: Job = viewModelScope.launch {
+        pipeline.collect { p ->
+            if (p !is PipelineState.Idle && _scene.value === Scene.Ambient) {
+                _scene.value = Scene.Idle
+            }
+        }
     }
 
     private fun scheduleAmbient() {
