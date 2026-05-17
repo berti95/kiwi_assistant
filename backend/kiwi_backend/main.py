@@ -405,6 +405,28 @@ _OAUTH_STATES: dict[str, float] = {}
 _OAUTH_STATE_TTL_S = 600.0  # 10 min
 
 
+def _oauth_callback_url(request: Request | None) -> str:
+    """Build the redirect_uri Google compares against el registrado.
+
+    Cloud Run termina TLS en el LB y le pasa al contenedor la petición
+    como HTTP, así que ``request.base_url`` devuelve ``http://`` por
+    defecto y Google rechaza con ``redirect_uri_mismatch``. Aunque ya
+    ejecutamos uvicorn con ``--proxy-headers`` para que respete
+    X-Forwarded-Proto, forzamos https aquí también como defensa
+    explícita — el coste de equivocarse en este endpoint es romper
+    el único flujo de renovación, no merece la pena depender solo
+    de la config de uvicorn.
+    """
+    if request is None:
+        return "/oauth/google/callback"
+    base = str(request.base_url).rstrip("/")
+    # Forzar https si el LB nos pasó http — los hosts que no son
+    # localhost siempre van por https en Cloud Run.
+    if base.startswith("http://") and "localhost" not in base:
+        base = "https://" + base[len("http://"):]
+    return f"{base}/oauth/google/callback"
+
+
 def _prune_oauth_states() -> None:
     """Drop expired entries so the in-memory dict no crece sin parar."""
     now = time.time()
@@ -426,8 +448,7 @@ async def oauth_google_start(token: str = "", request: Request = None):  # type:
     state = secrets.token_urlsafe(24)
     _OAUTH_STATES[state] = time.time()
 
-    base_url = str(request.base_url).rstrip("/") if request is not None else ""
-    redirect_uri = f"{base_url}/oauth/google/callback"
+    redirect_uri = _oauth_callback_url(request)
     auth_endpoint = "https://accounts.google.com/o/oauth2/v2/auth"
     params = {
         "client_id": cfg["client_id"],
@@ -466,8 +487,7 @@ async def oauth_google_callback(
     except google_auth.GoogleAuthUnavailableError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    base_url = str(request.base_url).rstrip("/") if request is not None else ""
-    redirect_uri = f"{base_url}/oauth/google/callback"
+    redirect_uri = _oauth_callback_url(request)
     try:
         response = await asyncio.to_thread(
             requests.post,
