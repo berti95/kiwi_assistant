@@ -1301,12 +1301,14 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "KiwiViewModel"
 
-        // How often we re-pull /api/home in the background. Five
-        // minutes is enough to keep events / now-playing reasonably
-        // current without burning Cloud Run requests on a tablet
-        // that's mostly idle. After-conversation refresh handles the
-        // "I just added a TODO" path on its own.
-        const val HOME_REFRESH_INTERVAL_MS = 5L * 60_000L
+        // How often we re-pull /api/home in the background. Pensado
+        // para que el chip "Suena ahora" desaparezca rápido cuando
+        // pausas Spotify desde otro device (el backend ya filtra
+        // is_playing=true, pero el tablet solo lo nota en el siguiente
+        // poll). Un minuto da sensación de "vivo" sin saturar quotas:
+        // Calendar y Spotify aceptan mucho más, y el weather se cachea
+        // 10 min internamente en el backend.
+        const val HOME_REFRESH_INTERVAL_MS = 60_000L
 
         // How long the user has to be silent (after Silero stopped
         // returning isSpeech=true) before we auto-close the turn.
