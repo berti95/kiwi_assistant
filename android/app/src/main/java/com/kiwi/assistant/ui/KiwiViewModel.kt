@@ -18,6 +18,7 @@ import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import com.kiwi.assistant.network.TodoApi
+import com.kiwi.assistant.updater.AutoUpdater
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +122,44 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     // back to a bare clock.
     private val _homeSnapshot = MutableStateFlow<HomeSnapshot?>(null)
     val homeSnapshot: StateFlow<HomeSnapshot?> = _homeSnapshot.asStateFlow()
+
+    // Updater para el botón "Actualizar" del Home. Mismo gate que el
+    // polling periódico de MainActivity: no instala en mitad de una
+    // sesión. _updateStatus es un mensaje transitorio que el chip
+    // muestra unos segundos (null = botón en reposo "Actualizar").
+    private val autoUpdater = AutoUpdater(application) {
+        _pipeline.value is PipelineState.Idle
+    }
+    private val _updateStatus = MutableStateFlow<String?>(null)
+    val updateStatus: StateFlow<String?> = _updateStatus.asStateFlow()
+
+    /**
+     * El usuario pulsó "Actualizar" en el Home. Comprueba el backend,
+     * y si hay versión nueva descarga + instala (silenciosa con Device
+     * Owner; diálogo normal en dev). Refleja el progreso en
+     * [updateStatus] para feedback, y lo limpia tras unos segundos.
+     */
+    fun onCheckForUpdate() {
+        if (_updateStatus.value != null) return  // ya hay un chequeo en curso
+        viewModelScope.launch {
+            _updateStatus.value = "Buscando…"
+            val result = runCatching { autoUpdater.checkForUpdate() }
+                .getOrDefault(AutoUpdater.Result.NO_NETWORK)
+            _updateStatus.value = when (result) {
+                AutoUpdater.Result.UP_TO_DATE -> "Ya al día"
+                AutoUpdater.Result.UPDATING -> "Actualizando…"
+                AutoUpdater.Result.BUSY -> "Ocupado, reintenta"
+                AutoUpdater.Result.NO_NETWORK -> "Sin conexión"
+                AutoUpdater.Result.NO_APK -> "Sin APK"
+            }
+            // "Actualizando…" lo dejamos hasta que el SO reinicie la
+            // app con la versión nueva; el resto se autolimpian.
+            if (result != AutoUpdater.Result.UPDATING) {
+                delay(4000)
+                _updateStatus.value = null
+            }
+        }
+    }
 
     private val homePoller = HomeStatePoller(
         baseUrl = BuildConfig.CLOUD_RUN_URL,

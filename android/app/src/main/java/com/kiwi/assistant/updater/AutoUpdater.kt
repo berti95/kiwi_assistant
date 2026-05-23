@@ -37,41 +37,62 @@ class AutoUpdater(
     private val http = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * Resultado de un chequeo de actualización, para que la UI pueda
+     * dar feedback al usuario (botón "Actualizar" en el Home).
+     */
+    enum class Result {
+        UP_TO_DATE,    // ya estás en la última versión
+        UPDATING,      // versión nueva → descarga + instalación lanzada
+        BUSY,          // hay una sesión activa; no se puede instalar ahora
+        NO_NETWORK,    // fallo de red / config ausente
+        NO_APK,        // versión nueva anunciada pero sin apk_url
+    }
+
     /** Single-shot check. Returns true if an install was attempted. */
-    suspend fun runOnce(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun runOnce(): Boolean = checkForUpdate() == Result.UPDATING
+
+    /**
+     * Comprueba + (si procede) descarga e instala, devolviendo un
+     * [Result] que la UI traduce a un mensaje. Mismo flujo que el
+     * polling periódico, pero con resultado explícito para el botón
+     * manual.
+     */
+    suspend fun checkForUpdate(): Result = withContext(Dispatchers.IO) {
         if (BuildConfig.CLOUD_RUN_URL.isEmpty() || BuildConfig.KIWI_API_KEY.isEmpty()) {
-            return@withContext false
+            return@withContext Result.NO_NETWORK
         }
         if (!canInstall()) {
             Log.i(TAG, "skipping update check: app is in an active session")
-            return@withContext false
+            return@withContext Result.BUSY
         }
 
-        val info = fetchVersionInfo() ?: return@withContext false
+        val info = fetchVersionInfo() ?: return@withContext Result.NO_NETWORK
         if (info.versionCode <= BuildConfig.VERSION_CODE) {
             Log.i(
                 TAG,
                 "up to date (local=${BuildConfig.VERSION_CODE}, remote=${info.versionCode})",
             )
-            return@withContext false
+            return@withContext Result.UP_TO_DATE
         }
         if (info.apkUrl.isBlank()) {
             Log.w(TAG, "remote version ${info.versionCode} has no apk_url")
-            return@withContext false
+            return@withContext Result.NO_APK
         }
 
         Log.i(TAG, "update available: ${info.versionName} (${info.versionCode})")
-        val apkFile = downloadApk(info.apkUrl, info.versionCode) ?: return@withContext false
+        val apkFile = downloadApk(info.apkUrl, info.versionCode)
+            ?: return@withContext Result.NO_NETWORK
 
         // Re-check the gate: the user may have started a session while the
         // APK was downloading. Defer the install to the next polling cycle.
         if (!canInstall()) {
             Log.i(TAG, "session started during download; deferring install")
-            return@withContext false
+            return@withContext Result.BUSY
         }
         runCatching { installSilently(apkFile) }
             .onFailure { Log.w(TAG, "install failed", it) }
-        true
+        Result.UPDATING
     }
 
     /**

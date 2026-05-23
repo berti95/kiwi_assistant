@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -97,6 +98,8 @@ fun HomeScene(
     onOpenCalendar: () -> Unit = {},
     onOpenNowPlaying: () -> Unit = {},
     onOpenShoppingList: () -> Unit = {},
+    onCheckForUpdate: () -> Unit = {},
+    updateStatus: String? = null,
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
@@ -171,6 +174,8 @@ fun HomeScene(
             onOpenCalendar = onOpenCalendar,
             onOpenAlarmList = onOpenAlarmList,
             onOpenUsageStats = onOpenUsageStats,
+            onCheckForUpdate = onCheckForUpdate,
+            updateStatus = updateStatus,
             alarmsCount = alarmsCount,
         )
     }
@@ -194,6 +199,8 @@ private fun QuickActionsRow(
     onOpenCalendar: () -> Unit,
     onOpenAlarmList: () -> Unit,
     onOpenUsageStats: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    updateStatus: String?,
     alarmsCount: Int,
     modifier: Modifier = Modifier,
 ) {
@@ -228,6 +235,14 @@ private fun QuickActionsRow(
             icon = Icons.Default.QueryStats,
             label = "Uso",
             onClick = onOpenUsageStats,
+        )
+        // El label refleja el progreso del chequeo cuando hay uno en
+        // curso (Buscando… / Ya al día / Actualizando…); en reposo
+        // muestra "Actualizar".
+        QuickActionChip(
+            icon = Icons.Default.Refresh,
+            label = updateStatus ?: "Actualizar",
+            onClick = onCheckForUpdate,
         )
     }
 }

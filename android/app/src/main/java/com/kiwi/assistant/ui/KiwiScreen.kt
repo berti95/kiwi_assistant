@@ -90,6 +90,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val eventBanner by viewModel.eventSoonBanner.collectAsState()
     val canGoBack by viewModel.canGoBack.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
+    val updateStatus by viewModel.updateStatus.collectAsState()
     // Modo nocturno: el tablet vive en pared cerca del dormitorio.
     // Entre 22:00 y 07:00 aplicamos un overlay marrón cálido para
     // que no moleste. La transición dura 1s al cruzar el umbral.
@@ -146,6 +147,8 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
+                onCheckForUpdate = viewModel::onCheckForUpdate,
+                updateStatus = updateStatus,
             )
         }
 
@@ -373,6 +376,8 @@ private fun SceneLayer(
     onOpenNowPlaying: () -> Unit,
     onOpenShoppingList: () -> Unit,
     onRenovarGoogle: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    updateStatus: String?,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -383,6 +388,8 @@ private fun SceneLayer(
             onOpenCalendar = onOpenCalendar,
             onOpenNowPlaying = onOpenNowPlaying,
             onOpenShoppingList = onOpenShoppingList,
+            onCheckForUpdate = onCheckForUpdate,
+            updateStatus = updateStatus,
         )
         Scene.Ambient -> AmbientHomeScene(snapshot = homeSnapshot)
         is Scene.Calendar -> CalendarScene(scene, onRenovarGoogle = onRenovarGoogle)
