@@ -649,6 +649,9 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
 
     private val capture = AudioCaptureManager()
     private val playback = AudioPlaybackManager()
+    // Foco de audio: pausa la música/vídeo de otras apps mientras Kiwi
+    // conversa y las reanuda al cerrar (estilo Assistant).
+    private val audioFocus = AudioFocusController(application.applicationContext)
     // Silero VAD wrapper. The constructor loads an ONNX model from the
     // APK so we defer it until the user actually starts a session;
     // most of the time the app is just showing the clock and doesn't
@@ -859,6 +862,9 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // capture, otherwise the second AudioRecord will fail to
         // initialise.
         wakeWordListener.stop()
+        // Pide foco transitorio → YouTube/Spotify se pausan mientras
+        // hablamos y reanudan al cerrar la sesión.
+        audioFocus.acquire()
         playback.start()
         val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
         session = s
@@ -1361,6 +1367,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         playback.stop()
         session?.close()
         session = null
+        // Soltar el foco → la app que estaba sonando (YouTube/Spotify)
+        // reanuda donde se quedó. cleanup() se llama en todos los
+        // finales de sesión (close, error, fallo de captura, cleared),
+        // así que es el sitio único para garantizar que el foco se
+        // suelta pase lo que pase.
+        audioFocus.release()
     }
 
     override fun onCleared() {
