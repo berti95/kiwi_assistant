@@ -16,6 +16,20 @@ from .registry import ToolResult, register
 
 log = logging.getLogger(__name__)
 
+# Caché de la última lista de vídeos que se le mostró al usuario
+# (resultados de búsqueda o ítems de playlist). youtube_play resuelve
+# una POSICIÓN sobre esto para sacar el video_id real: Gemini es
+# malísimo copiando los 11 chars del id verbatim (los alucina) pero
+# fiable diciendo "el segundo". Single-user / single-instance, así
+# que un global basta; la última lista gana.
+_last_video_results: list[dict[str, Any]] = []
+
+
+def _remember_results(videos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    global _last_video_results
+    _last_video_results = list(videos)
+    return videos
+
 # Maximum number of items we'll ever fetch in one tool call. The
 # backend caps the model's `max_results` to this so a runaway
 # Gemini call can't blow YouTube's per-request quota up. Real-world
@@ -241,6 +255,7 @@ async def _youtube_search(query: str, max_results: int = 10) -> ToolResult:
         return ToolResult(
             response={"error": f"youtube api error: {exc.status_code}"},
         )
+    _remember_results(videos)
     return ToolResult(
         response={"query": query, "count": len(videos), "videos": videos},
         scene={"type": "video_list", "title": f"\"{query}\"", "videos": videos},
@@ -334,6 +349,7 @@ async def _youtube_playlist_items(
         )
 
     title = resolved_title or playlist_name or "Playlist"
+    _remember_results(videos)
     return ToolResult(
         response={
             "playlist_id": playlist_id,
@@ -397,20 +413,61 @@ def _yt_deeplink(url: str) -> dict[str, Any]:
 
 
 def _youtube_play(
-    video_id: str,
+    position: int = 0,
+    video_id: str = "",
     title: str = "",
     channel: str = "",
 ) -> ToolResult:
-    """Abre el vídeo en la app de YouTube (deep link).
+    """Abre un vídeo en la app de YouTube (deep link).
 
-    Gemini nos da el video_id de un tool anterior (search / playlist
-    items). En vez de embeber en un WebView (que YouTube bloquea con
-    152-4), lanzamos la app nativa en ``watch?v=ID`` — reproduce con
-    la cuenta del usuario y su Premium.
+    Resolución del vídeo, en orden de preferencia:
+      1. ``position`` (1-based) sobre la última lista mostrada
+         (search / playlist). ESTE es el camino fiable: Gemini dice
+         "el segundo" y el backend saca el video_id REAL de la caché.
+      2. ``video_id`` directo — solo como último recurso, porque
+         Gemini alucina los 11 chars del id y manda uno inexistente
+         → "vídeo no disponible" en la app. Si hay caché y el id no
+         está en ella, lo tratamos como sospechoso y, si hay
+         posición implícita imposible, devolvemos error pidiendo
+         posición.
+
+    Lanzamos la app nativa en ``watch?v=ID`` — reproduce con la
+    cuenta del usuario y su Premium, sin el bloqueo de embed (152-4).
     """
-    if not video_id or not video_id.strip():
-        return ToolResult(response={"error": "missing video_id"})
-    vid = video_id.strip()
+    vid = ""
+    if position and _last_video_results:
+        idx = int(position) - 1
+        if 0 <= idx < len(_last_video_results):
+            item = _last_video_results[idx]
+            vid = (item.get("video_id") or "").strip()
+            title = title or item.get("title", "")
+            channel = channel or item.get("channel", "")
+        else:
+            return ToolResult(response={
+                "error": (
+                    f"position {position} fuera de rango "
+                    f"(hay {len(_last_video_results)} vídeos en la lista)"
+                ),
+            })
+    elif video_id and video_id.strip():
+        vid = video_id.strip()
+        # Si tenemos una lista cacheada y el id no está en ella, es
+        # casi seguro una alucinación de Gemini → pedir posición.
+        if _last_video_results and not any(
+            (v.get("video_id") or "") == vid for v in _last_video_results
+        ):
+            return ToolResult(response={
+                "error": (
+                    "ese video_id no está en la última lista mostrada — "
+                    "probablemente inventado. Llama de nuevo con "
+                    "'position' (1, 2, 3…) según el orden de la lista."
+                ),
+            })
+
+    if not vid:
+        return ToolResult(response={
+            "error": "indica 'position' (sobre la última lista) o 'video_id'",
+        })
     return ToolResult(
         response={"playing": vid, "title": title, "channel": channel},
         scene=_yt_deeplink(f"https://www.youtube.com/watch?v={vid}"),
@@ -543,18 +600,35 @@ register(
 register(
     name="youtube_play",
     description=(
-        "Reproduce un vídeo de YouTube abriéndolo en la app nativa (con "
-        "la cuenta y Premium del usuario). Llama con el video_id que has "
-        "obtenido de youtube_search o youtube_playlist_items. Title y "
-        "channel son opcionales. Tras llamarlo, confirma brevemente "
-        "('Te lo pongo') — el vídeo se abre en la app de YouTube."
+        "Reproduce un vídeo de la última lista (búsqueda o playlist) "
+        "abriéndolo en la app nativa de YouTube (con la cuenta y Premium "
+        "del usuario).\n"
+        "IMPORTANTE: usa SIEMPRE 'position' — el número de orden del "
+        "vídeo en la última lista que mostraste (1 = el primero, 2 = el "
+        "segundo…). Cuando el usuario diga 'pon el segundo', 'el de "
+        "Coldplay' (que era el tercero), etc., traduce a su posición. "
+        "NO inventes ni copies el video_id: son 11 caracteres aleatorios "
+        "que se corrompen al copiarlos y entonces YouTube dice 'no "
+        "disponible'. Solo usa 'video_id' si no hay lista previa y "
+        "tienes un id verificado de esta misma conversación.\n"
+        "Tras llamarlo, confirma brevemente ('Te lo pongo')."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
         properties={
+            "position": types.Schema(
+                type=types.Type.INTEGER,
+                description=(
+                    "Posición 1-based del vídeo en la última lista "
+                    "mostrada (búsqueda / playlist). El camino preferido."
+                ),
+            ),
             "video_id": types.Schema(
                 type=types.Type.STRING,
-                description="ID de YouTube del video (11 caracteres).",
+                description=(
+                    "ID de YouTube (11 chars). Solo como último recurso; "
+                    "prefiere 'position'."
+                ),
             ),
             "title": types.Schema(
                 type=types.Type.STRING,
@@ -565,7 +639,6 @@ register(
                 description="Nombre del canal, opcional.",
             ),
         },
-        required=["video_id"],
     ),
     handler=_youtube_play,
 )

@@ -573,7 +573,49 @@ def test_youtube_playlist_items_missing_both_args_errors() -> None:
     assert "error" in result
 
 
-def test_youtube_play_deeplinks_to_app() -> None:
+def test_youtube_play_by_position_resolves_real_id(monkeypatch) -> None:
+    """El camino fiable: position 1-based sobre la última lista → id real."""
+    monkeypatch.setattr(tools.youtube, "_last_video_results", [
+        {"video_id": "FIRST_id_11", "title": "Uno", "channel": "C1"},
+        {"video_id": "SECOND_id11", "title": "Dos", "channel": "C2"},
+    ])
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    result = _run(
+        tools.dispatch("youtube_play", {"position": 2}, on_scene=sink),
+    )
+    assert result["playing"] == "SECOND_id11"
+    assert result["title"] == "Dos"
+    assert pushed[0]["url"] == "https://www.youtube.com/watch?v=SECOND_id11"
+
+
+def test_youtube_play_position_out_of_range_errors(monkeypatch) -> None:
+    monkeypatch.setattr(tools.youtube, "_last_video_results", [
+        {"video_id": "only_one_11", "title": "Uno", "channel": "C"},
+    ])
+    result = _run(tools.dispatch("youtube_play", {"position": 5}))
+    assert "error" in result
+    assert "rango" in result["error"]
+
+
+def test_youtube_play_rejects_hallucinated_id_when_list_present(monkeypatch) -> None:
+    """video_id que no está en la lista cacheada → error pidiendo position."""
+    monkeypatch.setattr(tools.youtube, "_last_video_results", [
+        {"video_id": "real_id_aaa", "title": "Uno", "channel": "C"},
+    ])
+    result = _run(
+        tools.dispatch("youtube_play", {"video_id": "halluc_xxxx"}),
+    )
+    assert "error" in result
+    assert "position" in result["error"]
+
+
+def test_youtube_play_video_id_works_without_cache(monkeypatch) -> None:
+    """Sin lista previa, un video_id directo es válido (último recurso)."""
+    monkeypatch.setattr(tools.youtube, "_last_video_results", [])
     pushed: list[dict] = []
 
     async def sink(scene: dict) -> None:
@@ -595,24 +637,9 @@ def test_youtube_play_deeplinks_to_app() -> None:
     }]
 
 
-def test_youtube_play_strips_whitespace_around_video_id() -> None:
-    pushed: list[dict] = []
-
-    async def sink(scene: dict) -> None:
-        pushed.append(scene)
-
-    _run(
-        tools.dispatch(
-            "youtube_play",
-            {"video_id": "  abc123  "},
-            on_scene=sink,
-        ),
-    )
-    assert pushed[0]["url"] == "https://www.youtube.com/watch?v=abc123"
-
-
-def test_youtube_play_missing_video_id_errors() -> None:
-    result = _run(tools.dispatch("youtube_play", {"video_id": ""}))
+def test_youtube_play_missing_both_args_errors(monkeypatch) -> None:
+    monkeypatch.setattr(tools.youtube, "_last_video_results", [])
+    result = _run(tools.dispatch("youtube_play", {}))
     assert "error" in result
 
 

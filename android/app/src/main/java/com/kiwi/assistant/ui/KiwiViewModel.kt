@@ -1200,7 +1200,10 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
         // El usuario se va a la app a consumir contenido — cerrar la
         // conversación para no dejar el micro escuchando de fondo.
-        closeConversation(resetScene = true)
+        // resetScene=false: al volver de YouTube se queda la última
+        // escena (p.ej. la lista de búsqueda) en vez del home pelado,
+        // así puede pedir "oye kiwi, pon otro" sobre la misma lista.
+        closeConversation(resetScene = false)
     }
 
     /**
