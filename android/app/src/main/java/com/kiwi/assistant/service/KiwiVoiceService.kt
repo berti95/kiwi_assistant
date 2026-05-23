@@ -200,6 +200,7 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
             }
             "set_volume" -> applyVolume(event.level, event.delta)
             "ui_click" -> clickByLabel(event.label)
+            "ui_read" -> readScreen()
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
     }
@@ -273,6 +274,18 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
             return
         }
         KLog.i(TAG, "ui_click('$label') → ${svc.clickByLabel(label)}")
+    }
+
+    /**
+     * Lee los textos visibles (vía AccessibilityService) y los devuelve
+     * al backend por el socket, para que Gemini "vea" la pantalla. Si
+     * el servicio no está habilitado, manda lista vacía (el backend lo
+     * trata como "no se pudo leer").
+     */
+    private fun readScreen() {
+        val items = KiwiAccessibilityService.instance?.readScreen().orEmpty()
+        if (items.isEmpty()) KLog.w(TAG, "ui_read: nada que leer (¿accesibilidad off?)")
+        engine.sendScreenRead(items)
     }
 
     private fun hasMicPermission(): Boolean =

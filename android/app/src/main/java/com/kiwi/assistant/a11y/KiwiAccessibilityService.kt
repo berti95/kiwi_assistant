@@ -139,6 +139,31 @@ class KiwiAccessibilityService : AccessibilityService() {
         return prevWord in NEGATIONS
     }
 
+    /**
+     * Devuelve los textos visibles de la ventana en primer plano en
+     * orden de lectura (botones + contenido: títulos de una lista,
+     * etc.), deduplicados y capados. Lo usa el backend (ui_read_screen)
+     * para que Gemini sepa qué hay en pantalla — p.ej. los títulos de
+     * "Ver más tarde" para poner "el tercero", o las etiquetas reales
+     * de los botones para no inventarlos.
+     */
+    fun readScreen(): List<String> {
+        val root = rootInActiveWindow ?: run {
+            KLog.w(TAG, "ui_read: rootInActiveWindow == null")
+            return emptyList()
+        }
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        collect(root, nodes)
+        val seen = LinkedHashSet<String>()
+        for (n in nodes) {
+            val l = label(n).trim()
+            if (l.isNotBlank() && l.length <= MAX_ITEM_LEN) seen.add(l)
+            if (seen.size >= MAX_ITEMS) break
+        }
+        KLog.i(TAG, "ui_read: pkg=${root.packageName} → ${seen.size} items")
+        return seen.toList()
+    }
+
     private fun collect(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
         if (node == null) return
         out.add(node)
@@ -189,6 +214,13 @@ class KiwiAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "KiwiA11y"
+
+        // Tope de textos que devuelve readScreen y longitud máx. por
+        // texto: evita mandarle a Gemini un volcado gigante (la home de
+        // YouTube tiene cientos de nodos) y descarta párrafos largos
+        // (descripciones) que no son ni botones ni títulos de lista.
+        private const val MAX_ITEMS = 60
+        private const val MAX_ITEM_LEN = 120
 
         // Palabras que, justo antes del needle, lo convierten en su
         // opuesto: "no me gusta" vs "me gusta", "dislike" vs "like".

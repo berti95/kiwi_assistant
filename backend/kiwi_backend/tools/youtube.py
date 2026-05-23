@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from .. import google_auth
-from .registry import ToolResult, register
+from .registry import ReadScreen, ToolResult, register
 
 log = logging.getLogger(__name__)
 
@@ -412,6 +412,30 @@ def _yt_deeplink(url: str) -> dict[str, Any]:
     }
 
 
+async def _ui_read_screen(read_screen: ReadScreen | None = None) -> ToolResult:
+    """Lee lo que hay AHORA en la pantalla de YouTube (round-trip al tablet).
+
+    Devuelve la lista de etiquetas/textos visibles en orden de lectura:
+    botones reales ("Saltar anuncio", "Suscribirse"…) y contenido
+    (títulos de los vídeos de una lista). Úsalo cuando necesites SABER
+    qué hay para decidir — p.ej. el usuario abrió "Ver más tarde" en la
+    app nativa y pide "pon el tercero": llama a este tool, mira los
+    títulos en orden y luego ui_click sobre el que toque. También evita
+    inventar botones: si no ves "Abajo", no lo pulses.
+    """
+    if read_screen is None:
+        return ToolResult(response={"error": "screen read unavailable"})
+    items = await read_screen()
+    if not items:
+        return ToolResult(response={
+            "error": (
+                "no pude leer la pantalla (¿accesibilidad apagada o no "
+                "estás en YouTube?)"
+            ),
+        })
+    return ToolResult(response={"count": len(items), "screen": items})
+
+
 def _ui_click(label: str = "") -> ToolResult:
     """Pulsa por voz un botón de la app que está en primer plano (YouTube).
 
@@ -614,6 +638,23 @@ register(
         },
     ),
     handler=_youtube_open,
+)
+
+register(
+    name="ui_read_screen",
+    description=(
+        "Lee lo que hay ahora mismo en la pantalla de YouTube y te "
+        "devuelve la lista de textos visibles en orden (botones y "
+        "contenido). Llámalo cuando necesites VER para decidir: si el "
+        "usuario abrió 'Ver más tarde' u otra lista en la app nativa y "
+        "pide 'pon el tercero', usa este tool, identifica el título del "
+        "tercer vídeo y luego llama a ui_click con ese título. También "
+        "úsalo antes de ui_click si dudas de cómo se llama un botón, "
+        "para no inventarlo. Devuelve {error} si no se pudo leer "
+        "(accesibilidad apagada o no está en YouTube)."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_ui_read_screen,
 )
 
 register(

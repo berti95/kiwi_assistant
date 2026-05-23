@@ -32,6 +32,10 @@ TYPE_ACTIVITY_END = "activity.end"
 TYPE_TURN_CANCEL = "turn.cancel"
 TYPE_AUDIO_END = "audio.end"
 TYPE_SESSION_END = "session.end"
+# Respuesta del tablet a un device_command "ui_read": las etiquetas /
+# textos visibles en pantalla, para que Gemini sepa qué hay (botones
+# reales, títulos de una lista) en vez de adivinar.
+TYPE_UI_SCREEN = "ui.screen"
 
 # Server → client message types.
 TYPE_SESSION_READY = "session.ready"

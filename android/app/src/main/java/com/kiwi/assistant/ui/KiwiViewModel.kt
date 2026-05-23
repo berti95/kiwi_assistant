@@ -861,6 +861,11 @@ class KiwiViewModel(application: Application) :
                     else -> KLog.i(TAG, "ui_click('$label') → ${svc.clickByLabel(label)}")
                 }
             }
+            "ui_read" -> {
+                val items = KiwiAccessibilityService.instance?.readScreen().orEmpty()
+                if (items.isEmpty()) KLog.w(TAG, "ui_read: nada que leer (¿accesibilidad off?)")
+                engine.sendScreenRead(items)
+            }
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
     }

@@ -204,6 +204,12 @@ class KiwiSession(
         ws.send(json.encodeToString(AudioEnd.serializer(), AudioEnd()))
     }
 
+    /** Respuesta a un device_command "ui_read": textos visibles en pantalla. */
+    fun sendUiScreen(items: List<String>) {
+        val ws = webSocket ?: return
+        ws.send(json.encodeToString(UiScreen.serializer(), UiScreen(items = items)))
+    }
+
     fun close() {
         val ws = webSocket ?: return
         closedByClient = true

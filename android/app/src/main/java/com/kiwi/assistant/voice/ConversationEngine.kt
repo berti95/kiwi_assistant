@@ -146,6 +146,16 @@ class ConversationEngine(
         }
     }
 
+    /**
+     * Manda al backend los textos visibles en pantalla, en respuesta a
+     * un device_command "ui_read". Lo llama el host tras leer el árbol
+     * de accesibilidad; el backend resuelve con esto el round-trip de
+     * ui_read_screen para que Gemini "vea" la app nativa.
+     */
+    fun sendScreenRead(items: List<String>) {
+        session?.sendUiScreen(items)
+    }
+
     /** Teardown del pipeline → Idle. No toca wake word / escenas. */
     fun close() {
         noSpeechTimeoutJob?.cancel()

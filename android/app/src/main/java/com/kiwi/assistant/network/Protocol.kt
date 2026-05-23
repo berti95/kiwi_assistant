@@ -17,6 +17,9 @@ object Protocol {
     const val TYPE_TURN_CANCEL = "turn.cancel"
     const val TYPE_AUDIO_END = "audio.end"
     const val TYPE_SESSION_END = "session.end"
+    // Respuesta a un device_command "ui_read": etiquetas/textos visibles
+    // en pantalla, para que el backend (Gemini) sepa qué hay.
+    const val TYPE_UI_SCREEN = "ui.screen"
 
     const val TYPE_SESSION_READY = "session.ready"
     const val TYPE_AUDIO_OUTPUT = "audio.output"
@@ -51,3 +54,9 @@ data class AudioEnd(val type: String = Protocol.TYPE_AUDIO_END)
 
 @Serializable
 data class SessionEnd(val type: String = Protocol.TYPE_SESSION_END)
+
+@Serializable
+data class UiScreen(
+    val type: String = Protocol.TYPE_UI_SCREEN,
+    val items: List<String>,
+)

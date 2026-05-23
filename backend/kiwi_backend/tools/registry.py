@@ -35,6 +35,10 @@ DEFAULT_TIMEZONE = "Europe/Madrid"
 
 Handler = Callable[..., Any] | Callable[..., Awaitable[Any]]
 SceneSink = Callable[[dict[str, Any]], Awaitable[None]]
+# Lee la pantalla del tablet (round-trip): devuelve las etiquetas /
+# textos visibles. Inyectado en los handlers que lo declaren, como
+# on_scene. Lo usa ui_read_screen para que Gemini "vea" la app nativa.
+ReadScreen = Callable[[], Awaitable[list[str]]]
 
 
 @dataclass(frozen=True)
@@ -111,6 +115,7 @@ async def dispatch(
     name: str,
     args: dict[str, Any] | None,
     on_scene: SceneSink | None = None,
+    read_screen: ReadScreen | None = None,
 ) -> dict[str, Any]:
     """Run the named tool and return its JSON-serialisable response.
 
@@ -127,10 +132,11 @@ async def dispatch(
     caller la maneja.
     """
     args = args or {}
-    # Defensive: el modelo no debería incluir on_scene como argumento
-    # (no está en su schema) pero filtrarlo evita que un input
-    # malicioso pueda inyectarlo y suplantar nuestro sink.
+    # Defensive: el modelo no debería incluir on_scene / read_screen
+    # como argumentos (no están en su schema) pero filtrarlos evita que
+    # un input malicioso pueda inyectarlos y suplantar nuestros canales.
     args.pop("on_scene", None)
+    args.pop("read_screen", None)
     tool = _REGISTRY.get(name)
     if tool is None:
         log.warning("unknown tool requested: %r", name)
@@ -146,6 +152,8 @@ async def dispatch(
         sig = inspect.signature(tool.handler)
         if on_scene is not None and "on_scene" in sig.parameters:
             call_args["on_scene"] = on_scene
+        if read_screen is not None and "read_screen" in sig.parameters:
+            call_args["read_screen"] = read_screen
         result = tool.handler(**call_args)
         if inspect.isawaitable(result):
             result = await result
