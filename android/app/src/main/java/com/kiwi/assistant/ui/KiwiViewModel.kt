@@ -1161,9 +1161,46 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                 val pkg = event.packageName ?: return
                 openAppAndReturnToKiwi(pkg)
             }
+            "open_app_url" -> {
+                val url = event.url ?: return
+                openUrlInApp(url, event.packageName)
+            }
             "set_volume" -> applyVolume(level = event.level, delta = event.delta)
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
+    }
+
+    /**
+     * Abre una URL en una app concreta (deep link). Usado por los
+     * tools de YouTube para reproducir / abrir Watch Later / etc. en
+     * la app nativa, donde aplica tu cuenta + Premium y no hay las
+     * restricciones de embed (error 152-4) del WebView.
+     *
+     * Si la app pedida no está instalada, cae a abrir la URL sin
+     * package (el SO elige: navegador u otra app que la maneje), así
+     * el deep link sigue funcionando en un tablet sin la app de
+     * YouTube. Cierra la conversación: el usuario se va a ver el
+     * vídeo, no tiene sentido dejar el micro abierto.
+     */
+    private fun openUrlInApp(url: String, packageName: String?) {
+        val ctx = getApplication<Application>().applicationContext
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (packageName != null) setPackage(packageName)
+        }
+        val launched = runCatching { ctx.startActivity(intent) }.isSuccess
+        if (!launched && packageName != null) {
+            // App no instalada / no resuelve → reintento sin package.
+            KLog.w(TAG, "open_app_url: $packageName no resolvió, abriendo sin package")
+            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { ctx.startActivity(fallback) }.onFailure {
+                KLog.w(TAG, "open_app_url fallback falló: ${it.message}")
+            }
+        }
+        // El usuario se va a la app a consumir contenido — cerrar la
+        // conversación para no dejar el micro escuchando de fondo.
+        closeConversation(resetScene = true)
     }
 
     /**

@@ -60,6 +60,7 @@ sealed interface KiwiSessionEvent {
         val packageName: String? = null,
         val level: Int? = null,
         val delta: Int? = null,
+        val url: String? = null,
     ) : KiwiSessionEvent
 
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
@@ -253,6 +254,7 @@ class KiwiSession(
                                 ?.contentOrNull?.toIntOrNull(),
                             delta = (sceneObj["delta"] as? JsonPrimitive)
                                 ?.contentOrNull?.toIntOrNull(),
+                            url = sceneObj.string("url"),
                         ),
                     )
                     return

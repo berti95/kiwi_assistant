@@ -30,6 +30,7 @@
     -->
     <queries>
         <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.youtube" />
     </queries>
 
     <application

@@ -573,7 +573,7 @@ def test_youtube_playlist_items_missing_both_args_errors() -> None:
     assert "error" in result
 
 
-def test_youtube_play_pushes_video_player_scene() -> None:
+def test_youtube_play_deeplinks_to_app() -> None:
     pushed: list[dict] = []
 
     async def sink(scene: dict) -> None:
@@ -588,10 +588,10 @@ def test_youtube_play_pushes_video_player_scene() -> None:
     )
     assert result["playing"] == "dQw4w9WgXcQ"
     assert pushed == [{
-        "type": "video_player",
-        "video_id": "dQw4w9WgXcQ",
-        "title": "Foo",
-        "channel": "Bar",
+        "type": "device_command",
+        "command": "open_app_url",
+        "package": "com.google.android.youtube",
+        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     }]
 
 
@@ -608,7 +608,7 @@ def test_youtube_play_strips_whitespace_around_video_id() -> None:
             on_scene=sink,
         ),
     )
-    assert pushed[0]["video_id"] == "abc123"
+    assert pushed[0]["url"] == "https://www.youtube.com/watch?v=abc123"
 
 
 def test_youtube_play_missing_video_id_errors() -> None:
@@ -616,50 +616,20 @@ def test_youtube_play_missing_video_id_errors() -> None:
     assert "error" in result
 
 
-def test_youtube_watch_later_uses_configured_playlist(monkeypatch) -> None:
-    from kiwi_backend.settings import settings as live_settings
-
-    monkeypatch.setattr(
-        live_settings, "youtube_watch_later_playlist_id", "PL_test_wl",
-    )
-    monkeypatch.setattr(tools.google_auth, "credentials", lambda: object())
-
-    captured: dict[str, str] = {}
-
-    def fake_items(creds, playlist_id, max_results):  # noqa: ARG001
-        captured["id"] = playlist_id
-        return [
-            {
-                "video_id": "v1",
-                "title": "Pendiente 1",
-                "channel": "C",
-                "thumbnail_url": None,
-                "duration": "10:00",
-            },
-        ]
-
-    monkeypatch.setattr(tools.youtube, "_youtube_playlist_items_blocking", fake_items)
-
+def test_youtube_watch_later_deeplinks_to_real_wl() -> None:
     pushed: list[dict] = []
 
     async def sink(scene: dict) -> None:
         pushed.append(scene)
 
     result = _run(tools.dispatch("youtube_watch_later", None, on_scene=sink))
-    assert captured["id"] == "PL_test_wl"
-    assert result["title"] == "Ver más tarde"
-    assert result["count"] == 1
-    assert pushed[0]["type"] == "video_list"
-    assert pushed[0]["title"] == "Ver más tarde"
-
-
-def test_youtube_watch_later_errors_when_unconfigured(monkeypatch) -> None:
-    from kiwi_backend.settings import settings as live_settings
-
-    monkeypatch.setattr(live_settings, "youtube_watch_later_playlist_id", "")
-    result = _run(tools.dispatch("youtube_watch_later", None))
-    assert "error" in result
-    assert "not configured" in result["error"]
+    assert result["opened"] == "watch_later"
+    assert pushed == [{
+        "type": "device_command",
+        "command": "open_app_url",
+        "package": "com.google.android.youtube",
+        "url": "https://www.youtube.com/playlist?list=WL",
+    }]
 
 
 def test_youtube_open_default_url() -> None:
@@ -669,8 +639,13 @@ def test_youtube_open_default_url() -> None:
         pushed.append(scene)
 
     result = _run(tools.dispatch("youtube_open", None, on_scene=sink))
-    assert result["opened"] == "https://m.youtube.com"
-    assert pushed == [{"type": "browse_youtube", "url": "https://m.youtube.com"}]
+    assert result["opened"] == "https://www.youtube.com"
+    assert pushed == [{
+        "type": "device_command",
+        "command": "open_app_url",
+        "package": "com.google.android.youtube",
+        "url": "https://www.youtube.com",
+    }]
 
 
 def test_youtube_open_explicit_url_passes_through() -> None:
@@ -682,12 +657,12 @@ def test_youtube_open_explicit_url_passes_through() -> None:
     result = _run(
         tools.dispatch(
             "youtube_open",
-            {"url": "https://m.youtube.com/feed/subscriptions"},
+            {"url": "https://www.youtube.com/feed/subscriptions"},
             on_scene=sink,
         ),
     )
-    assert result["opened"] == "https://m.youtube.com/feed/subscriptions"
-    assert pushed[0]["url"] == "https://m.youtube.com/feed/subscriptions"
+    assert result["opened"] == "https://www.youtube.com/feed/subscriptions"
+    assert pushed[0]["url"] == "https://www.youtube.com/feed/subscriptions"
 
 
 def test_youtube_open_adds_https_when_missing() -> None:
@@ -699,11 +674,11 @@ def test_youtube_open_adds_https_when_missing() -> None:
     result = _run(
         tools.dispatch(
             "youtube_open",
-            {"url": "m.youtube.com/@somechannel"},
+            {"url": "www.youtube.com/@somechannel"},
             on_scene=sink,
         ),
     )
-    assert result["opened"] == "https://m.youtube.com/@somechannel"
+    assert result["opened"] == "https://www.youtube.com/@somechannel"
 
 
 # ---- todos tools ----------------------------------------------------

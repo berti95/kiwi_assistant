@@ -12,7 +12,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from .. import google_auth
-from ..settings import settings as _settings
 from .registry import ToolResult, register
 
 log = logging.getLogger(__name__)
@@ -346,74 +345,55 @@ async def _youtube_playlist_items(
     )
 
 
-async def _youtube_watch_later(max_results: int = 20) -> ToolResult:
-    """Read the user's "ver más tarde" playlist.
+def _youtube_watch_later() -> ToolResult:
+    """Abre la lista "Ver más tarde" REAL en la app de YouTube.
 
-    YouTube's official Watch Later (system playlist ``WL``) hasn't
-    been API-accessible since 2016. The user maintains a regular
-    custom playlist (configured in settings) as a stand-in, and
-    this tool reads it without making Gemini guess the playlist's
-    name.
+    Antes leíamos una playlist custom como stand-in porque la Data
+    API no expone la Watch Later del sistema (``WL``) desde 2016 —
+    pero eso solo enseñaba una lista falsa en Kiwi. Con el deep link
+    a ``playlist?list=WL`` la app nativa abre tu Watch Later de
+    verdad, con tu cuenta. El stand-in por API queda obsoleto.
     """
-    playlist_id = _settings.youtube_watch_later_playlist_id
-    if not playlist_id:
-        return ToolResult(
-            response={
-                "error": (
-                    "watch_later_playlist_id not configured. Set the "
-                    "YOUTUBE_WATCH_LATER_PLAYLIST_ID env var to the ID of "
-                    "your 'ver más tarde' playlist."
-                ),
-            },
-        )
-    capped = max(1, min(int(max_results), _YT_MAX_RESULTS_HARD_CAP))
-    try:
-        creds = google_auth.credentials()
-    except google_auth.GoogleAuthUnavailableError as exc:
-        return ToolResult(response={"error": str(exc)})
-    try:
-        videos = await asyncio.to_thread(
-            _youtube_playlist_items_blocking, creds, playlist_id, capped,
-        )
-    except HttpError as exc:
-        return ToolResult(
-            response={"error": f"youtube api error: {exc.status_code}"},
-        )
     return ToolResult(
-        response={
-            "playlist_id": playlist_id,
-            "title": "Ver más tarde",
-            "count": len(videos),
-            "videos": videos,
-        },
-        scene={
-            "type": "video_list",
-            "title": "Ver más tarde",
-            "videos": videos,
-        },
+        response={"opened": "watch_later"},
+        scene=_yt_deeplink("https://www.youtube.com/playlist?list=WL"),
     )
 
 
 def _youtube_open(url: str | None = None) -> ToolResult:
-    """Push the full-YouTube-web browser scene to the tablet.
+    """Abre YouTube en la app nativa (deep link).
 
-    Pure scene push — no API call. Used as a fallback when the user
-    asks for something we don't have a dedicated tool for (browsing
-    the home page, suscripciones, a specific channel page, …).
-
-    The user has to be signed in inside the WebView for personalised
-    content. Google blocks WebView-based sign-in, so the first sign-in
-    is unreliable and may need to happen via Chrome on the device.
-    Once cookies are persisted in the WebView they survive across
-    sessions.
+    Fallback genérico para lo que no tiene tool dedicada: home,
+    suscripciones, un canal concreto, una playlist, una búsqueda…
+    Gemini construye la URL de youtube.com adecuada y la abrimos en
+    la app, donde el usuario ya está con su cuenta (a diferencia del
+    WebView, que requería login y lo personalizado no funcionaba).
     """
-    target = (url or "https://m.youtube.com").strip()
+    target = (url or "https://www.youtube.com").strip()
     if not target.startswith(("http://", "https://")):
         target = "https://" + target
     return ToolResult(
         response={"opened": target},
-        scene={"type": "browse_youtube", "url": target},
+        scene=_yt_deeplink(target),
     )
+
+
+# Paquete de la app de YouTube en Android. El tablet hace deep-link
+# aquí en vez de embeber en un WebView: la app nativa reproduce con
+# la cuenta del usuario (Premium, historial, ver más tarde) y no
+# sufre el bloqueo de embed (error 152-4) que YouTube aplica a los
+# iframes en WebView desde finales de 2025.
+_YT_PACKAGE = "com.google.android.youtube"
+
+
+def _yt_deeplink(url: str) -> dict[str, Any]:
+    """device_command que el tablet resuelve abriendo la app de YouTube."""
+    return {
+        "type": "device_command",
+        "command": "open_app_url",
+        "package": _YT_PACKAGE,
+        "url": url,
+    }
 
 
 def _youtube_play(
@@ -421,22 +401,19 @@ def _youtube_play(
     title: str = "",
     channel: str = "",
 ) -> ToolResult:
-    """Push the video player scene; the tablet starts playback.
+    """Abre el vídeo en la app de YouTube (deep link).
 
-    Pure scene push — no API call. Gemini gives us the video_id from
-    a previous tool result (search / playlist items), and we hand
-    the IDs straight to the IFrame Player on the tablet.
+    Gemini nos da el video_id de un tool anterior (search / playlist
+    items). En vez de embeber en un WebView (que YouTube bloquea con
+    152-4), lanzamos la app nativa en ``watch?v=ID`` — reproduce con
+    la cuenta del usuario y su Premium.
     """
     if not video_id or not video_id.strip():
         return ToolResult(response={"error": "missing video_id"})
+    vid = video_id.strip()
     return ToolResult(
-        response={"playing": video_id, "title": title, "channel": channel},
-        scene={
-            "type": "video_player",
-            "video_id": video_id.strip(),
-            "title": title,
-            "channel": channel,
-        },
+        response={"playing": vid, "title": title, "channel": channel},
+        scene=_yt_deeplink(f"https://www.youtube.com/watch?v={vid}"),
     )
 
 
@@ -522,40 +499,30 @@ register(
 register(
     name="youtube_watch_later",
     description=(
-        "Devuelve y muestra los videos guardados por el usuario para ver "
-        "más tarde. Llama a este tool SIEMPRE que el usuario diga 'ver "
-        "más tarde', 'pendientes', 'videos guardados', 'lo que tengo "
-        "para ver', o cualquier variante similar. Es un atajo a la "
-        "playlist personalizada que el usuario mantiene como sustituto "
-        "del 'Watch Later' nativo (que YouTube no expone por API). "
-        "Después de mostrar la lista, si el usuario dice 'pon el N' usa "
-        "youtube_play con el video_id correspondiente."
+        "Abre la lista 'Ver más tarde' del usuario en la app de YouTube. "
+        "Llama a este tool SIEMPRE que el usuario diga 'ver más tarde', "
+        "'pendientes', 'videos guardados', 'lo que tengo para ver', o "
+        "variantes. Abre la Watch Later REAL de su cuenta en la app "
+        "nativa (con su Premium); no devuelve una lista en pantalla, "
+        "así que tras llamarlo confirma brevemente ('Te abro tu lista "
+        "de ver más tarde')."
     ),
-    parameters=types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "max_results": types.Schema(
-                type=types.Type.INTEGER,
-                description="Máximo de videos (1-25, por defecto 20).",
-            ),
-        },
-    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
     handler=_youtube_watch_later,
 )
 
 register(
     name="youtube_open",
     description=(
-        "Abre YouTube en pantalla completa para que el usuario navegue "
-        "manualmente con el dedo (suscripciones, recomendaciones, página "
-        "principal, un canal concreto, etc.). Llama a este tool SOLO "
-        "cuando no haya una tool específica que cubra la petición. Si el "
-        "usuario pide ver una playlist concreta usa "
-        "youtube_playlist_items; si pide 'ver más tarde' / 'pendientes' "
-        "usa youtube_watch_later; si pide buscar usa youtube_search; si "
-        "pide reproducir un video usa youtube_play. Acepta una URL "
-        "específica de youtube.com si la conversación lo justifica; en "
-        "otro caso abre la home móvil por defecto."
+        "Abre YouTube en la app nativa, en la sección que pidas. Llama a "
+        "este tool SOLO cuando no haya una tool específica: suscripciones "
+        "(https://www.youtube.com/feed/subscriptions), home, un canal "
+        "(https://www.youtube.com/@handle), tendencias, etc. Construye la "
+        "URL de youtube.com adecuada. Para una playlist concreta usa "
+        "youtube_playlist_items; para 'ver más tarde' usa "
+        "youtube_watch_later; para buscar usa youtube_search; para "
+        "reproducir un vídeo usa youtube_play. Se abre en la app con la "
+        "cuenta del usuario, así que tras llamarlo confirma brevemente."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
@@ -563,8 +530,9 @@ register(
             "url": types.Schema(
                 type=types.Type.STRING,
                 description=(
-                    "URL específica de youtube.com a abrir, opcional. "
-                    "Por defecto la home móvil https://m.youtube.com."
+                    "URL de youtube.com a abrir (p.ej. "
+                    "https://www.youtube.com/feed/subscriptions). Por "
+                    "defecto la home."
                 ),
             ),
         },
@@ -575,10 +543,11 @@ register(
 register(
     name="youtube_play",
     description=(
-        "Reproduce un video de YouTube en la pantalla del tablet. Llama "
-        "a este tool con el video_id que has obtenido de una llamada "
-        "previa a youtube_search o youtube_playlist_items. Title y "
-        "channel son opcionales y se muestran sobre el reproductor."
+        "Reproduce un vídeo de YouTube abriéndolo en la app nativa (con "
+        "la cuenta y Premium del usuario). Llama con el video_id que has "
+        "obtenido de youtube_search o youtube_playlist_items. Title y "
+        "channel son opcionales. Tras llamarlo, confirma brevemente "
+        "('Te lo pongo') — el vídeo se abre en la app de YouTube."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
