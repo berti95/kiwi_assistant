@@ -21,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.alarm.AlarmRingReceiver
 import com.kiwi.assistant.log.LogShipper
+import com.kiwi.assistant.service.ForegroundSceneRelay
 import com.kiwi.assistant.service.KiwiVoiceService
 import com.kiwi.assistant.ui.theme.KiwiTheme
 import com.kiwi.assistant.updater.AutoUpdater
@@ -122,9 +123,10 @@ class MainActivity : ComponentActivity() {
         brightnessManager.start()
         // Volvemos a primer plano: paramos el wake word del service
         // (background) ANTES de reabrir el del ViewModel, para que no
-        // compitan por el micro. El service, cuando detecta "oye kiwi"
-        // en background, conversa con su propio overlay encima de la
-        // otra app — no trae esta Activity al frente.
+        // compitan por el micro. El service, al detectar "oye kiwi" en
+        // background, conversa en su overlay encima de la otra app; solo
+        // nos trae al frente cuando la respuesta produce una escena
+        // visual (calendario, listas…), que consumimos abajo.
         KiwiVoiceService.stop(this)
         viewModel.setMicrophonePermission(hasMicPermission())
         // Belt-and-braces: setMicrophonePermission ya arranca el wake
@@ -132,6 +134,10 @@ class MainActivity : ComponentActivity() {
         // force-stopped o el listener petó, llamarlo en cada resume
         // garantiza el micro abierto para "oye kiwi".
         viewModel.ensureWakeWordListening()
+        // Si veníamos de una conversación en overlay (background) que
+        // produjo una escena visual, el service nos trajo al frente y
+        // dejó la escena aquí: la pintamos en el ViewModel.
+        ForegroundSceneRelay.consume()?.let { viewModel.onSceneSet(it) }
         startUpdater()
     }
 

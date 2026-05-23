@@ -65,6 +65,11 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
     private val overlay by lazy { ConversationOverlay(applicationContext) }
     private var stateJob: Job? = null
 
+    // Escena visual producida por la respuesta actual (calendario,
+    // lista de vídeos…). Si la hay, al cerrar la conversación traemos
+    // Kiwi al frente con ella en vez de re-armar el wake word de fondo.
+    private var pendingForegroundScene: Scene? = null
+
     override fun onCreate() {
         super.onCreate()
         ensureChannel()
@@ -104,28 +109,88 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
         afterClose()
     }
 
-    /** Tras cerrar (por el usuario o por el motor): limpiar y re-armar. */
+    /**
+     * Tras cerrar (por el usuario o por el motor): limpiar. Si la
+     * respuesta produjo una escena visual, traemos Kiwi al frente con
+     * ella (MainActivity parará este service y armará su propio wake
+     * word). Si fue una respuesta de voz pura, seguimos escuchando
+     * "oye kiwi" en background.
+     */
     private fun afterClose() {
         stateJob?.cancel()
         stateJob = null
         overlay.hide()
-        // Re-armar el wake word para seguir escuchando "oye kiwi".
+        val foreground = pendingForegroundScene
+        pendingForegroundScene = null
+        if (foreground != null) {
+            bringKiwiToForeground(foreground)
+            return
+        }
         startWakeWord()
+    }
+
+    /**
+     * Trae Kiwi (MainActivity) al frente mostrando [scene]. Deja la
+     * escena en [ForegroundSceneRelay] para que MainActivity la pinte
+     * al reanudar. Si por algo no podemos lanzar la Activity, caemos
+     * a re-armar el wake word para no quedarnos sordos.
+     */
+    private fun bringKiwiToForeground(scene: Scene) {
+        ForegroundSceneRelay.put(scene)
+        val intent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT,
+            )
+        }
+        runCatching { intent?.let { startActivity(it) } }
+            .onFailure {
+                KLog.w(TAG, "no se pudo traer Kiwi al frente: ${it.message}")
+                ForegroundSceneRelay.consume()  // descarta la escena huérfana
+                startWakeWord()
+            }
+    }
+
+    /**
+     * Escenas que merece la pena ver en grande en la app (no solo como
+     * texto en la pill): listas, calendario, vídeos, lo que suena. Las
+     * pasivas (timer, reproducción de vídeo) o de sistema (alarma
+     * sonando) NO traen Kiwi al frente — interrumpirían lo que estás
+     * viendo sin aportar.
+     */
+    private fun shouldShowInForeground(scene: Scene): Boolean = when (scene) {
+        is Scene.Calendar,
+        is Scene.VideoList,
+        is Scene.PlaylistList,
+        is Scene.TodoList,
+        is Scene.AlarmList,
+        is Scene.ShoppingList,
+        is Scene.UsageStats,
+        is Scene.NowPlaying,
+        -> true
+        else -> false
     }
 
     // ---- ConversationEngine.Host ------------------------------------
 
     override fun onSceneSet(scene: Scene) {
-        // El overlay no pinta escenas (calendar, listas…): Kiwi
-        // responde por voz y el overlay muestra el transcript. Las
-        // device_command (reproducir, etc.) sí se manejan abajo.
+        // El overlay solo muestra el transcript en la pill. Si la
+        // respuesta produce una escena visual (calendario, listas,
+        // vídeos…), la recordamos: al terminar de hablar traeremos
+        // Kiwi al frente con ella en vez de dejarla escondida. Las
+        // device_command (reproducir, etc.) se manejan abajo.
+        if (shouldShowInForeground(scene)) {
+            pendingForegroundScene = scene
+        }
     }
 
     override fun onDeviceCommand(event: KiwiSessionEvent.DeviceCommand) {
         when (event.command) {
             "open_app_url" -> {
                 event.url?.let { openUrlInApp(it, event.packageName) }
-                // El usuario se va a la app → cerrar conversación.
+                // El usuario se va a la app (YouTube) → no traer Kiwi
+                // al frente aunque la búsqueda dejara una escena.
+                pendingForegroundScene = null
                 engine.close()
                 afterClose()
             }
