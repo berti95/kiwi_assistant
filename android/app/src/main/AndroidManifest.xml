@@ -23,6 +23,19 @@
         tools:ignore="ProtectedPermissions" />
 
     <!--
+      Wake word en segundo plano (Fase 2): un foreground service de
+      micrófono mantiene "oye kiwi" vivo mientras Kiwi no está en
+      primer plano. SYSTEM_ALERT_WINDOW permite traer la Activity al
+      frente desde background (y, en Fase 2b, el overlay encima de
+      otras apps). POST_NOTIFICATIONS para la notificación obligatoria
+      del foreground service en Android 13+.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
       Android 11+ requiere declarar visibilidad de paquetes terceros
       que vayamos a lanzar con PackageManager.getLaunchIntentForPackage.
       Sin esto, la llamada devuelve null aunque la app esté instalada.
@@ -57,6 +70,11 @@
                 <action android:name="com.kiwi.assistant.ALARM_RING" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".service.KiwiVoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <activity
             android:name=".ui.MainActivity"

@@ -2,7 +2,10 @@ package com.kiwi.assistant.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kiwi.assistant.BuildConfig
 import com.kiwi.assistant.alarm.AlarmRingReceiver
 import com.kiwi.assistant.log.LogShipper
+import com.kiwi.assistant.service.KiwiVoiceService
 import com.kiwi.assistant.ui.theme.KiwiTheme
 import com.kiwi.assistant.updater.AutoUpdater
 import com.kiwi.assistant.util.BrightnessManager
@@ -41,6 +45,10 @@ class MainActivity : ComponentActivity() {
         viewModel.setMicrophonePermission(granted)
     }
 
+    private val requestNotifications = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* la notificación del FGS se mostrará si se concede; no-op si no */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -56,6 +64,22 @@ class MainActivity : ComponentActivity() {
 
         viewModel.setMicrophonePermission(hasMicPermission())
         if (!hasMicPermission()) requestMic.launch(Manifest.permission.RECORD_AUDIO)
+
+        // Permisos para el wake word en background (Fase 2):
+        //  - POST_NOTIFICATIONS (Android 13+): para que se vea la
+        //    notificación obligatoria del foreground service.
+        //  - "Mostrar sobre otras apps": para que el service pueda
+        //    traer Kiwi al frente desde background (y el overlay de
+        //    Fase 2b). Se concede en Ajustes, así que solo lanzamos
+        //    la pantalla si falta.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        ensureOverlayPermission()
 
         // Start shipping app logs to the backend so the developer can
         // see what the tablet is doing without ADB. Outlives the
@@ -96,22 +120,71 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         brightnessManager.start()
+        // Volvemos a primer plano: paramos el wake word del service
+        // (background) ANTES de reabrir el del ViewModel, para que no
+        // compitan por el micro.
+        KiwiVoiceService.stop(this)
         viewModel.setMicrophonePermission(hasMicPermission())
-        // Belt-and-braces: setMicrophonePermission already starts the
-        // wake-word listener when permission flips from false to true,
-        // but if the app was force-stopped or the listener crashed,
-        // calling ensureWakeWordListening() on every resume guarantees
-        // that returning to the clock leaves the mic open for "hey
-        // jarvis".
-        viewModel.ensureWakeWordListening()
+        // Si llegamos aquí porque el service detectó "oye kiwi" en
+        // background, abrimos sesión directamente en vez de re-armar
+        // el wake word.
+        val wokenFromBackground = intent?.getBooleanExtra(
+            KiwiVoiceService.EXTRA_WAKE, false,
+        ) == true
+        if (wokenFromBackground) {
+            intent.removeExtra(KiwiVoiceService.EXTRA_WAKE)
+            viewModel.onTap()  // abre sesión cuando el pipeline está Idle
+        } else {
+            // Belt-and-braces: setMicrophonePermission ya arranca el
+            // wake word cuando el permiso pasa a concedido, pero si la
+            // app fue force-stopped o el listener petó, llamarlo en
+            // cada resume garantiza el micro abierto para "oye kiwi".
+            viewModel.ensureWakeWordListening()
+        }
         startUpdater()
     }
 
     override fun onPause() {
         brightnessManager.stop()
+        // Soltamos el micro del ViewModel y cedemos el wake word al
+        // foreground service, que sigue escuchando "oye kiwi" mientras
+        // Kiwi no está en primer plano (p.ej. viendo YouTube).
         viewModel.releaseMicForBackground()
+        if (canListenInBackground()) {
+            KiwiVoiceService.start(this)
+        }
         stopUpdater()
         super.onPause()
+    }
+
+    /**
+     * El service de wake word en background necesita permiso de micro
+     * (obvio) y, para traer la Activity al frente desde background sin
+     * que el SO lo bloquee, "Mostrar sobre otras apps"
+     * (SYSTEM_ALERT_WINDOW). Si falta alguno, no arrancamos el service
+     * — el wake word seguirá funcionando con Kiwi en primer plano.
+     */
+    private fun canListenInBackground(): Boolean {
+        if (!hasMicPermission()) return false
+        return Settings.canDrawOverlays(this)
+    }
+
+    /**
+     * Pide "Mostrar sobre otras apps" si falta. Lo necesita el service
+     * para abrir Kiwi desde background (Fase 2a) y para el overlay
+     * (Fase 2b). Es un permiso especial que se concede en Ajustes, no
+     * con un diálogo runtime normal.
+     */
+    private fun ensureOverlayPermission() {
+        if (Settings.canDrawOverlays(this)) return
+        runCatching {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+        }
     }
 
     private fun startUpdater() {
