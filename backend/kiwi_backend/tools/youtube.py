@@ -526,11 +526,10 @@ register(
     description=(
         "Lista las playlists propias del usuario en YouTube. Útil cuando "
         "pregunte 'qué playlists tengo' o cuando necesites resolver un "
-        "nombre de playlist a su ID. NO incluye 'Ver más tarde' — Google "
-        "deprecó el acceso a esa playlist por API. Si el usuario pide "
-        "'ver más tarde' explícale brevemente y sugiere usar una playlist "
-        "personalizada en su lugar (puedes ofrecerte a abrir la que tenga "
-        "para ese propósito si la nombra)."
+        "nombre de playlist a su ID. NO incluye 'Ver más tarde' — esa es "
+        "una playlist de sistema; para abrirla usa SIEMPRE el tool "
+        "youtube_watch_later (abre la nativa de Google), nunca una "
+        "playlist personalizada como sustituto."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
