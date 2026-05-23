@@ -61,6 +61,8 @@ sealed interface KiwiSessionEvent {
         val level: Int? = null,
         val delta: Int? = null,
         val url: String? = null,
+        /** Etiqueta del botón a pulsar (ui_click). */
+        val label: String? = null,
     ) : KiwiSessionEvent
 
     data class Closed(val code: Int, val reason: String) : KiwiSessionEvent
@@ -255,6 +257,7 @@ class KiwiSession(
                             delta = (sceneObj["delta"] as? JsonPrimitive)
                                 ?.contentOrNull?.toIntOrNull(),
                             url = sceneObj.string("url"),
+                            label = sceneObj.string("label"),
                         ),
                     )
                     return

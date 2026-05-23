@@ -412,19 +412,23 @@ def _yt_deeplink(url: str) -> dict[str, Any]:
     }
 
 
-def _youtube_like() -> ToolResult:
-    """Da 'me gusta' al vídeo que se reproduce ahora en YouTube.
+def _ui_click(label: str = "") -> ToolResult:
+    """Pulsa por voz un botón de la app que está en primer plano (YouTube).
 
     Emite un device_command que el tablet resuelve con su
-    AccessibilityService: pulsa el botón "Me gusta" de la ventana de
-    YouTube en primer plano. No abre nada ni cambia de pantalla — el
-    usuario sigue viendo el vídeo. Si el servicio de accesibilidad no
-    está habilitado en el tablet, la acción se ignora ahí (Kiwi no se
-    entera; confirma de forma genérica).
+    AccessibilityService: busca en pantalla el botón cuya etiqueta
+    coincide con ``label`` (sin acentos, exacto/prefijo/substring) y lo
+    pulsa. No abre nada ni cambia de pantalla — el usuario sigue viendo
+    el vídeo. Si el servicio de accesibilidad no está habilitado en el
+    tablet, la acción se ignora ahí (Kiwi no se entera; confirma de
+    forma genérica).
     """
+    label = (label or "").strip()
+    if not label:
+        return ToolResult(response={"error": "missing label"})
     return ToolResult(
-        response={"liked": True},
-        scene={"type": "device_command", "command": "youtube_like"},
+        response={"clicked": label},
+        scene={"type": "device_command", "command": "ui_click", "label": label},
     )
 
 
@@ -614,17 +618,37 @@ register(
 )
 
 register(
-    name="youtube_like",
+    name="ui_click",
     description=(
-        "Da 'Me gusta' al vídeo que se está reproduciendo AHORA en la "
-        "app de YouTube. Llama a este tool cuando el usuario diga 'dale "
-        "like', 'me gusta este vídeo', 'dale a me gusta', 'like' o "
-        "variantes, mientras hay un vídeo en marcha. No abre ni cambia "
-        "nada en pantalla; el usuario sigue viendo el vídeo. Tras "
-        "llamarlo confirma muy breve ('Hecho', 'Le he dado like')."
+        "Pulsa un botón VISIBLE de la app de YouTube que el usuario está "
+        "viendo, buscándolo por su etiqueta en pantalla. Úsalo para "
+        "acciones que no tienen tool propia: dar 'Me gusta' (label='Me "
+        "gusta'), saltar un anuncio (label='Saltar anuncio'), "
+        "suscribirse (label='Suscribirse'), compartir, guardar, etc. "
+        "Traduce lo que pide el usuario a la ETIQUETA del botón tal y "
+        "como aparece en YouTube en español ('dale like' → 'Me gusta'; "
+        "'quita el anuncio' → 'Saltar anuncio'; 'sígueme este canal' → "
+        "'Suscribirse'). El tablet hace match sin acentos y por "
+        "substring, así que no hace falta clavar mayúsculas. El botón "
+        "debe estar en pantalla (en pantalla completa muchos no se ven). "
+        "No abre ni cambia nada; el usuario sigue en el vídeo. Tras "
+        "llamarlo confirma muy breve ('Hecho')."
     ),
-    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
-    handler=_youtube_like,
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "label": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Etiqueta del botón a pulsar, tal y como sale en "
+                    "YouTube (p.ej. 'Me gusta', 'Saltar anuncio', "
+                    "'Suscribirse')."
+                ),
+            ),
+        },
+        required=["label"],
+    ),
+    handler=_ui_click,
 )
 
 register(

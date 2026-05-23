@@ -199,7 +199,7 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
                 event.packageName?.let { launchApp(it) }
             }
             "set_volume" -> applyVolume(event.level, event.delta)
-            "youtube_like" -> likeYouTubeVideo()
+            "ui_click" -> clickByLabel(event.label)
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
     }
@@ -255,20 +255,24 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
     }
 
     /**
-     * "Dale like": delega en el AccessibilityService, que pulsa el
-     * botón "Me gusta" de la ventana de YouTube en primer plano (el
-     * overlay no le roba el foco). Si el servicio no está habilitado
-     * (instance == null) lo dejamos en un warning; el usuario lo
-     * activa en Ajustes → Accesibilidad → Kiwi.
+     * Pulsa por voz un botón de la app en primer plano (YouTube)
+     * buscándolo por su etiqueta — delega en el AccessibilityService.
+     * El overlay no roba el foco, así que la ventana activa es la app
+     * de debajo. Si el servicio no está habilitado (instance == null)
+     * lo dejamos en un warning; el usuario lo activa en Ajustes →
+     * Accesibilidad → Kiwi.
      */
-    private fun likeYouTubeVideo() {
-        val svc = KiwiAccessibilityService.instance
-        if (svc == null) {
-            KLog.w(TAG, "youtube_like: AccessibilityService no habilitado")
+    private fun clickByLabel(label: String?) {
+        if (label.isNullOrBlank()) {
+            KLog.w(TAG, "ui_click sin etiqueta")
             return
         }
-        val ok = svc.likeCurrentVideo()
-        KLog.i(TAG, "youtube_like → $ok")
+        val svc = KiwiAccessibilityService.instance
+        if (svc == null) {
+            KLog.w(TAG, "ui_click: AccessibilityService no habilitado")
+            return
+        }
+        KLog.i(TAG, "ui_click('$label') → ${svc.clickByLabel(label)}")
     }
 
     private fun hasMicPermission(): Boolean =

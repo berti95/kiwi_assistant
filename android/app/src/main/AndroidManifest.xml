@@ -78,9 +78,9 @@
 
         <!--
           AccessibilityService para pulsar botones de YouTube por voz
-          (de momento solo "Me gusta"). El usuario lo habilita a mano
-          en Ajustes → Accesibilidad → Kiwi. Limitado a YouTube en su
-          config XML.
+          (ui_click: Me gusta, Saltar anuncio, Suscribirse, etc.). El
+          usuario lo habilita a mano en Ajustes → Accesibilidad → Kiwi.
+          Limitado a YouTube en su config XML.
         -->
         <service
             android:name=".a11y.KiwiAccessibilityService"

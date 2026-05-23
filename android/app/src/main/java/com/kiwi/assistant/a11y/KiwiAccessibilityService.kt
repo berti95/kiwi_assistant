@@ -10,24 +10,26 @@ import com.kiwi.assistant.log.KLog
 import java.text.Normalizer
 
 /**
- * Servicio de accesibilidad de Kiwi. De momento solo hace UNA cosa:
- * darle "me gusta" al vídeo que se está reproduciendo en la app de
- * YouTube, a petición por voz ("oye kiwi, dale like").
+ * Servicio de accesibilidad de Kiwi. Primitivo genérico: pulsar por
+ * voz un botón de la app en primer plano (YouTube) buscándolo por su
+ * etiqueta. "dale like" → pulsa "Me gusta"; "salta el anuncio" →
+ * "Saltar anuncio"; "suscríbete" → "Suscribirse", etc. — todo con la
+ * misma [clickByLabel], sin código por botón.
  *
- * Cómo funciona: cuando llega el device_command `youtube_like`, leemos
- * el árbol de nodos de la ventana activa (que es YouTube, porque el
- * overlay de la conversación es NOT_FOCUSABLE y no le roba el foco),
- * buscamos el nodo del botón "Me gusta" por su contentDescription y lo
- * pulsamos (ACTION_CLICK; si no es clickable, gesto de toque en sus
- * coordenadas).
+ * Cómo funciona: cuando llega el device_command `ui_click` con una
+ * etiqueta, leemos el árbol de nodos de la ventana activa (que es
+ * YouTube, porque el overlay de la conversación es NOT_FOCUSABLE y no
+ * le roba el foco), buscamos el nodo cuya contentDescription/text
+ * coincide con la etiqueta (normalizado, sin acentos: exacto → prefijo
+ * → substring) y lo pulsamos (ACTION_CLICK; si no es clickable, gesto
+ * de toque en sus coordenadas).
  *
- * Es un primer experimento: la etiqueta exacta del botón cambia entre
- * versiones de YouTube, así que [likeCurrentVideo] vuelca al log los
- * candidatos cuando no encuentra match, para afinar el matcher con
- * datos reales del tablet.
+ * Si no encuentra match, [clickByLabel] vuelca al log los candidatos
+ * clickables para depurar (las etiquetas de YouTube varían por
+ * versión/idioma).
  *
  * El usuario debe habilitar el servicio a mano una vez en Ajustes →
- * Accesibilidad → Kiwi. Sin eso, [instance] es null y los like se
+ * Accesibilidad → Kiwi. Sin eso, [instance] es null y los ui_click se
  * ignoran (con un warning en el log).
  */
 class KiwiAccessibilityService : AccessibilityService() {
@@ -40,7 +42,7 @@ class KiwiAccessibilityService : AccessibilityService() {
 
     // No reaccionamos a eventos: las acciones son on-demand vía
     // device_command. Necesitamos el servicio vivo para tener
-    // rootInActiveWindow cuando nos pidan el like.
+    // rootInActiveWindow cuando nos pidan pulsar un botón.
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
     override fun onInterrupt() {}
@@ -51,23 +53,31 @@ class KiwiAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Pulsa el botón "Me gusta" del vídeo en primer plano. Devuelve
-     * true si encontró y pulsó algo; false si no (y deja en el log el
-     * paquete activo + los candidatos clickables para depurar).
+     * Pulsa el botón cuya etiqueta coincide con [target] en la ventana
+     * en primer plano. Devuelve true si encontró y pulsó algo; false si
+     * no (y deja en el log el paquete activo + los candidatos
+     * clickables para depurar). Matching sin acentos: exacto → prefijo
+     * → substring; entre varios, gana el de etiqueta más corta (suele
+     * ser el botón en sí, no un contenedor que lo describe largo).
      */
-    fun likeCurrentVideo(): Boolean {
-        val root = rootInActiveWindow
-        if (root == null) {
-            KLog.w(TAG, "like: rootInActiveWindow == null (¿ventana sin contenido accesible?)")
+    fun clickByLabel(target: String): Boolean {
+        val needle = normalize(target)
+        if (needle.isBlank()) {
+            KLog.w(TAG, "ui_click: etiqueta vacía")
             return false
         }
-        KLog.i(TAG, "like: ventana activa pkg=${root.packageName}")
+        val root = rootInActiveWindow
+        if (root == null) {
+            KLog.w(TAG, "ui_click: rootInActiveWindow == null (¿ventana sin contenido accesible?)")
+            return false
+        }
+        KLog.i(TAG, "ui_click('$target'): ventana activa pkg=${root.packageName}")
         val nodes = ArrayList<AccessibilityNodeInfo>()
         collect(root, nodes)
 
-        val match = nodes.firstOrNull { isLikeNode(label(it)) }
+        val match = bestMatch(nodes, needle)
         if (match == null) {
-            KLog.w(TAG, "like: no encontré botón 'me gusta'. Candidatos clickables:")
+            KLog.w(TAG, "ui_click: no encontré '$target'. Candidatos clickables:")
             nodes.filter { it.isClickable }.take(40).forEach {
                 KLog.w(TAG, "  · '${label(it)}' [${it.className}]")
             }
@@ -75,8 +85,39 @@ class KiwiAccessibilityService : AccessibilityService() {
         }
 
         val clicked = clickNodeOrAncestor(match)
-        KLog.i(TAG, "like: match='${label(match)}' → clicked=$clicked")
+        KLog.i(TAG, "ui_click('$target'): match='${label(match)}' → clicked=$clicked")
         return clicked
+    }
+
+    /**
+     * Elige el mejor nodo para [needle] (ya normalizado): exacto gana
+     * sobre prefijo, prefijo sobre substring; a igualdad, etiqueta más
+     * corta (más probable que sea el propio botón). Solo considera
+     * nodos con etiqueta no vacía.
+     */
+    private fun bestMatch(
+        nodes: List<AccessibilityNodeInfo>,
+        needle: String,
+    ): AccessibilityNodeInfo? {
+        var best: AccessibilityNodeInfo? = null
+        var bestScore = Int.MIN_VALUE
+        for (n in nodes) {
+            val l = normalize(label(n))
+            if (l.isBlank()) continue
+            val rank = when {
+                l == needle -> 3
+                l.startsWith(needle) -> 2
+                needle in l -> 1
+                else -> continue
+            }
+            // Puntúa: rank manda; a igual rank, etiqueta más corta gana.
+            val score = rank * 10_000 - l.length
+            if (score > bestScore) {
+                bestScore = score
+                best = n
+            }
+        }
+        return best
     }
 
     private fun collect(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
@@ -91,22 +132,6 @@ class KiwiAccessibilityService : AccessibilityService() {
         val desc = node.contentDescription?.toString().orEmpty()
         if (desc.isNotBlank()) return desc
         return node.text?.toString().orEmpty()
-    }
-
-    /**
-     * Heurística "esto es el botón de me gusta". YouTube en español
-     * etiqueta el botón como "Me gusta" (a veces con el recuento). El
-     * de no me gusta contiene "me gusta" como substring, así que lo
-     * excluimos explícitamente. Inglés como respaldo, con guarda contra
-     * "dislike".
-     */
-    private fun isLikeNode(rawLabel: String): Boolean {
-        val l = normalize(rawLabel)
-        if (l.isBlank()) return false
-        if ("no me gusta" in l) return false           // botón de dislike
-        if ("me gusta" in l) return true
-        if ("dislike" in l) return false
-        return l == "like" || l.startsWith("like ")
     }
 
     private fun normalize(s: String): String {
@@ -131,7 +156,7 @@ class KiwiAccessibilityService : AccessibilityService() {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         if (bounds.isEmpty) {
-            KLog.w(TAG, "like: nodo sin bounds, no puedo tocar")
+            KLog.w(TAG, "ui_click: nodo sin bounds, no puedo tocar")
             return false
         }
         val path = Path().apply {

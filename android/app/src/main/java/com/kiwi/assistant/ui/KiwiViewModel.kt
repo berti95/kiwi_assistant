@@ -852,12 +852,13 @@ class KiwiViewModel(application: Application) :
                 openUrlInApp(url, event.packageName)
             }
             "set_volume" -> applyVolume(level = event.level, delta = event.delta)
-            "youtube_like" -> {
+            "ui_click" -> {
+                val label = event.label
                 val svc = KiwiAccessibilityService.instance
-                if (svc == null) {
-                    KLog.w(TAG, "youtube_like: AccessibilityService no habilitado")
-                } else {
-                    KLog.i(TAG, "youtube_like → ${svc.likeCurrentVideo()}")
+                when {
+                    label.isNullOrBlank() -> KLog.w(TAG, "ui_click sin etiqueta")
+                    svc == null -> KLog.w(TAG, "ui_click: AccessibilityService no habilitado")
+                    else -> KLog.i(TAG, "ui_click('$label') → ${svc.clickByLabel(label)}")
                 }
             }
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
