@@ -18,11 +18,25 @@
     skip, …) so the JS API didn't earn its complexity. When Fase 8
     (unified MediaController) wires that up we'll pull it back via
     a postMessage bridge inside the same iframe.
+
+  Referer fix (152/153) — añadido 2026:
+  - A finales de 2025 YouTube empezó a EXIGIR el header HTTP Referer
+    para reproducir embeds; sin él devuelve "152-4 / Video no
+    disponible". En un WebView (sobre todo cargado con
+    loadDataWithBaseURL, que produce un origen opaco) el Referer se
+    pierde por defecto. La doc de YouTube para WebView recomienda:
+      1. referrerpolicy="strict-origin-when-cross-origin" en el iframe
+         + <meta name="referrer"> → manda el origen como Referer.
+      2. el parámetro origin en la URL del embed → identifica el host
+         embebedor cuando el Referer va vacío.
+    widget_referrer es un extra para analytics, no afecta a la
+    reproducción pero no estorba.
 -->
 <!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <style>
   html, body, iframe {
     margin: 0;
@@ -37,7 +51,8 @@
 </head>
 <body>
   <iframe
-    src="https://www.youtube.com/embed/__VIDEO_ID__?autoplay=1&playsinline=1&rel=0"
+    src="https://www.youtube.com/embed/__VIDEO_ID__?autoplay=1&playsinline=1&rel=0&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com"
+    referrerpolicy="strict-origin-when-cross-origin"
     allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
     allowfullscreen>
   </iframe>
