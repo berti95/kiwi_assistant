@@ -29,6 +29,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from google import genai
 from google.genai import types
 
@@ -70,6 +71,23 @@ class _TurnCancelledError(Exception):
     session is closed without producing a response, and so the proxy
     loop knows to skip the history append for this turn.
     """
+
+
+def _is_client_disconnect(ws: WebSocket, exc: Exception) -> bool:
+    """True si `exc` se debe a que el tablet ya cerró el socket.
+
+    Starlette lanza ``RuntimeError('WebSocket is not connected. Need to
+    call "accept" first.')`` cuando intentamos recibir/enviar tras un
+    disconnect — pasa al volver a ``receive_json`` entre turnos justo
+    después de un ``device_command`` que envía al usuario a otra app
+    (open_app_url → YouTube). No es un fallo del proxy; hay que
+    tratarlo como cierre normal, no como ERROR.
+    """
+    if not isinstance(exc, RuntimeError):
+        return False
+    if ws.client_state == WebSocketState.DISCONNECTED:
+        return True
+    return "not connected" in str(exc).lower()
 
 
 async def proxy(ws: WebSocket, settings: Settings) -> None:
@@ -178,14 +196,26 @@ async def proxy(ws: WebSocket, settings: Settings) -> None:
     except WebSocketDisconnect:
         log.info("tablet disconnected after %d turns", len(history))
     except Exception as exc:
-        log.exception("Gemini Live error")
-        await _safe_send(
-            ws,
-            {
-                "type": protocol.TYPE_ERROR,
-                "message": f"{type(exc).__name__}: {exc}",
-            },
-        )
+        if _is_client_disconnect(ws, exc):
+            # El tablet cerró el socket (típicamente tras un
+            # device_command que lo manda a otra app, p.ej. open_app_url
+            # → YouTube). Starlette lo señala con un RuntimeError al
+            # volver a receive_json/send, no con WebSocketDisconnect. No
+            # es un fallo nuestro: disconnect limpio, sin traceback.
+            log.info(
+                "tablet socket closed mid-flow (%s) after %d turns",
+                exc,
+                len(history),
+            )
+        else:
+            log.exception("Gemini Live error")
+            await _safe_send(
+                ws,
+                {
+                    "type": protocol.TYPE_ERROR,
+                    "message": f"{type(exc).__name__}: {exc}",
+                },
+            )
     finally:
         # Persiste estadísticas de la conversación (incluso si terminó
         # por excepción / disconnect / timeout). Si no hubo turnos
