@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import requests
@@ -243,9 +244,16 @@ def _try_resolve_first_track(query: str) -> dict | None:
 
 
 def _spotify_play_blocking(
-    uri: str | None, query: str | None,
+    uri: str | None, query: str | None, device_id: str | None = None,
 ) -> tuple[dict, dict | None]:
-    """Start playback. Returns (response, scene_or_none)."""
+    """Start playback. Returns (response, scene_or_none).
+
+    Si ``device_id`` está presente, ``PUT /me/player/play?device_id=X``
+    transfiere la reproducción a ese device Y arranca — esencial tras
+    despertar Spotify en el tablet, que aparece como dispositivo
+    *disponible* pero no *activo*, así que un play sin device_id daría
+    404 "no active device".
+    """
     target_uri: str | None = uri
     track_meta: dict | None = None
     if not target_uri and query:
@@ -263,7 +271,10 @@ def _spotify_play_blocking(
         else:
             # Albums, artists, playlists go via context_uri.
             body = {"context_uri": target_uri}
-        _spotify_send("PUT", "/me/player/play", json_body=body)
+        path = "/me/player/play"
+        if device_id:
+            path += f"?device_id={device_id}"
+        _spotify_send("PUT", path, json_body=body)
     except SpotifyNoDeviceError:
         return {
             "error": (
@@ -301,12 +312,48 @@ def _spotify_play_blocking(
 
 
 _SPOTIFY_PACKAGE = "com.spotify.music"
-_SPOTIFY_WAKE_DELAY_S = 4.0
+# Tras lanzar Spotify en el tablet, cuánto esperamos (sondeando cada
+# segundo) a que aparezca como dispositivo Connect. Un arranque en
+# frío tarda fácil 5-10s en registrarse, así que el viejo delay fijo
+# de 4s se quedaba corto.
+_SPOTIFY_WAKE_POLL_TIMEOUT_S = 12.0
+_SPOTIFY_WAKE_POLL_INTERVAL_S = 1.0
 
 
 def _looks_like_no_active_device(response: dict[str, Any]) -> bool:
     err = str(response.get("error") or "").lower()
     return "no active" in err and "device" in err
+
+
+def _wait_for_device_blocking(name_pattern: str) -> str | None:
+    """Sondea /me/player/devices hasta que aparezca el tablet.
+
+    Devuelve el device_id que matchea ``name_pattern`` (substring,
+    case-insensitive), o el único device disponible si no hay match
+    por nombre pero sí hay exactamente uno (caso típico: solo el
+    tablet). None si tras el timeout no aparece nada.
+    """
+    deadline = time.monotonic() + _SPOTIFY_WAKE_POLL_TIMEOUT_S
+    pattern = name_pattern.lower()
+    while time.monotonic() < deadline:
+        try:
+            devices = _spotify_devices_blocking()
+        except Exception:  # noqa: BLE001 — reintentamos en el siguiente tick
+            devices = []
+        match = next(
+            (d for d in devices if pattern in (d.get("name") or "").lower()),
+            None,
+        )
+        if match is None and len(devices) == 1:
+            match = devices[0]
+        if match is not None and match.get("id"):
+            log.info(
+                "spotify wake: device ready '%s' (%s)",
+                match.get("name"), match.get("id"),
+            )
+            return match["id"]
+        time.sleep(_SPOTIFY_WAKE_POLL_INTERVAL_S)
+    return None
 
 
 async def _spotify_play(
@@ -316,14 +363,15 @@ async def _spotify_play(
     on_scene: SceneSink | None = None,
 ) -> ToolResult:
     """Reproduce algo en Spotify; si no hay device activo, "despierta"
-    la app de Spotify en el tablet y reintenta una vez.
+    la app de Spotify en el tablet y reintenta apuntando a él.
 
     El flow auto-wake imita lo que hace Waze: si no hay nadie
     escuchando, le pedimos al tablet que lance la app de Spotify
-    (Intent ``launchIntentForPackage``), esperamos a que Spotify se
-    registre como Connect device (~3-4 s), y volvemos a reproducir.
-    El cliente además vuelve a Kiwi en foreground tras un breve
-    delay para que la conversación siga viva.
+    (Intent ``launchIntentForPackage``). Luego sondeamos
+    /me/player/devices hasta que el tablet aparece como dispositivo
+    Connect (cold start ~5-10s) y reproducimos con ``device_id``
+    explícito — porque recién abierto Spotify está *disponible* pero
+    no *activo*, así que un play sin device_id volvería a dar 404.
 
     Una sola llamada a la tool orquesta todo, así que Kiwi sólo
     habla una vez (con el resultado final) en lugar de pedir al
@@ -341,9 +389,17 @@ async def _spotify_play(
             })
         except Exception:  # noqa: BLE001
             log.exception("device_command push failed")
-        await asyncio.sleep(_SPOTIFY_WAKE_DELAY_S)
-        log.info("spotify_play: retrying after wake")
-        response, scene = await asyncio.to_thread(_spotify_play_blocking, uri, query)
+
+        from ..settings import settings as _settings
+        pattern = _settings.kiwi_spotify_tablet_name or "tablet"
+        device_id = await asyncio.to_thread(_wait_for_device_blocking, pattern)
+        if device_id is not None:
+            log.info("spotify_play: retrying targeting device %s", device_id)
+            response, scene = await asyncio.to_thread(
+                _spotify_play_blocking, uri, query, device_id,
+            )
+        else:
+            log.info("spotify_play: tablet device never appeared after wake")
 
     return ToolResult(response=response, scene=scene)
 
