@@ -94,6 +94,12 @@ class KiwiAccessibilityService : AccessibilityService() {
      * sobre prefijo, prefijo sobre substring; a igualdad, etiqueta más
      * corta (más probable que sea el propio botón). Solo considera
      * nodos con etiqueta no vacía.
+     *
+     * Guarda de negación: descarta candidatos donde [needle] aparece
+     * precedido de una negación ("no me gusta" cuando pides "me gusta",
+     * "dislike" cuando pides "like"). Sin esto, el botón opuesto —que
+     * contiene el needle como substring— podía ganar. Caso real: "dale
+     * like" pulsaba "No me gusta".
      */
     private fun bestMatch(
         nodes: List<AccessibilityNodeInfo>,
@@ -107,7 +113,7 @@ class KiwiAccessibilityService : AccessibilityService() {
             val rank = when {
                 l == needle -> 3
                 l.startsWith(needle) -> 2
-                needle in l -> 1
+                needle in l -> if (isNegated(l, needle)) continue else 1
                 else -> continue
             }
             // Puntúa: rank manda; a igual rank, etiqueta más corta gana.
@@ -118,6 +124,19 @@ class KiwiAccessibilityService : AccessibilityService() {
             }
         }
         return best
+    }
+
+    /**
+     * True si [needle] aparece dentro de [label] justo detrás de una
+     * negación → es el botón contrario, no el pedido. Si el propio
+     * needle empieza por "no" (el usuario pidió la negación) no aplica.
+     */
+    private fun isNegated(label: String, needle: String): Boolean {
+        if (needle.startsWith("no ")) return false
+        val idx = label.indexOf(needle)
+        if (idx <= 0) return false
+        val prevWord = label.substring(0, idx).trimEnd().substringAfterLast(' ')
+        return prevWord in NEGATIONS
     }
 
     private fun collect(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
@@ -170,6 +189,10 @@ class KiwiAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "KiwiA11y"
+
+        // Palabras que, justo antes del needle, lo convierten en su
+        // opuesto: "no me gusta" vs "me gusta", "dislike" vs "like".
+        private val NEGATIONS = setOf("no", "sin", "dis", "not", "quitar", "deshacer")
 
         /** Instancia viva del servicio (null si no está habilitado). */
         @Volatile
