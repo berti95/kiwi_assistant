@@ -412,6 +412,22 @@ def _yt_deeplink(url: str) -> dict[str, Any]:
     }
 
 
+def _youtube_like() -> ToolResult:
+    """Da 'me gusta' al vídeo que se reproduce ahora en YouTube.
+
+    Emite un device_command que el tablet resuelve con su
+    AccessibilityService: pulsa el botón "Me gusta" de la ventana de
+    YouTube en primer plano. No abre nada ni cambia de pantalla — el
+    usuario sigue viendo el vídeo. Si el servicio de accesibilidad no
+    está habilitado en el tablet, la acción se ignora ahí (Kiwi no se
+    entera; confirma de forma genérica).
+    """
+    return ToolResult(
+        response={"liked": True},
+        scene={"type": "device_command", "command": "youtube_like"},
+    )
+
+
 def _youtube_play(
     position: int = 0,
     video_id: str = "",
@@ -595,6 +611,20 @@ register(
         },
     ),
     handler=_youtube_open,
+)
+
+register(
+    name="youtube_like",
+    description=(
+        "Da 'Me gusta' al vídeo que se está reproduciendo AHORA en la "
+        "app de YouTube. Llama a este tool cuando el usuario diga 'dale "
+        "like', 'me gusta este vídeo', 'dale a me gusta', 'like' o "
+        "variantes, mientras hay un vídeo en marcha. No abre ni cambia "
+        "nada en pantalla; el usuario sigue viendo el vídeo. Tras "
+        "llamarlo confirma muy breve ('Hecho', 'Le he dado like')."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_youtube_like,
 )
 
 register(

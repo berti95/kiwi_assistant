@@ -76,6 +76,25 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!--
+          AccessibilityService para pulsar botones de YouTube por voz
+          (de momento solo "Me gusta"). El usuario lo habilita a mano
+          en Ajustes → Accesibilidad → Kiwi. Limitado a YouTube en su
+          config XML.
+        -->
+        <service
+            android:name=".a11y.KiwiAccessibilityService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kiwi_accessibility_config" />
+        </service>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

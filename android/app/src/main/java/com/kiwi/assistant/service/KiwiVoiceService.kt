@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.content.ContextCompat
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.a11y.KiwiAccessibilityService
 import com.kiwi.assistant.audio.VoskKeywordListener
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.KiwiSessionEvent
@@ -198,6 +199,7 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
                 event.packageName?.let { launchApp(it) }
             }
             "set_volume" -> applyVolume(event.level, event.delta)
+            "youtube_like" -> likeYouTubeVideo()
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
     }
@@ -250,6 +252,23 @@ class KiwiVoiceService : Service(), ConversationEngine.Host {
         runCatching {
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, targetSteps, AudioManager.FLAG_SHOW_UI)
         }
+    }
+
+    /**
+     * "Dale like": delega en el AccessibilityService, que pulsa el
+     * botón "Me gusta" de la ventana de YouTube en primer plano (el
+     * overlay no le roba el foco). Si el servicio no está habilitado
+     * (instance == null) lo dejamos en un warning; el usuario lo
+     * activa en Ajustes → Accesibilidad → Kiwi.
+     */
+    private fun likeYouTubeVideo() {
+        val svc = KiwiAccessibilityService.instance
+        if (svc == null) {
+            KLog.w(TAG, "youtube_like: AccessibilityService no habilitado")
+            return
+        }
+        val ok = svc.likeCurrentVideo()
+        KLog.i(TAG, "youtube_like → $ok")
     }
 
     private fun hasMicPermission(): Boolean =

@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
+import com.kiwi.assistant.a11y.KiwiAccessibilityService
 import com.kiwi.assistant.alarm.AlarmScheduler
 import com.kiwi.assistant.audio.VoskKeywordListener
 import com.kiwi.assistant.log.KLog
@@ -851,6 +852,14 @@ class KiwiViewModel(application: Application) :
                 openUrlInApp(url, event.packageName)
             }
             "set_volume" -> applyVolume(level = event.level, delta = event.delta)
+            "youtube_like" -> {
+                val svc = KiwiAccessibilityService.instance
+                if (svc == null) {
+                    KLog.w(TAG, "youtube_like: AccessibilityService no habilitado")
+                } else {
+                    KLog.i(TAG, "youtube_like → ${svc.likeCurrentVideo()}")
+                }
+            }
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
     }
