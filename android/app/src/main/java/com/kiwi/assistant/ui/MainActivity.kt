@@ -122,25 +122,16 @@ class MainActivity : ComponentActivity() {
         brightnessManager.start()
         // Volvemos a primer plano: paramos el wake word del service
         // (background) ANTES de reabrir el del ViewModel, para que no
-        // compitan por el micro.
+        // compitan por el micro. El service, cuando detecta "oye kiwi"
+        // en background, conversa con su propio overlay encima de la
+        // otra app — no trae esta Activity al frente.
         KiwiVoiceService.stop(this)
         viewModel.setMicrophonePermission(hasMicPermission())
-        // Si llegamos aquí porque el service detectó "oye kiwi" en
-        // background, abrimos sesión directamente en vez de re-armar
-        // el wake word.
-        val wokenFromBackground = intent?.getBooleanExtra(
-            KiwiVoiceService.EXTRA_WAKE, false,
-        ) == true
-        if (wokenFromBackground) {
-            intent.removeExtra(KiwiVoiceService.EXTRA_WAKE)
-            viewModel.onTap()  // abre sesión cuando el pipeline está Idle
-        } else {
-            // Belt-and-braces: setMicrophonePermission ya arranca el
-            // wake word cuando el permiso pasa a concedido, pero si la
-            // app fue force-stopped o el listener petó, llamarlo en
-            // cada resume garantiza el micro abierto para "oye kiwi".
-            viewModel.ensureWakeWordListening()
-        }
+        // Belt-and-braces: setMicrophonePermission ya arranca el wake
+        // word cuando el permiso pasa a concedido, pero si la app fue
+        // force-stopped o el listener petó, llamarlo en cada resume
+        // garantiza el micro abierto para "oye kiwi".
+        viewModel.ensureWakeWordListening()
         startUpdater()
     }
 
