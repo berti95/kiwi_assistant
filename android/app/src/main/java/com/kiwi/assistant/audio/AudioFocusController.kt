@@ -35,24 +35,34 @@ class AudioFocusController(context: Context) {
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
+            // OJO: NO usar setWillPauseWhenDucked / setAcceptsDelayedFocusGain
+            // sin un OnAudioFocusChangeListener — Android lanza
+            // IllegalStateException ("Can't use delayed focus or pause on
+            // duck without a listener"). Además no queremos ducking:
+            // AUDIOFOCUS_GAIN_TRANSIENT ya hace que las apps que respetan
+            // el foco PAUSEN del todo, que es lo que buscamos.
             val req = AudioFocusRequest.Builder(
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
             )
                 .setAudioAttributes(attrs)
-                // No queremos que nos avisen de cambios de foco: Kiwi
-                // controla su propio ciclo (abre/cierra sesión).
-                .setWillPauseWhenDucked(true)
                 .build()
             request = req
-            val result = mgr.requestAudioFocus(req)
+            val result = runCatching { mgr.requestAudioFocus(req) }
+                .getOrElse {
+                    KLog.w(TAG, "requestAudioFocus falló: ${it.message}")
+                    request = null
+                    return
+                }
             KLog.i(TAG, "requestAudioFocus → $result")
         } else {
             @Suppress("DEPRECATION")
-            mgr.requestAudioFocus(
-                null,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
-            )
+            runCatching {
+                mgr.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
+                )
+            }
         }
     }
 
