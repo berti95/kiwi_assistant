@@ -37,8 +37,10 @@ import org.vosk.Recognizer
  *     frases de activación + "[unk]" — esto fuerza a Vosk a producir
  *     SOLO esas frases (o "[unk]") en lugar de transcribir libremente,
  *     mucho más rápido y más preciso para nuestro caso.
- *  3. Loop AudioRecord → recognizer.acceptWaveForm(). Al detectar
- *     una de las frases en el resultado parcial / final, disparamos.
+ *  3. Loop AudioRecord → recognizer.acceptWaveForm(). Solo actuamos
+ *     sobre resultados FINALES (tras una pausa) y con confianza media
+ *     >= MIN_WAKE_CONFIDENCE — los parciales y los matches de baja
+ *     confianza causaban falsos positivos con ruido de fondo.
  *
  * Compatibilidad: mismo interface público (``start(scope,
  * onDetected) → Boolean`` + ``stop()``) que el anterior, así el
@@ -94,6 +96,10 @@ class VoskKeywordListener(
                 KLog.e(TAG, "Recognizer init failed", e)
                 return@launch
             }
+            // Pide confianza por palabra en el JSON de result. Sin esto
+            // no podemos distinguir un "oye kiwi" real (conf alta) de
+            // un match forzado desde ruido ambiente (conf baja).
+            runCatching { rec.setWords(true) }
             recognizer = rec
 
             val record = openAudioRecord() ?: run {
@@ -117,29 +123,37 @@ class VoskKeywordListener(
                 ) {
                     val read = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (read <= 0 || stopRequested) continue
-                    val accepted = rec.acceptWaveForm(buffer, read)
-                    val recognised = if (accepted) {
-                        extractText(rec.result, "text")
-                    } else {
-                        extractText(rec.partialResult, "partial")
-                    }
+                    // Solo resultados FINALES (acceptWaveForm == true,
+                    // tras una pausa). Los parciales son inestables y
+                    // disparaban con un "kiwi-ish" fugaz del ruido de
+                    // fondo — eran la causa principal de los falsos
+                    // positivos de madrugada.
+                    if (!rec.acceptWaveForm(buffer, read)) continue
+                    val result = rec.result
+                    val recognised = extractText(result, "text")
                     if (recognised.isBlank()) continue
-                    val matched = matchPhrase(recognised)
-                    if (matched != null) {
+                    val matched = matchPhrase(recognised) ?: continue
+                    val conf = averageConfidence(result)
+                    if (conf < MIN_WAKE_CONFIDENCE) {
                         KLog.i(
                             TAG,
-                            "Wake word DETECTED (phrase='$matched', " +
-                                "heard='$recognised')",
+                            "wake ignored (low conf=%.2f): '%s'".format(conf, recognised),
                         )
-                        // Liberar mic + recognizer ANTES de notificar
-                        // para que el capture de la sesión pueda
-                        // agarrar el AudioRecord sin carrera.
-                        releaseResources()
-                        withContext(Dispatchers.Main) {
-                            if (!stopRequested) onDetected()
-                        }
-                        return@launch
+                        continue
                     }
+                    KLog.i(
+                        TAG,
+                        "Wake word DETECTED (phrase='$matched', " +
+                            "heard='$recognised', conf=%.2f)".format(conf),
+                    )
+                    // Liberar mic + recognizer ANTES de notificar
+                    // para que el capture de la sesión pueda
+                    // agarrar el AudioRecord sin carrera.
+                    releaseResources()
+                    withContext(Dispatchers.Main) {
+                        if (!stopRequested) onDetected()
+                    }
+                    return@launch
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -248,6 +262,29 @@ class VoskKeywordListener(
         }
     }
 
+    /**
+     * Confianza media de las palabras en el JSON de result de Vosk
+     * (campo ``result`` con ``conf`` por palabra, presente gracias a
+     * setWords(true)). Fail-open: si no hay array de palabras o el
+     * parseo falla, devolvemos 1.0 para no bloquear el wake — el
+     * gate es una mejora, no debe romper la detección si el formato
+     * cambia.
+     */
+    private fun averageConfidence(json: String): Double {
+        if (json.isBlank()) return 1.0
+        return try {
+            val arr = JSONObject(json).optJSONArray("result") ?: return 1.0
+            if (arr.length() == 0) return 1.0
+            var sum = 0.0
+            for (i in 0 until arr.length()) {
+                sum += arr.getJSONObject(i).optDouble("conf", 1.0)
+            }
+            sum / arr.length()
+        } catch (_: Exception) {
+            1.0
+        }
+    }
+
     private companion object {
         const val TAG = "VoskKeywordListener"
         const val SAMPLE_RATE_HZ = 16_000
@@ -277,11 +314,26 @@ class VoskKeywordListener(
          * alexa" porque "alexa" es más común en el modelo acústico
          * español. Falsos positivos con TV de fondo + mis-detecciones
          * de la palabra real del usuario.
+         *
+         * "hola kiwi" también se quitó: "hola" es de las palabras más
+         * comunes en español, así que el recognizer está primado para
+         * oírla constantemente y bastaba un "kiwi-ish" de fondo para
+         * completar el match (falsos positivos de madrugada con la
+         * radio/TV). "oye" / "hey" son menos ambientales.
          */
         val DEFAULT_PHRASES = listOf(
-            "hola kiwi",
             "oye kiwi",
             "hey kiwi",
         )
+
+        /**
+         * Confianza media mínima (sobre los ``conf`` por palabra que
+         * Vosk devuelve con setWords(true)) para aceptar un wake. Un
+         * "oye kiwi" real ronda conf alta; un match forzado desde
+         * ruido la tiene baja. Arranca conservador; los logs imprimen
+         * la conf de cada detección (aceptada o rechazada) para
+         * afinarlo con datos reales.
+         */
+        const val MIN_WAKE_CONFIDENCE = 0.5
     }
 }
