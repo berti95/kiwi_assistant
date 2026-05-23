@@ -8,22 +8,17 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kiwi.assistant.BuildConfig
-import com.kiwi.assistant.audio.AudioCaptureManager
-import com.kiwi.assistant.audio.AudioPlaybackManager
-import com.kiwi.assistant.audio.SpeechActivityDetector
 import com.kiwi.assistant.alarm.AlarmScheduler
 import com.kiwi.assistant.audio.VoskKeywordListener
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.HomeStatePoller
-import com.kiwi.assistant.network.KiwiSession
 import com.kiwi.assistant.network.KiwiSessionEvent
 import com.kiwi.assistant.network.TodoApi
 import com.kiwi.assistant.updater.AutoUpdater
+import com.kiwi.assistant.voice.ConversationEngine
 import java.time.LocalDate
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,10 +53,21 @@ import kotlinx.coroutines.launch
  * Vertex Live API y va emparejado con la rotación per-turn de la
  * sesión Gemini que hace el backend.
  */
-class KiwiViewModel(application: Application) : AndroidViewModel(application) {
+class KiwiViewModel(application: Application) :
+    AndroidViewModel(application), ConversationEngine.Host {
 
-    private val _pipeline = MutableStateFlow<PipelineState>(PipelineState.Idle)
-    val pipeline: StateFlow<PipelineState> = _pipeline.asStateFlow()
+    // Pipeline de conversación extraído a ConversationEngine para
+    // poder reutilizarlo desde el foreground service (overlay, Fase
+    // 2b). El ViewModel actúa de Host: reacciona a escenas / device
+    // commands y re-arma el wake word al cerrar.
+    private val engine = ConversationEngine(
+        context = application.applicationContext,
+        scope = viewModelScope,
+        cloudRunUrl = BuildConfig.CLOUD_RUN_URL,
+        apiKey = BuildConfig.KIWI_API_KEY,
+        host = this,
+    )
+    val pipeline: StateFlow<PipelineState> get() = engine.pipeline
 
     // What's currently on the canvas. Defaults to the clock; later
     // fases (Calendar, NowPlaying, VideoPlayer, BrowseYT) will mutate
@@ -128,7 +134,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     // sesión. _updateStatus es un mensaje transitorio que el chip
     // muestra unos segundos (null = botón en reposo "Actualizar").
     private val autoUpdater = AutoUpdater(application) {
-        _pipeline.value is PipelineState.Idle
+        pipeline.value is PipelineState.Idle
     }
     private val _updateStatus = MutableStateFlow<String?>(null)
     val updateStatus: StateFlow<String?> = _updateStatus.asStateFlow()
@@ -316,7 +322,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
                     // delay would otherwise be clobbered.
                     if (
                         _scene.value === currentScene &&
-                        _pipeline.value is PipelineState.Idle
+                        pipeline.value is PipelineState.Idle
                     ) {
                         KLog.i(TAG, "auto-close: ${currentScene::class.simpleName} → home")
                         resetToHome()
@@ -387,7 +393,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             // Re-check: por si justo en este último delay el estado
             // cambió antes de que cancelAmbient corra (race con el
             // collect del flow combine).
-            if (_scene.value is Scene.Idle && _pipeline.value is PipelineState.Idle) {
+            if (_scene.value is Scene.Idle && pipeline.value is PipelineState.Idle) {
                 _scene.value = Scene.Ambient
             }
         }
@@ -647,64 +653,12 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val capture = AudioCaptureManager()
-    private val playback = AudioPlaybackManager()
-    // Foco de audio: pausa la música/vídeo de otras apps mientras Kiwi
-    // conversa y las reanuda al cerrar (estilo Assistant).
-    private val audioFocus = AudioFocusController(application.applicationContext)
-    // Silero VAD wrapper. The constructor loads an ONNX model from the
-    // APK so we defer it until the user actually starts a session;
-    // most of the time the app is just showing the clock and doesn't
-    // need it. Holding the Lazy directly (rather than `by lazy`) lets
-    // onCleared check isInitialized() before forcing it open just to
-    // close it.
-    private val detectorLazy: Lazy<SpeechActivityDetector> = lazy {
-        SpeechActivityDetector(application)
-    }
-    private val detector: SpeechActivityDetector get() = detectorLazy.value
-    // Wake-word listener (Vosk ASR offline en español, "hola kiwi" /
-    // "alexa" / etc.). Posee el micro mientras la app está Idle y lo
-    // libera al disparar el wake word o cuando el usuario toca para
-    // arrancar manualmente. Sólo un AudioRecord puede estar activo
-    // por proceso para la misma fuente → el start/stop dance tiene
-    // que ser disciplinado, ver openSession() / endSession().
+    // Wake-word listener (Vosk ASR offline en español). Posee el micro
+    // mientras la app está Idle y lo libera al disparar el wake word o
+    // cuando el usuario toca para arrancar manualmente. El pipeline de
+    // conversación (captura, VAD, sesión, playback) vive ahora en
+    // [engine]; aquí solo queda el wake word.
     private val wakeWordListener = VoskKeywordListener(application)
-    private var session: KiwiSession? = null
-
-    /**
-     * Coroutine that auto-closes the conversation if the user goes
-     * silent for [NO_SPEECH_TIMEOUT_MS] in [PipelineState.Listening].
-     * Without it, Kiwi would keep streaming PCM to Gemini Live (and
-     * burning input-audio tokens) for as long as the mic stays open.
-     */
-    private var noSpeechTimeoutJob: Job? = null
-
-    private val playbackQueue = Channel<ByteArray>(Channel.UNLIMITED)
-    private val pendingPlaybackChunks = AtomicInteger(0)
-
-    private val playbackWorker: Job = viewModelScope.launch(Dispatchers.IO) {
-        for (chunk in playbackQueue) {
-            try {
-                playback.play(chunk)
-            } catch (e: Exception) {
-                KLog.w("KiwiViewModel", "playback chunk failed", e)
-            } finally {
-                pendingPlaybackChunks.decrementAndGet()
-            }
-        }
-    }
-
-    /**
-     * Tracks how many times the current ``openSession`` flow has
-     * retried a failed connect. Reset on successful ``session.ready``
-     * and when we surface a hard error.
-     */
-    private var connectRetryAttempt = 0
-
-    /** Set true on session.ready so we know whether a later failure
-     *  is "WS never opened" (retry) vs "WS dropped mid-conversation"
-     *  (don't retry, the conversation is gone anyway). */
-    private var sessionReady = false
 
     private var permissionGranted = false
 
@@ -715,7 +669,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // the clock, light up the wake-word listener so the user can
         // start talking right away. If it just got revoked, drop the
         // listener (it'd fail to read anyway).
-        if (granted && !wasGranted && _pipeline.value is PipelineState.Idle) {
+        if (granted && !wasGranted && pipeline.value is PipelineState.Idle) {
             startWakeWordListener()
         } else if (!granted && wasGranted) {
             wakeWordListener.stop()
@@ -728,7 +682,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * up the first time the app comes to the foreground.
      */
     fun ensureWakeWordListening() {
-        if (permissionGranted && _pipeline.value is PipelineState.Idle) {
+        if (permissionGranted && pipeline.value is PipelineState.Idle) {
             startWakeWordListener()
         }
     }
@@ -745,42 +699,38 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
     private fun startWakeWordListener() {
         val started = wakeWordListener.start(viewModelScope) {
             KLog.i(TAG, "wake word fired → opening session")
-            // Release the mic before openSession spins up its own
+            // Release the mic before the engine spins up its own
             // capture. start()/stop() on the listener is synchronous
-            // enough that this is safe to do back-to-back here on the
-            // main thread.
+            // enough que esto sea seguro back-to-back en el hilo Main.
             wakeWordListener.stop()
-            openSession()
+            openConversation()
         }
         if (!started) {
             KLog.w(TAG, "wake-word listener failed to start")
         }
     }
 
+    /**
+     * Arranca una conversación: libera el micro del wake word y abre
+     * el motor. El motor valida permiso/config y monta el WebSocket.
+     */
+    private fun openConversation() {
+        wakeWordListener.stop()
+        engine.open(permissionGranted)
+    }
+
     fun onTap() {
-        when (_pipeline.value) {
-            PipelineState.Idle -> openSession()
-            // While the WS handshake is in flight a tap would race with
-            // the auto-start that fires on session.ready, so swallow it.
-            PipelineState.Connecting -> Unit
-            // Same idea while we're waiting between auto-retries —
-            // the scheduled coroutine will retry on its own. Long-press
-            // / X cancels if the user really wants out.
-            is PipelineState.Reconnecting -> Unit
-            PipelineState.Listening -> endUserTurn()
-            is PipelineState.Processing,
-            is PipelineState.Responding,
-            -> Unit
+        when (pipeline.value) {
+            PipelineState.Idle -> openConversation()
             is PipelineState.Error -> {
-                _pipeline.value = PipelineState.Idle
-                // Wipe whatever scene a previous turn pushed too —
-                // recovering from an error returns the tablet to the
-                // clock, not to a stale calendar/now-playing view.
-                resetToHome()
-                // Re-arm the wake-word listener so the user can call
-                // Kiwi again without tapping.
-                startWakeWordListener()
+                // Recuperar de un error: cerrar (Idle), volver al reloj
+                // y re-armar el wake word para poder volver a llamar.
+                closeConversation(resetScene = true)
             }
+            // Resto de estados activos (Connecting/Reconnecting/
+            // Listening/Processing/Responding) los gestiona el motor:
+            // en Listening termina el turno, en el resto ignora.
+            else -> engine.onActiveTap()
         }
     }
 
@@ -811,7 +761,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
             // Back arrow propio de WebViews — pop al histórico, no
             // reset directo. Si stack está vacío vuelve a Idle igual.
             popScene()
-            if (_pipeline.value is PipelineState.Idle) {
+            if (pipeline.value is PipelineState.Idle) {
                 startWakeWordListener()
             }
             triggerHomeRefresh()
@@ -828,7 +778,7 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * (no-op when already Idle).
      */
     fun onCloseConversation() {
-        if (_pipeline.value !is PipelineState.Idle) closeConversation(resetScene = false)
+        if (pipeline.value !is PipelineState.Idle) closeConversation(resetScene = false)
     }
 
     /**
@@ -837,356 +787,46 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
      * wipe both the conversation and any scene the tablet is showing.
      */
     fun onLongPress() {
-        if (_pipeline.value !is PipelineState.Idle || _scene.value !is Scene.Idle) {
+        if (pipeline.value !is PipelineState.Idle || _scene.value !is Scene.Idle) {
             closeConversation(resetScene = true)
         }
     }
 
-    private fun openSession() {
-        if (!permissionGranted) {
-            _pipeline.value = PipelineState.Error("Concede permiso de micrófono para usar Kiwi.")
-            return
-        }
-        if (BuildConfig.CLOUD_RUN_URL.isEmpty() || BuildConfig.KIWI_API_KEY.isEmpty()) {
-            _pipeline.value = PipelineState.Error(
-                "Configura CLOUD_RUN_URL y KIWI_API_KEY en local.properties.",
-            )
-            return
-        }
-
-        sessionReady = false
-        KLog.i(TAG, "openSession: connecting…")
-        // Manual taps may arrive while the wake-word listener is still
-        // holding the mic (e.g. user taps the screen instead of saying
-        // "hey jarvis"). Always stop it before we open the session
-        // capture, otherwise the second AudioRecord will fail to
-        // initialise.
-        wakeWordListener.stop()
-        // Pide foco transitorio → YouTube/Spotify se pausan mientras
-        // hablamos y reanudan al cerrar la sesión.
-        audioFocus.acquire()
-        playback.start()
-        val s = KiwiSession(BuildConfig.CLOUD_RUN_URL, BuildConfig.KIWI_API_KEY)
-        session = s
-        // Wait for session.ready before opening the mic — sending
-        // activity_start while the WS is still mid-handshake would
-        // queue it before session.start in OkHttp's outbound buffer
-        // and the server would close the socket on us.
-        _pipeline.value = PipelineState.Connecting
-        s.connect { event ->
-            viewModelScope.launch(Dispatchers.Main) { handleEvent(event) }
-        }
-    }
+    // ---- ConversationEngine.Host ------------------------------------
 
     /**
-     * Send activity_start and start capturing. Used both right after
-     * session.ready (first turn) and after response.end + audio drain
-     * (subsequent turns). Caller is responsible for ensuring the
-     * WebSocket is open and the previous capture (if any) has been
-     * stopped already.
+     * Una tool empujó una escena. enterScene maneja smart-push (mismo
+     * tipo = replace sin meter al stack). Si es una AlarmList, además
+     * reconciliamos el scheduler del SO al momento para que "ponme un
+     * despertador en 2 min" no espere al próximo /api/home.
      */
-    private fun startUserTurn() {
-        KLog.i(TAG, "startUserTurn: sending activity_start")
-        detector.reset()
-        session?.sendActivityStart()
-        val ok = capture.start(viewModelScope) { chunk ->
-            session?.sendAudio(chunk)
-            // Run VAD in parallel with sending so we can both decide
-            // (when the user stops talking) that the turn is over and
-            // (when the user taps without speaking) that there's
-            // nothing to send to Gemini.
-            detector.feed(chunk)
-            if (detector.isEndOfTurn(SILENCE_END_OF_TURN_MS)) {
-                viewModelScope.launch(Dispatchers.Main) {
-                    // Re-check on the main thread to avoid double-firing
-                    // if several chunks land before endUserTurn() actually
-                    // stops the capture coroutine.
-                    if (_pipeline.value is PipelineState.Listening) {
-                        KLog.i(TAG, "auto end-of-turn (silence detected)")
-                        endUserTurn()
-                    }
-                }
-            }
-        }
-        if (!ok) {
-            _pipeline.value = PipelineState.Error("No se pudo iniciar la captura de audio.")
-            cleanup()
-            return
-        }
-        _pipeline.value = PipelineState.Listening
-        scheduleNoSpeechTimeout()
-    }
-
-    /**
-     * Arm the no-speech auto-close. Re-armed on every [startUserTurn]
-     * so the user always gets a fresh window after Kiwi finishes
-     * answering. Cancelled the moment the user actually says
-     * something (via [endUserTurn]) or the conversation closes.
-     */
-    private fun scheduleNoSpeechTimeout() {
-        noSpeechTimeoutJob?.cancel()
-        noSpeechTimeoutJob = viewModelScope.launch(Dispatchers.Main) {
-            delay(NO_SPEECH_TIMEOUT_MS)
-            // Only fire if we're still in Listening AND the user
-            // hasn't crossed the speech threshold — otherwise the VAD
-            // path is already going to handle the turn.
-            if (_pipeline.value is PipelineState.Listening && !detector.userSpoke) {
-                KLog.i(
-                    TAG,
-                    "no-speech timeout (${NO_SPEECH_TIMEOUT_MS}ms) — closing to stop billing",
-                )
-                session?.sendTurnCancel()
-                closeConversation(resetScene = false)
-            }
-        }
-    }
-
-    private fun endUserTurn() {
-        noSpeechTimeoutJob?.cancel()
-        if (!detector.userSpoke) {
-            // The user tapped to end without ever crossing the speech
-            // threshold (mainstream voice agents discard these turns
-            // rather than feeding silence to the model). Tell the
-            // server to drop the upstream Gemini session for this
-            // turn, then silently re-arm the mic.
-            KLog.i(TAG, "endUserTurn: no speech, cancelling turn")
-            capture.stop()
-            session?.sendTurnCancel()
-            startUserTurn()
-            return
-        }
-        KLog.i(TAG, "endUserTurn: stopping capture + sending activity_end")
-        capture.stop()
-        session?.sendActivityEnd()
-        _pipeline.value = PipelineState.Processing()
-    }
-
-    private fun handleEvent(event: KiwiSessionEvent) {
-        when (event) {
-            KiwiSessionEvent.SessionReady -> {
-                KLog.i(TAG, "session.ready → auto-starting first turn")
-                sessionReady = true
-                connectRetryAttempt = 0
-                // Long-press during the handshake, or an error, may have
-                // already closed the session — only auto-start if we're
-                // still in the Connecting state we set in openSession.
-                if (_pipeline.value is PipelineState.Connecting) {
-                    startUserTurn()
-                }
-            }
-
-            is KiwiSessionEvent.AudioOutput -> {
-                pendingPlaybackChunks.incrementAndGet()
-                playbackQueue.trySend(event.pcm)
-                val current = _pipeline.value
-                if (current is PipelineState.Processing) {
-                    KLog.i(TAG, "first audio chunk → Responding")
-                    // Carry the user transcript over so the UI keeps
-                    // showing what Kiwi heard while it answers.
-                    _pipeline.value = PipelineState.Responding(
-                        userTranscript = current.userTranscript,
-                        kiwiTranscript = "",
-                    )
-                }
-            }
-
-            is KiwiSessionEvent.InputTranscript -> appendInputTranscript(event.text)
-            is KiwiSessionEvent.OutputTranscript -> appendOutputTranscript(event.text)
-
-            is KiwiSessionEvent.SceneSet -> {
-                KLog.i(TAG, "scene.set → ${event.scene::class.simpleName}")
-                // enterScene maneja smart-push (mismo tipo = replace
-                // sin meter al stack), así que un tool que actualiza
-                // TodoList por voz no crea entrada de back redundante.
-                enterScene(event.scene)
-                // Voice-driven alarm tools push the full updated
-                // alarm list as Scene.AlarmList — reconcile the system
-                // scheduler immediately so a "ponme un despertador en
-                // 2 min" doesn't have to wait for the next /api/home
-                // poll to actually arm. Defensive try-catch: si
-                // setAlarmClock se queja (p.ej. SecurityException en
-                // Android 14+ sin permiso), preferimos enseñar la
-                // escena con la alarma "registrada" antes que matar
-                // el proceso a media conversación.
-                if (event.scene is Scene.AlarmList) {
-                    runCatching { alarmScheduler.sync(event.scene.items) }
-                        .onFailure { e ->
-                            KLog.w(
-                                TAG,
-                                "alarmScheduler.sync from scene failed: " +
-                                    "${e::class.simpleName}: ${e.message}",
-                            )
-                        }
-                }
-            }
-
-            is KiwiSessionEvent.DeviceCommand -> {
-                KLog.i(
-                    TAG,
-                    "device_command: ${event.command} pkg=${event.packageName}",
-                )
-                handleDeviceCommand(event)
-            }
-
-            KiwiSessionEvent.ResponseEnd -> {
-                if (isPassiveConsumptionScene(_scene.value)) {
-                    // The user just told Kiwi to play something
-                    // (video or song). Once Kiwi finishes saying
-                    // "ahora reproduciendo X" there is no point
-                    // re-opening the mic for another turn.
-                    KLog.i(TAG, "response.end on playback scene → drain + close")
-                    waitForAudioAndCloseConversation()
-                } else {
-                    // Despedidas explícitas las decide Gemini llamando
-                    // a la tool end_conversation; el backend cierra el
-                    // WS tras este turno y aquí caerá el Closed event
-                    // que ya manejamos. No hay heurísticas de keyword
-                    // en el cliente — todo decisión generativa.
-                    KLog.i(TAG, "response.end → drain → next turn")
-                    waitForAudioAndStartNextTurn()
-                }
-            }
-
-            is KiwiSessionEvent.Closed -> {
-                val current = _pipeline.value
-                when {
-                    current is PipelineState.Error -> Unit
-                    current is PipelineState.Idle -> Unit
-                    event.code == 1000 -> {
-                        // Cierre limpio iniciado por el server
-                        // (típicamente la tool end_conversation):
-                        // volvemos a Idle como en cualquier cierre
-                        // normal, sin pantalla de error.
-                        KLog.i(
-                            TAG,
-                            "WS closed cleanly by server (reason=${event.reason})",
-                        )
-                        closeConversation(resetScene = false)
-                    }
-                    else -> {
-                        val reason = event.reason.takeIf { it.isNotBlank() }
-                        val msg = if (reason != null) {
-                            "Sesión cerrada (code=${event.code}, ${reason})"
-                        } else {
-                            "Sesión cerrada (code=${event.code})"
-                        }
-                        _pipeline.value = PipelineState.Error(msg)
-                        cleanup()
-                    }
-                }
-            }
-
-            is KiwiSessionEvent.Error -> {
-                if (
-                    event.transient &&
-                    !sessionReady &&
-                    connectRetryAttempt < MAX_CONNECT_ATTEMPTS - 1
-                ) {
-                    // Pre-handshake transient (DNS, EBADF post-Doze, …):
-                    // tear down the dead session and schedule a retry.
-                    // Mid-conversation drops fall through to Error
-                    // because the upstream Gemini turn would be lost
-                    // anyway.
-                    connectRetryAttempt += 1
-                    KLog.i(
+    override fun onSceneSet(scene: Scene) {
+        enterScene(scene)
+        if (scene is Scene.AlarmList) {
+            runCatching { alarmScheduler.sync(scene.items) }
+                .onFailure { e ->
+                    KLog.w(
                         TAG,
-                        "transient connect failure (${event.message}); " +
-                            "retry $connectRetryAttempt/${MAX_CONNECT_ATTEMPTS - 1}",
+                        "alarmScheduler.sync from scene failed: " +
+                            "${e::class.simpleName}: ${e.message}",
                     )
-                    cleanup()
-                    _pipeline.value = PipelineState.Reconnecting(
-                        attempt = connectRetryAttempt,
-                        maxAttempts = MAX_CONNECT_ATTEMPTS - 1,
-                    )
-                    val attempt = connectRetryAttempt
-                    val delayMs = if (attempt == 1) 1_000L else 3_000L
-                    viewModelScope.launch {
-                        delay(delayMs)
-                        // The user may have cancelled (long-press, X)
-                        // during the wait — only retry if we're still
-                        // in Reconnecting.
-                        if (_pipeline.value is PipelineState.Reconnecting) {
-                            openSession()
-                        }
-                    }
-                } else {
-                    _pipeline.value = PipelineState.Error(event.message)
-                    cleanup()
-                    connectRetryAttempt = 0
-                    sessionReady = false
                 }
-            }
         }
     }
 
-    /**
-     * Append a fragment of the **user's** transcript (what Gemini heard).
-     * Updates whichever state currently holds it (Processing or
-     * Responding, in case Gemini's input transcription arrives after
-     * the first audio chunk).
-     */
-    private fun appendInputTranscript(chunk: String) {
-        val updated = when (val current = _pipeline.value) {
-            is PipelineState.Processing ->
-                current.copy(userTranscript = current.userTranscript + chunk)
-            is PipelineState.Responding ->
-                current.copy(userTranscript = current.userTranscript + chunk)
-            else -> return
-        }
-        _pipeline.value = updated
+    override fun onDeviceCommand(event: KiwiSessionEvent.DeviceCommand) {
+        handleDeviceCommand(event)
     }
 
-    private fun appendOutputTranscript(chunk: String) {
-        val updated = when (val current = _pipeline.value) {
-            is PipelineState.Responding ->
-                current.copy(kiwiTranscript = current.kiwiTranscript + chunk)
-            // Defensive: in theory we always see the first audio chunk
-            // (which moves us to Responding) before any output transcript,
-            // but if Gemini ever ships text first we still want to show it.
-            is PipelineState.Processing ->
-                PipelineState.Responding(
-                    userTranscript = current.userTranscript,
-                    kiwiTranscript = chunk,
-                )
-            else -> return
-        }
-        _pipeline.value = updated
-    }
+    /** Tras una respuesta: cerrar si estamos en una escena pasiva
+     *  (reproducción de vídeo/música), si no abrir el siguiente turno. */
+    override fun shouldCloseAfterResponse(): Boolean =
+        isPassiveConsumptionScene(_scene.value)
 
-    /**
-     * Wait for AudioTrack to actually finish playing the response, then
-     * auto-start the next turn — otherwise we'd reopen the mic while
-     * Kiwi is still mid-sentence and capture our own playback as input.
-     * The 800 ms padding accounts for AudioTrack's internal buffer.
-     */
-    private fun waitForAudioAndStartNextTurn() {
-        if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return
-        viewModelScope.launch(Dispatchers.Main) {
-            while (pendingPlaybackChunks.get() > 0) delay(50)
-            delay(800)
-            // The user may have long-pressed during the drain; bail if
-            // the session is already gone.
-            if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return@launch
-            startUserTurn()
-        }
-    }
-
-    /**
-     * Same drain-then-act dance as [waitForAudioAndStartNextTurn] but
-     * closes the conversation instead of opening the next turn. Used
-     * after a play-something tool fires so the HUD vanishes the moment
-     * Kiwi finishes saying "ahora reproduciendo X" — keeping the mic
-     * open while the user is consuming media is both pointless and
-     * costly.
-     */
-    private fun waitForAudioAndCloseConversation() {
-        if (_pipeline.value is PipelineState.Idle || _pipeline.value is PipelineState.Error) return
-        viewModelScope.launch(Dispatchers.Main) {
-            while (pendingPlaybackChunks.get() > 0) delay(50)
-            delay(800)
-            if (_pipeline.value is PipelineState.Idle) return@launch
-            closeConversation(resetScene = false)
-        }
+    /** El motor cerró por su cuenta (no-speech / cierre del server /
+     *  cierre tras respuesta pasiva): re-armamos wake word + refresco. */
+    override fun onClosed() {
+        afterConversationClosed(resetScene = false)
     }
 
     /**
@@ -1339,53 +979,35 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         else -> false
     }
 
+    /**
+     * Cierre explícito (long-press, X, o tras un device_command que
+     * lanza otra app). Tira abajo el pipeline vía [engine] y hace lo
+     * de host: reset de escena (si toca), re-armar wake word, refresco.
+     */
     private fun closeConversation(resetScene: Boolean) {
-        noSpeechTimeoutJob?.cancel()
-        cleanup()
-        connectRetryAttempt = 0
-        sessionReady = false
-        _pipeline.value = PipelineState.Idle
-        // The close-conversation X buttons keep the active scene
-        // (calendar / now-playing / …) so the user can keep reading
-        // what was on screen. Long-press wipes scene too — the
-        // gesture is the "go home" affordance.
+        engine.close()
+        afterConversationClosed(resetScene)
+    }
+
+    /**
+     * Trabajo de host tras cerrar una conversación (lo llama tanto
+     * [closeConversation] como [onClosed] cuando el motor cierra solo).
+     */
+    private fun afterConversationClosed(resetScene: Boolean) {
         if (resetScene) resetToHome()
-        // Re-arm the wake-word listener regardless: with the pipeline
-        // closed, the user may still trigger Kiwi by saying the wake
-        // word with the calendar (or whatever) still on screen.
+        // Re-arm the wake-word listener regardless: con el pipeline
+        // cerrado, el usuario puede volver a llamar a Kiwi con la
+        // escena (calendar / lo que sea) aún en pantalla.
         startWakeWordListener()
-        // The conversation may have added/completed/removed a TODO or
-        // bumped Spotify/Calendar state; if we land back on the Home
-        // scene the user expects it fresh. Kicks off async — the
-        // HomeScene keeps the previous snapshot until the new one
-        // lands.
         if (_scene.value is Scene.Idle) triggerHomeRefresh()
     }
 
-    private fun cleanup() {
-        capture.stop()
-        playback.stop()
-        session?.close()
-        session = null
-        // Soltar el foco → la app que estaba sonando (YouTube/Spotify)
-        // reanuda donde se quedó. cleanup() se llama en todos los
-        // finales de sesión (close, error, fallo de captura, cleared),
-        // así que es el sitio único para garantizar que el foco se
-        // suelta pase lo que pase.
-        audioFocus.release()
-    }
-
     override fun onCleared() {
-        cleanup()
+        engine.shutdown()
         wakeWordListener.stop()
-        playbackQueue.close()
-        playbackWorker.cancel()
         homePollerJob.cancel()
         sceneAutoCloseJob.cancel()
         eventSoonJob.cancel()
-        if (detectorLazy.isInitialized()) {
-            runCatching { detectorLazy.value.close() }
-        }
         super.onCleared()
     }
 
@@ -1401,31 +1023,9 @@ class KiwiViewModel(application: Application) : AndroidViewModel(application) {
         // 10 min internamente en el backend.
         const val HOME_REFRESH_INTERVAL_MS = 60_000L
 
-        // How long the user has to be silent (after Silero stopped
-        // returning isSpeech=true) before we auto-close the turn.
-        // Silero already smooths over ~300 ms internally so the
-        // perceived end-of-speech delay is ~300 ms longer than this.
-        // 1200 ms here ⇒ feels like ~1.5 s of pause: long enough
-        // that Kiwi doesn't cut the user off mid-thought when they
-        // pause to phrase a longer query, short enough that the
-        // back-and-forth still feels conversational.
-        const val SILENCE_END_OF_TURN_MS = 1_200L
-
-        // How long Listening can stay open WITHOUT any speech being
-        // detected before we auto-close the conversation. Listening
-        // streams PCM to Gemini Live continuously, así que cada
-        // segundo de mic-abierto-y-nadie-hablando quema tokens de
-        // input audio. 6 s deja margen para "lo voy a pensar un
-        // momento" pero corta rápido cuando ya acabaste; la detección
-        // de despedida de Kiwi (looksLikeGoodbye) cubre el caso
-        // explícito "nada más" cerrando antes incluso del timeout.
-        const val NO_SPEECH_TIMEOUT_MS = 6_000L
-
-        // Total handshake attempts before we surface PipelineState.Error.
-        // First attempt + 2 retries with 1s/3s backoff covers the
-        // typical post-Doze stale-socket case (~3 s for the WiFi/4G
-        // stack to stabilise) without making real outages drag on.
-        const val MAX_CONNECT_ATTEMPTS = 3
+        // (SILENCE_END_OF_TURN_MS / NO_SPEECH_TIMEOUT_MS /
+        // MAX_CONNECT_ATTEMPTS viven ahora en ConversationEngine, que
+        // es quien gestiona los turnos y la reconexión.)
 
         // Tras un device_command tipo "open_app_then_return" lanzamos
         // la app target con un Intent y, transcurrido este delay,
