@@ -1,0 +1,95 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT: kiwi-assistant-494421
+  GCP_REGION: europe-west1
+  AR_REPO: kiwi
+  SERVICE_NAME: kiwi-backend
+  RUNTIME_SA: kiwi-backend@kiwi-assistant-494421.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    name: Build and deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write   # required for Workload Identity Federation
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.SERVICE_NAME }}
+        run: |
+          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" backend
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Deploy to Cloud Run
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.SERVICE_NAME }}
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --image="$IMAGE:${{ github.sha }}" \
+            --region="$GCP_REGION" \
+            --service-account="$RUNTIME_SA" \
+            --allow-unauthenticated \
+            --port=8080 \
+            --memory=512Mi \
+            --cpu=1 \
+            --min-instances=1 \
+            --max-instances=1 \
+            --timeout=3600 \
+            --session-affinity \
+            --concurrency=4 \
+            --update-env-vars="GCP_PROJECT=${GCP_PROJECT},GCP_LOCATION=${GCP_REGION},KIWI_STATE_BUCKET=${GCP_PROJECT}-state" \
+            --set-secrets="KIWI_API_KEY=KIWI_API_KEY:latest,KIWI_GOOGLE_CREDENTIALS=kiwi-google-credentials:latest,DEV_LOGS_TOKEN=kiwi-dev-logs-token:latest,GEMINI_API_KEY=kiwi-gemini-ai-studio-key:latest,KIWI_SPOTIFY_CREDENTIALS=kiwi-spotify-credentials:latest"
+
+      - name: Allow public invocations
+        # `gcloud run deploy --allow-unauthenticated` silently no-ops if the
+        # org policy blocks `allUsers`. We add the binding explicitly so a
+        # fresh deploy is always reachable; if the org policy denies it the
+        # step fails loudly instead of leaving a 403'ing service behind.
+        run: |
+          gcloud run services add-iam-policy-binding "$SERVICE_NAME" \
+            --region="$GCP_REGION" \
+            --member=allUsers \
+            --role=roles/run.invoker \
+            --quiet
+
+      - name: Print service URL
+        run: |
+          URL=$(gcloud run services describe "$SERVICE_NAME" \
+            --region="$GCP_REGION" \
+            --format='value(status.url)')
+          echo "Deployed: $URL"
+          echo "::notice::Backend live at $URL"

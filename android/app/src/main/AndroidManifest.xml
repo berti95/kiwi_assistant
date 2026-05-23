@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!--
+      setAlarmClock está exento de SCHEDULE_EXACT_ALARM en la
+      mayoría de versiones, pero algunos OEM de Android 14+ lo
+      exigen igualmente. SCHEDULE_EXACT_ALARM se concede por
+      defecto en instalación; USE_EXACT_ALARM es la variante "no
+      revocable" para apps con uso legítimo de alarma. Declaramos
+      ambas para cubrir cualquier configuración.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES"
+        tools:ignore="ProtectedPermissions" />
+
+    <!--
+      Wake word en segundo plano (Fase 2): un foreground service de
+      micrófono mantiene "oye kiwi" vivo mientras Kiwi no está en
+      primer plano. SYSTEM_ALERT_WINDOW permite traer la Activity al
+      frente desde background (y, en Fase 2b, el overlay encima de
+      otras apps). POST_NOTIFICATIONS para la notificación obligatoria
+      del foreground service en Android 13+.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Android 11+ requiere declarar visibilidad de paquetes terceros
+      que vayamos a lanzar con PackageManager.getLaunchIntentForPackage.
+      Sin esto, la llamada devuelve null aunque la app esté instalada.
+      Añadir aquí cada paquete que orquestamos vía device_command.
+    -->
+    <queries>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.youtube" />
+    </queries>
+
+    <application
+        android:name=".KiwiApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Kiwi">
+
+        <receiver
+            android:name=".updater.InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.kiwi.assistant.UPDATE_INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".alarm.AlarmRingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.kiwi.assistant.ALARM_RING" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".service.KiwiVoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!--
+          AccessibilityService para pulsar botones de YouTube por voz
+          (ui_click: Me gusta, Saltar anuncio, Suscribirse, etc.). El
+          usuario lo habilita a mano en Ajustes → Accesibilidad → Kiwi.
+          Limitado a YouTube en su config XML.
+        -->
+        <service
+            android:name=".a11y.KiwiAccessibilityService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kiwi_accessibility_config" />
+        </service>
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Kiwi">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

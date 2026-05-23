@@ -1183,36 +1183,81 @@ gcloud run deploy kiwi-backend \
 
 ---
 
-## Roadmap — Visión a futuro
+## Camino W — Decisión de arquitectura post-V1
 
-### V2 — Integraciones básicas
+Tras evaluar caminos alternativos (Home Assistant + Lovelace, Music Assistant
+para unificar reproductores, MCPs como capa de integración) la dirección
+elegida para todo el roadmap post-V1 es **Camino W: integraciones DIY
+directas desde el backend**. Las razones:
 
-- **Spotify Connect**: control por voz ("pon música de cocinar"). Usar la Spotify Web API para buscar y controlar reproducción. El audio sale por el altavoz de la base.
-- **Tiempo meteorológico**: Gemini function calling para consultar APIs de tiempo (OpenWeatherMap o WeatherAPI). Mostrar el pronóstico en la pantalla en modo reposo.
-- **Firebase Auth**: migrar de API key fija a autenticación con cuenta de Google. Login una sola vez, token auto-renovable. Más seguro y preparado para multi-dispositivo.
+- **Single-user, 30 años, premium en todas las plataformas relevantes.** No
+  hay multi-tenant, ni perfil infantil, ni necesidad de un "hub" doméstico
+  abierto. Cada decisión se puede tomar para esta persona.
+- **UI estilo Echo Show, no Lovelace.** La interfaz de Home Assistant /
+  Lovelace está pensada para dashboards de domótica; aquí queremos un
+  asistente con escenas custom (now-playing, video, calendario) en Compose.
+- **Servicios separados, no unificados.** Spotify, YouTube y Calendar se
+  integran como tools independientes. Un wrapper tipo Music Assistant
+  facilita un reproductor común pero quita personalización a futuro
+  (carátulas Spotify, recomendaciones YouTube, etc.).
+- **HA queda en reserva, sólo para domótica.** Las persianas/estores llegan
+  en ~6 meses. Cuando llegue ese momento se levanta una Raspberry Pi con
+  Home Assistant y se expone una sola tool (`ha_call_service`) desde el
+  backend. Hasta entonces no hay HA en el sistema.
 
-### V3 — Asistente domótico
+### Servicios objetivo
 
-- **Home Assistant**: integración vía REST API o WebSocket de HA. Controlar luces, enchufes, termostato por voz. "Apaga la luz del salón", "Pon la calefacción a 21 grados".
-- **Rutinas**: "Buenos días" → enciende luces, dice el tiempo, pone las noticias, muestra la agenda del día.
-- **Calendario**: integración con Google Calendar. "¿Qué tengo hoy?", "Ponme una reunión mañana a las 10".
-- **Recordatorios y timers**: "Recuérdame en 20 minutos que revise el horno".
+| Servicio | Plan | Alcance v1 de la integración |
+|---|---|---|
+| Spotify | Premium | Web API + Web Playback SDK en WebView para reproducir en la propia tablet, controlado por voz ("pon música de fondo"). |
+| YouTube (regular) | Premium | YouTube Data API v3 para listar/buscar/Watch Later + IFrame Player API en WebView para reproducir video embebido. **No** YouTube Music: el plan es mantener Spotify para audio. |
+| Google Calendar | Cuenta personal | Calendar API v3 **sólo lectura** ("¿qué tengo hoy?", "¿hay algo el viernes?"). Escritura queda fuera de scope hasta que esté pulido el read. |
 
-### V4 — Experiencia avanzada
+### Cuotas y avisos en UI
 
-- **Reconocimiento de voz multi-usuario**: usar Eagle Speaker Recognition (Picovoice) para distinguir quién habla. Personalizar respuestas por usuario.
-- **Wake word personalizado**: migrar de Porcupine a OpenWakeWord. Entrenar una palabra propia ("Hey Casa", "Oye Jarvis", lo que quieras).
-- **Modo visual**: mostrar imágenes, gráficos, mapas en la pantalla como parte de las respuestas. Gemini puede generar código que se renderiza en la tablet.
-- **Historial de conversaciones**: persistir conversaciones en Firestore. "¿Qué me dijiste ayer sobre la receta de paella?"
-- **Widgets en pantalla de reposo**: temperatura, eventos del calendario, titulares de noticias, estado de dispositivos del hogar.
-- **Cámara**: usar la cámara del Pixel Tablet para que Gemini "vea" (la Live API soporta video). "¿Qué planta es esta?" apuntando a una maceta.
+Las APIs anteriores tienen límites diarios o mensuales (YouTube Data API:
+10 000 units/día; Calendar: 1 000 000 queries/día; Spotify: 180 req/min
+sliding window). El plan es:
 
-### V5 — Ecosistema
+- El backend lleva contadores por API en memoria/Firestore.
+- Se exponen vía un endpoint `GET /api/quotas` que la UI Compose consulta
+  cada N segundos.
+- La UI muestra un icono pequeño con el % consumido y avisa cuando se cruza
+  el 80 %. Si una API se queda sin cuota, el tool correspondiente devuelve
+  un error claro que Gemini comunica al usuario.
 
-- **Multi-dispositivo**: el mismo backend sirve a varias tablets/dispositivos en distintas habitaciones.
-- **App companion en el móvil**: configurar el asistente, ver historial, gestionar integraciones desde el teléfono.
-- **Plugins**: arquitectura de plugins para que sea fácil añadir nuevas integraciones (nueva API, nuevo servicio domótico, etc.) sin tocar el core.
-- **Google Car**: reutilizar el backend para un asistente en el coche con Android Auto o una tablet montada en el salpicadero.
+### Plan por fases
+
+Cada fase deja el sistema verificable end-to-end antes de avanzar.
+
+| Fase | Alcance | Entregable | Estim. |
+|---|---|---|---|
+| **0** | Function calling base + tool dummy `get_current_time` | Gemini llama tools y el backend responde correctamente | ~2 h |
+| **1** | Refactor `KiwiState` → escenas + Router Compose | Navegación entre escenas (Idle/NowPlaying/Calendar/Video/…) | ~3 h |
+| **2** | Bootstrap OAuth de Google (Calendar + YouTube Data API) | Refresh token guardado en GCP Secret Manager | ~2 h |
+| **3** | Tool `calendar_list_events` + escena `CalendarView` | Pregunta por agenda funciona y se ve | ~4 h |
+| **4** | Tools de YouTube Data (search, Watch Later) + escena `VideoListView` | Listas y resultados navegables por voz | ~5 h |
+| **5** | WebView + IFrame Player + escena `VideoPlayer` | Reproducción de YouTube embebido controlable por voz | ~5 h |
+| **6** | Escena `BrowseYT` (WebView de YouTube completa) | Fallback para "abre YouTube" sin parsearlo | ~2 h |
+| **7** | OAuth Spotify + Web API tools + escena `NowPlaying` | Pedir música por voz, Now Playing en pantalla | ~6 h |
+| **8** | `MediaController` unificado (pause/next/skip transversal) | Comandos de medios sin discriminar Spotify/YouTube | ~3 h |
+| **9** | Volumen vía `AudioManager` | "Sube/baja el volumen" sin tocar la app subyacente | ~1 h |
+| **10** *(en ~6 meses)* | Home Assistant + persianas | Tool `ha_call_service`. Sólo cuando llegue el hardware. | — |
+
+Las fases se desarrollan en orden estricto. Se puede cortar el roadmap en
+cualquier punto y el sistema queda en un estado coherente: V1 sigue
+funcionando, las escenas previas siguen funcionando, etc.
+
+### Lo que queda fuera (consciente)
+
+- Reconocimiento multi-usuario (Eagle / Speaker ID): single-user.
+- Cámara como entrada visual: bonito pero ortogonal a integraciones.
+- Multi-dispositivo: una sola tablet en el salón.
+- Plugins / arquitectura de extensión genérica: sobreingeniería para un
+  asistente personal — añadir un servicio nuevo es escribir un fichero
+  `tools/<servicio>.py` y registrarlo.
+- App companion en el móvil: el asistente vive en la tablet; la
+  configuración se hace por SSH/Cloud Run/CLI.
 
 ---
 

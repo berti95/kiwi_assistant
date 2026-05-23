@@ -1,0 +1,60 @@
+<!--
+  YouTube embed host page for Kiwi.
+
+  Loaded from android/assets and rendered inside an Android WebView.
+  The Compose layer substitutes ``__VIDEO_ID__`` with the real id
+  before handing the HTML to the WebView.
+
+  Implementation note — why a plain <iframe> instead of the IFrame
+  Player JS API:
+  - The JS API path (loadDataWithBaseURL + YT.Player + postMessage)
+    repeatedly produced "152-4" / "Video no disponible" errors in
+    real WebView testing on the tablet. The exact origin of the
+    failure is hard to pin down (cookie / iframe origin / postMessage
+    same-origin checks all interact in subtle ways), but a plain
+    iframe pointing at YouTube's standard embed URL is the lowest-
+    common-denominator and works for every embeddable video.
+  - We don't currently expose voice control of the player (pause,
+    skip, …) so the JS API didn't earn its complexity. When Fase 8
+    (unified MediaController) wires that up we'll pull it back via
+    a postMessage bridge inside the same iframe.
+
+  Referer fix (152/153) — añadido 2026:
+  - A finales de 2025 YouTube empezó a EXIGIR el header HTTP Referer
+    para reproducir embeds; sin él devuelve "152-4 / Video no
+    disponible". En un WebView (sobre todo cargado con
+    loadDataWithBaseURL, que produce un origen opaco) el Referer se
+    pierde por defecto. La doc de YouTube para WebView recomienda:
+      1. referrerpolicy="strict-origin-when-cross-origin" en el iframe
+         + <meta name="referrer"> → manda el origen como Referer.
+      2. el parámetro origin en la URL del embed → identifica el host
+         embebedor cuando el Referer va vacío.
+    widget_referrer es un extra para analytics, no afecta a la
+    reproducción pero no estorba.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>
+  html, body, iframe {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    border: none;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+  <iframe
+    src="https://www.youtube.com/embed/__VIDEO_ID__?autoplay=1&playsinline=1&rel=0&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com"
+    referrerpolicy="strict-origin-when-cross-origin"
+    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+    allowfullscreen>
+  </iframe>
+</body>
+</html>
