@@ -73,47 +73,49 @@ class _TurnCancelledError(Exception):
     """
 
 
-class _ScreenReadChannel:
-    """RPC ida-y-vuelta para que un tool 'vea' la pantalla del tablet.
+async def _read_tablet_screen(
+    ws: WebSocket, turn_index: int, timeout: float = 4.0,
+) -> list[str]:
+    """Pide al tablet los textos visibles y espera su ``ui.screen``.
 
-    El handler (ui_read_screen) llama a [request]: enviamos un
-    device_command ``ui_read`` al tablet y esperamos su respuesta
-    ``ui.screen``, que llega por el otro lado del turno
-    (``tablet_to_gemini``) y resuelve el future vía [resolve].
-
-    Single-user / una lectura en vuelo a la vez: el último request gana.
-    Si el tablet no contesta (accesibilidad apagada, no está en una app
-    legible…) [request] devuelve [] tras el timeout y el tool lo
-    comunica a Gemini sin bloquear el turno.
+    Se llama desde el tool ``ui_read_screen``, que Gemini invoca DESPUÉS
+    de que el usuario terminó de hablar (``activity_end``). En ese punto
+    ``tablet_to_gemini`` ya retornó, así que el socket del tablet no
+    tiene otro lector y podemos leerlo aquí directamente hasta que
+    llegue el ``ui.screen`` o se agote el timeout. (Antes esto usaba un
+    future resuelto por ``tablet_to_gemini``, pero esa corutina ya no
+    está viva cuando corre el tool → siempre timeout.)
     """
-
-    def __init__(self, ws: WebSocket) -> None:
-        self._ws = ws
-        self._pending: asyncio.Future[list[str]] | None = None
-
-    async def request(self, timeout: float = 4.0) -> list[str]:
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[list[str]] = loop.create_future()
-        self._pending = fut
-        await _safe_send(
-            self._ws,
-            {
-                "type": protocol.TYPE_SCENE_SET,
-                "scene": {"type": "device_command", "command": "ui_read"},
-            },
-        )
-        try:
-            return await asyncio.wait_for(fut, timeout)
-        except TimeoutError:
-            log.warning("ui_read: tablet no respondió en %.1fs", timeout)
+    await _safe_send(
+        ws,
+        {
+            "type": protocol.TYPE_SCENE_SET,
+            "scene": {"type": "device_command", "command": "ui_read"},
+        },
+    )
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            log.warning("turn %d: ui_read sin respuesta en %.1fs", turn_index, timeout)
             return []
-        finally:
-            self._pending = None
-
-    def resolve(self, items: list[str]) -> None:
-        fut = self._pending
-        if fut is not None and not fut.done():
-            fut.set_result(items)
+        try:
+            msg = await asyncio.wait_for(ws.receive_json(), remaining)
+        except (TimeoutError, WebSocketDisconnect, RuntimeError):
+            log.warning("turn %d: ui_read sin respuesta (socket/timeout)", turn_index)
+            return []
+        if msg.get("type") == protocol.TYPE_UI_SCREEN:
+            items = msg.get("items") or []
+            log.info("turn %d: ui.screen recibido (%d items)", turn_index, len(items))
+            return [str(x) for x in items]
+        # No debería llegar otra cosa tras activity_end; si llega, la
+        # ignoramos y seguimos esperando el ui.screen.
+        log.info(
+            "turn %d: ui_read ignora msg %r mientras espera pantalla",
+            turn_index,
+            msg.get("type"),
+        )
 
 
 def _is_client_disconnect(ws: WebSocket, exc: Exception) -> bool:
@@ -380,7 +382,6 @@ async def _run_one_turn(
     audio_chunks_in = 0
     audio_bytes_out = 0
     end_requested = False
-    screen = _ScreenReadChannel(ws)
 
     async def tablet_to_gemini() -> None:
         nonlocal audio_chunks_in
@@ -417,10 +418,6 @@ async def _run_one_turn(
                     audio_chunks_in,
                 )
                 raise _TurnCancelledError()
-            elif kind == protocol.TYPE_UI_SCREEN:
-                items = message.get("items") or []
-                log.info("turn %d: ui.screen recibido (%d items)", turn_index, len(items))
-                screen.resolve([str(x) for x in items])
             elif kind == protocol.TYPE_SESSION_END:
                 raise _SessionEndError()
 
@@ -448,7 +445,7 @@ async def _run_one_turn(
             tool_call = getattr(response, "tool_call", None)
             if tool_call is not None:
                 nonlocal_end = await _handle_tool_call(
-                    ws, gemini_session, tool_call, turn_index, stats, screen,
+                    ws, gemini_session, tool_call, turn_index, stats,
                 )
                 if nonlocal_end:
                     end_requested = True
@@ -505,7 +502,6 @@ async def _handle_tool_call(
     tool_call,
     turn_index: int,
     stats: usage.ProxyStats,
-    screen: _ScreenReadChannel,
 ) -> bool:
     """Run each requested tool and ship the responses back to Gemini.
 
@@ -536,7 +532,7 @@ async def _handle_tool_call(
         )
 
     async def read_screen() -> list[str]:
-        return await screen.request()
+        return await _read_tablet_screen(ws, turn_index)
 
     end_session_after_turn = False
     responses: list[types.FunctionResponse] = []
