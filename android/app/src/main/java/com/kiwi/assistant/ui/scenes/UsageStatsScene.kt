@@ -1,6 +1,7 @@
 package com.kiwi.assistant.ui.scenes
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,15 +46,54 @@ import kotlin.math.roundToInt
  * de modelo, ajustar via env vars.
  */
 @Composable
-fun UsageStatsScene(scene: Scene.UsageStats) {
+fun UsageStatsScene(
+    scene: Scene.UsageStats,
+    onSelectPeriod: (String) -> Unit = {},
+) {
     SceneScaffold {
         Header(period = scene.period)
+        Spacer(Modifier.height(KiwiSpacing.lg))
+        PeriodTabs(selected = scene.period, onSelect = onSelectPeriod)
         Spacer(Modifier.height(KiwiSpacing.lg + KiwiSpacing.xs))
         BigNumbers(scene = scene)
         Spacer(Modifier.height(KiwiSpacing.xl))
         TopToolsBlock(tools = scene.topTools)
     }
 }
+
+/** Hoy / 7 días / 30 días — toca para recargar ese periodo. */
+@Composable
+private fun PeriodTabs(selected: String, onSelect: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.sm)) {
+        for ((period, label) in USAGE_PERIODS) {
+            val active = period == selected
+            Text(
+                text = label,
+                color = Color.White.copy(
+                    alpha = if (active) 0.95f else KiwiOpacity.TEXT_SECONDARY,
+                ),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(KiwiRadii.md))
+                    .background(
+                        Color.White.copy(
+                            alpha = if (active) 0.16f else KiwiOpacity.CARD_BG,
+                        ),
+                    )
+                    .clickable(enabled = !active) { onSelect(period) }
+                    .padding(horizontal = KiwiSpacing.lg, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
+            )
+        }
+    }
+}
+
+private val USAGE_PERIODS = listOf(
+    "today" to "Hoy",
+    "7d" to "7 días",
+    "30d" to "30 días",
+)
 
 @Composable
 private fun Header(period: String) {

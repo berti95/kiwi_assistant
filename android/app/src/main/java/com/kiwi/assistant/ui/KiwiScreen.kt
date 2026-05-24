@@ -142,6 +142,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onAlarmSnooze = viewModel::onAlarmSnooze,
                 onShoppingTap = viewModel::onShoppingTap,
                 onOpenUsageStats = { viewModel.onOpenUsageStats() },
+                onSelectUsagePeriod = { viewModel.onOpenUsageStats(it) },
                 onOpenAlarmList = viewModel::onOpenAlarmList,
                 onOpenCalendar = viewModel::onOpenCalendar,
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
@@ -371,6 +372,7 @@ private fun SceneLayer(
     onAlarmSnooze: (String, Int) -> Unit,
     onShoppingTap: (ShoppingItem) -> Unit,
     onOpenUsageStats: () -> Unit,
+    onSelectUsagePeriod: (String) -> Unit,
     onOpenAlarmList: () -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenNowPlaying: () -> Unit,
@@ -407,7 +409,7 @@ private fun SceneLayer(
             onSnooze = onAlarmSnooze,
         )
         is Scene.ShoppingList -> ShoppingListScene(scene, onItemTap = onShoppingTap)
-        is Scene.UsageStats -> UsageStatsScene(scene)
+        is Scene.UsageStats -> UsageStatsScene(scene, onSelectPeriod = onSelectUsagePeriod)
     }
 }
 
