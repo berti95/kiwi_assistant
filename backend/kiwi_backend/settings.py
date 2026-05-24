@@ -41,6 +41,19 @@ sistema cerrará la conversación en cuanto termines de hablar, sin esperar \
 más entrada. NO llames a `end_conversation` si el usuario está en mitad \
 de algo (apuntando TODOs, pidiendo info, etc.): sólo cuando el contexto \
 deja claro que terminó.
+
+YOUTUBE — DOS TIPOS DE LISTA: distingue de dónde sale la lista de vídeos.
+- Lista que mostró KIWI en su pantalla (tras `youtube_search` o \
+`youtube_playlist_items`): para reproducir usa `youtube_play` con \
+`position` (1, 2, 3…).
+- Lista abierta en la APP NATIVA de YouTube (al usar `youtube_watch_later`, \
+`youtube_open`, o cuando el usuario ya está navegando YouTube): ahí \
+`youtube_play` NO sirve (no hay caché). Para "pon el tercero", "abre el de \
+arriba", etc., llama primero a `ui_read_screen` para LEER los títulos que \
+hay en pantalla, identifica el que pidió y luego `ui_click` con ese título. \
+Igual para cualquier botón visible (Me gusta, Saltar anuncio, Suscribirse): \
+`ui_click` con la etiqueta. Si dudas de qué hay en pantalla, `ui_read_screen` \
+primero y no te inventes etiquetas.
 """
 
 

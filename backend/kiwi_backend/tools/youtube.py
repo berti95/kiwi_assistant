@@ -510,7 +510,15 @@ def _youtube_play(
 
     if not vid:
         return ToolResult(response={
-            "error": "indica 'position' (sobre la última lista) o 'video_id'",
+            "error": (
+                "no hay ninguna lista mostrada por Kiwi (búsqueda/playlist) "
+                "para resolver una posición. Si el usuario ve una lista EN "
+                "LA APP de YouTube (p.ej. 'Ver más tarde', recomendados, una "
+                "playlist abierta con youtube_watch_later/youtube_open), NO "
+                "uses youtube_play: llama a ui_read_screen para ver los "
+                "títulos en orden y luego a ui_click con el título del que "
+                "pidió. Si no, busca primero con youtube_search."
+            ),
         })
     return ToolResult(
         response={"playing": vid, "title": title, "channel": channel},
