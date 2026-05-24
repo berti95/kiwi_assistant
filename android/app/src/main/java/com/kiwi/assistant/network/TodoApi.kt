@@ -2,6 +2,7 @@ package com.kiwi.assistant.network
 
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.UsageToolCount
 import java.util.concurrent.TimeUnit
@@ -176,6 +177,15 @@ class TodoApi(
                 count = (obj["count"] as? JsonPrimitive)?.intOrNull ?: 0,
             )
         }
+        val byDayArr = root["by_day"] as? JsonArray ?: JsonArray(emptyList())
+        val byDay = byDayArr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            UsageDay(
+                date = (obj["date"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null,
+                costEur = (obj["cost_eur"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
+            )
+        }
         return Scene.UsageStats(
             period = (root["period"] as? JsonPrimitive)?.contentOrNull ?: "today",
             conversationCount = int("conversation_count"),
@@ -185,6 +195,7 @@ class TodoApi(
             audioTotalSeconds = double("audio_total_seconds"),
             estimatedCostEur = double("estimated_cost_eur"),
             topTools = tools,
+            byDay = byDay,
         )
     }
 

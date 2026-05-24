@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.Scene
+import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.UsageToolCount
 import com.kiwi.assistant.ui.components.SceneScaffold
 import com.kiwi.assistant.ui.theme.KiwiOpacity
@@ -56,9 +58,49 @@ fun UsageStatsScene(
         PeriodTabs(selected = scene.period, onSelect = onSelectPeriod)
         Spacer(Modifier.height(KiwiSpacing.lg + KiwiSpacing.xs))
         BigNumbers(scene = scene)
+        // El gráfico solo aporta con varios días (en "Hoy" es un único
+        // día → no lo pintamos).
+        if (scene.byDay.size > 1) {
+            Spacer(Modifier.height(KiwiSpacing.xl))
+            DailyCostChart(byDay = scene.byDay)
+        }
         Spacer(Modifier.height(KiwiSpacing.xl))
         TopToolsBlock(tools = scene.topTools)
     }
+}
+
+/** Barras de gasto por día sobre el periodo (estilo dashboard). */
+@Composable
+private fun DailyCostChart(byDay: List<UsageDay>) {
+    val maxCost = (byDay.maxOfOrNull { it.costEur } ?: 0.0).coerceAtLeast(0.0001)
+    Text(
+        text = "Gasto por día",
+        color = Color.White.copy(alpha = 0.7f),
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+    )
+    Spacer(Modifier.height(KiwiSpacing.sm + KiwiSpacing.xs))
+    Row(
+        modifier = Modifier.fillMaxWidth().height(110.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        for (d in byDay) {
+            val frac = (d.costEur / maxCost).toFloat().coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(frac)
+                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)),
+            )
+        }
+    }
+    Spacer(Modifier.height(KiwiSpacing.xs))
+    Text(
+        text = "${byDay.first().date} – ${byDay.last().date} · máx ${formatCost(maxCost)}/día",
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+        style = MaterialTheme.typography.bodyMedium,
+    )
 }
 
 /** Hoy / 7 días / 30 días — toca para recargar ese periodo. */

@@ -118,16 +118,17 @@ def test_estimated_cost_uses_settings_rates(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(settings, "kiwi_cost_audio_in_eur_per_second", 0.001)
     monkeypatch.setattr(settings, "kiwi_cost_audio_out_eur_per_second", 0.002)
+    monkeypatch.setattr(settings, "kiwi_cost_per_turn_eur", 0.01)
 
     now_ms = int(time.time() * 1000)
     usage.log_conversation(
         started_at_ms=now_ms, ended_at_ms=now_ms + 1_000,
-        turn_count=1, audio_in_seconds=10.0, audio_out_seconds=20.0,
+        turn_count=3, audio_in_seconds=10.0, audio_out_seconds=20.0,
         tool_call_names=[],
     )
     today = usage.aggregate("today")
-    # 10 * 0.001 + 20 * 0.002 = 0.01 + 0.04 = 0.05
-    assert today["estimated_cost_eur"] == pytest.approx(0.05)
+    # 10*0.001 + 20*0.002 + 3*0.01 = 0.01 + 0.04 + 0.03 = 0.08
+    assert today["estimated_cost_eur"] == pytest.approx(0.08)
 
 
 def test_log_conversation_prunes_old_entries(_fake_state: dict[str, Any]) -> None:
@@ -154,6 +155,11 @@ def test_aggregate_invalid_period_raises() -> None:
 
 def test_aggregate_empty_returns_zeros() -> None:
     today = usage.aggregate("today")
+    # by_day para "today" es un único día con coste 0; lo validamos
+    # aparte y comprobamos el resto del agregado.
+    by_day = today.pop("by_day")
+    assert len(by_day) == 1
+    assert by_day[0]["cost_eur"] == 0.0
     assert today == {
         "period": "today",
         "conversation_count": 0,

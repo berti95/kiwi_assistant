@@ -22,6 +22,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Literal
 
 from . import state_store
@@ -147,8 +148,6 @@ def aggregate(period: Period, now_ms: int | None = None) -> dict:
 
     audio_in = sum(it.audio_in_seconds for it in in_window)
     audio_out = sum(it.audio_out_seconds for it in in_window)
-    cost_in = audio_in * settings.kiwi_cost_audio_in_eur_per_second
-    cost_out = audio_out * settings.kiwi_cost_audio_out_eur_per_second
 
     tool_counter: Counter[str] = Counter()
     total_turns = 0
@@ -167,9 +166,50 @@ def aggregate(period: Period, now_ms: int | None = None) -> dict:
         "audio_in_seconds": round(audio_in, 1),
         "audio_out_seconds": round(audio_out, 1),
         "audio_total_seconds": round(audio_in + audio_out, 1),
-        "estimated_cost_eur": round(cost_in + cost_out, 4),
+        "estimated_cost_eur": round(_cost_eur(audio_in, audio_out, total_turns), 4),
         "top_tools": top_tools,
+        "by_day": _by_day(in_window, from_ms, to_ms),
     }
+
+
+def _cost_eur(audio_in_s: float, audio_out_s: float, turns: int) -> float:
+    """Coste estimado en EUR.
+
+    Tres términos: audio entrante, audio saliente y un coste por TURNO.
+    El término por turno modela el coste real dominante que el audio
+    solo no captura: con la rotación de sesión por turno, cada turno
+    re-envía system prompt + historial como tokens de texto de entrada.
+    Las constantes están calibradas contra el gasto real observado en
+    el billing de Google (ver settings).
+    """
+    return (
+        audio_in_s * settings.kiwi_cost_audio_in_eur_per_second
+        + audio_out_s * settings.kiwi_cost_audio_out_eur_per_second
+        + turns * settings.kiwi_cost_per_turn_eur
+    )
+
+
+def _by_day(
+    in_window: list[ConversationLog], from_ms: int, to_ms: int,
+) -> list[dict]:
+    """Coste por día (UTC) en la ventana, una entrada por día natural.
+
+    Incluye días sin actividad (coste 0) para que el gráfico de barras
+    tenga huecos reales, como el dashboard de facturación de Google.
+    """
+    cost_by_day: dict[int, float] = {}
+    for it in in_window:
+        day = it.started_at_ms // _DAY_MS
+        cost_by_day[day] = cost_by_day.get(day, 0.0) + _cost_eur(
+            it.audio_in_seconds, it.audio_out_seconds, it.turn_count,
+        )
+    out: list[dict] = []
+    for day in range(from_ms // _DAY_MS, to_ms // _DAY_MS + 1):
+        label = datetime.fromtimestamp(
+            day * _DAY_MS / 1000, tz=UTC,
+        ).strftime("%d/%m")
+        out.append({"date": label, "cost_eur": round(cost_by_day.get(day, 0.0), 4)})
+    return out
 
 
 def reset_for_tests() -> None:

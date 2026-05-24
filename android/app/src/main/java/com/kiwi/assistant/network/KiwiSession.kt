@@ -21,6 +21,7 @@ import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.ShoppingItem
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.UsageToolCount
 import com.kiwi.assistant.ui.VideoItem
 import kotlinx.serialization.json.doubleOrNull
@@ -386,6 +387,14 @@ class KiwiSession(
                 count = (obj["count"] as? JsonPrimitive)?.intOrNull ?: 0,
             )
         }
+        val byDayArr = scene["by_day"] as? JsonArray ?: JsonArray(emptyList())
+        val byDay = byDayArr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            UsageDay(
+                date = obj.string("date") ?: return@mapNotNull null,
+                costEur = (obj["cost_eur"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
+            )
+        }
         return Scene.UsageStats(
             period = scene.string("period") ?: "today",
             conversationCount = int("conversation_count"),
@@ -395,6 +404,7 @@ class KiwiSession(
             audioTotalSeconds = double("audio_total_seconds"),
             estimatedCostEur = double("estimated_cost_eur"),
             topTools = tools,
+            byDay = byDay,
         )
     }
 

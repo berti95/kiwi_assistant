@@ -115,13 +115,19 @@ class Settings(BaseSettings):
     kiwi_state_shopping_path: str = "shopping.json"
     kiwi_state_usage_path: str = "usage.json"
 
-    # Tarifas EUR por segundo de audio para la pantalla de costes.
-    # Defaults aproximan al modelo Flash Live (precios en USD del
-    # tier público con conversión 1 USD ≈ 0.95 EUR). Si Google
-    # actualiza precios o cambias de modelo, sobreescribe vía env
-    # KIWI_COST_AUDIO_IN_EUR_PER_SECOND / OUT.
-    kiwi_cost_audio_in_eur_per_second: float = 0.00002
-    kiwi_cost_audio_out_eur_per_second: float = 0.00006
+    # Tarifas para estimar el coste en la pantalla de Uso. Calibradas
+    # contra el gasto REAL observado en el billing de Gemini: con ~30
+    # días de uso (1637 s audio in, 1139 s out, 235 turnos) el gasto
+    # real fue ~€2.79, que el audio solo estimaba en ~€0.10 (28× corto).
+    # El grueso del coste es el TEXTO que se re-envía cada turno (system
+    # prompt + historial, por la rotación de sesión por turno), de ahí
+    # el término por turno. Audio in/out aproximan el token-pricing del
+    # modelo (~$3 / $12 por 1M tokens, 32 tok/s, 1 USD≈0.95 EUR). Si
+    # Google cambia precios o cambias de modelo, recalibra vía env
+    # (KIWI_COST_AUDIO_IN/OUT_EUR_PER_SECOND, KIWI_COST_PER_TURN_EUR).
+    kiwi_cost_audio_in_eur_per_second: float = 0.0000912
+    kiwi_cost_audio_out_eur_per_second: float = 0.0003648
+    kiwi_cost_per_turn_eur: float = 0.0095
 
     # Lat/lon for the weather widget on the home dashboard + the
     # get_weather tool. Defaults to Madrid; override per deploy if Kiwi

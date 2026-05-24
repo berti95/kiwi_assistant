@@ -160,11 +160,16 @@ sealed interface Scene {
         val audioTotalSeconds: Double,
         val estimatedCostEur: Double,
         val topTools: List<UsageToolCount>,
+        /** Coste por día (UTC) en el periodo, para el gráfico de barras. */
+        val byDay: List<UsageDay> = emptyList(),
     ) : Scene
 }
 
 /** Una entrada de "tool más usada" dentro de [Scene.UsageStats]. */
 data class UsageToolCount(val name: String, val count: Int)
+
+/** Coste de un día concreto, para el gráfico de [Scene.UsageStats]. */
+data class UsageDay(val date: String, val costEur: Double)
 
 /**
  * Un artículo de la lista de la compra. Reutiliza la misma forma que
