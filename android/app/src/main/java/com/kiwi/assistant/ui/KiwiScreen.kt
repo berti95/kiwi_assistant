@@ -97,6 +97,16 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     // que no moleste. La transición dura 1s al cruzar el umbral.
     val nightActive = rememberNightModeActive()
 
+    // Banda inferior reservada para el chip / HUD. La escena se
+    // pinta encima de esta franja para que su contenido NO pueda
+    // solaparse con la affordance de "Habla con Kiwi" ni con el HUD
+    // de conversación. Antes cada escena tenía que esquivarlos a
+    // mano (la home con un offset de 88dp en el chip, las demás
+    // simplemente se solapaban); ahora el contenedor manda y las
+    // escenas no se enteran.
+    val bottomBand = bottomBandFor(scene, pipeline)
+    val sceneBottomInset = if (bottomBand == BottomBand.None) 0.dp else BottomBandHeight
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -131,6 +141,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                     fadeOut(animationSpec = tween(180))
             },
             label = "scene-fade",
+            modifier = Modifier.padding(bottom = sceneBottomInset),
         ) { current ->
             SceneLayer(
                 scene = current,
@@ -157,48 +168,40 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
             )
         }
 
-        // Overlay layer. Cuatro estados disjuntos:
+        // Overlay layer. `bottomBand` ya resolvió cuál de los cuatro
+        // estados disjuntos toca (fullscreen / chip / hud / nada),
+        // así que aquí solo pintamos.
         //
-        // - Error / Reconnecting → siempre overlay fullscreen, sea
-        //   cual sea la escena: el usuario tiene que ver el problema
-        //   antes de seguir intentando hablar con Kiwi.
-        // - Pipeline Idle → botón "Habla con Kiwi" siempre visible
-        //   en bottom-center. Es la ÚNICA forma de arrancar
-        //   conversación (junto con el wake word "hola kiwi"); el
-        //   tap-anywhere ya no abre nada.
+        // - Error / Reconnecting → overlay fullscreen, sea cual sea
+        //   la escena: el usuario tiene que ver el problema antes de
+        //   seguir intentando hablar con Kiwi.
+        // - Ambient + pipeline Idle → pantalla "limpia" — sin
+        //   affordance del mic ni overlay. Wake word sigue activa;
+        //   tap o palabra disparan el ViewModel, que saca de Ambient.
+        // - Pipeline Idle (resto de escenas) → chip "Habla con Kiwi"
+        //   en la banda inferior.
         // - Pipeline activo + scene Idle (home) → fullscreen overlay
         //   con Listening / Processing / Responding como antes.
-        // - Pipeline activo + scene no-Idle → HUD compacto abajo
-        //   para que la escena (agenda, video, etc.) siga visible.
-        val pipelineWantsFullscreen =
-            pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting
-        when {
-            pipelineWantsFullscreen -> PipelineFullscreenOverlay(pipeline)
-            // Ambient con todo en reposo: pantalla "limpia" — sin
-            // affordance del mic ni overlay. Wake word sigue activa;
-            // tap o palabra disparan el ViewModel, que saca de Ambient.
-            // OJO: solo suprimimos cuando el pipeline ESTÁ Idle. Si
-            // arrancó una conversación (wake word desde la vista de
-            // pared) hay que dejar pasar el flow normal para que se
-            // pinte Listening/Processing/Responding por encima.
-            scene === Scene.Ambient && pipeline is PipelineState.Idle -> Unit
-            pipeline is PipelineState.Idle -> TalkAffordance(
+        // - Pipeline activo + scene no-Idle → HUD compacto en la
+        //   banda inferior para que la escena (agenda, video, etc.)
+        //   siga visible.
+        when (bottomBand) {
+            BottomBand.Chip -> TalkAffordance(
                 onTap = viewModel::onTap,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    // En Home la QuickActionsRow ya vive al fondo
-                    // (Compra · Agenda · Alarmas · Uso). Sin este
-                    // offset extra el TalkAffordance se le superpondría.
-                    // En otras scenes no hay nada abajo así que se
-                    // queda pegado al borde como antes.
-                    .padding(bottom = if (scene is Scene.Idle) 88.dp else 0.dp),
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
-            scene is Scene.Idle -> PipelineFullscreenOverlay(pipeline)
-            else -> PipelineHud(
+            BottomBand.Hud -> PipelineHud(
                 state = pipeline,
                 onClose = viewModel::onCloseConversation,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
+            BottomBand.None -> if (
+                pipeline is PipelineState.Error ||
+                pipeline is PipelineState.Reconnecting ||
+                (scene is Scene.Idle && pipeline !is PipelineState.Idle)
+            ) {
+                PipelineFullscreenOverlay(pipeline)
+            }
         }
 
         // Top-left chrome: back arrow (if there's a previous scene in
@@ -424,6 +427,33 @@ private fun SceneLayer(
             onRemove = onRemovePlan,
         )
     }
+}
+
+/**
+ * Altura de la franja inferior reservada para chip o HUD. Cubre el
+ * alto real del [TalkAffordance] (~48dp chip + 24dp margin) y el del
+ * [PipelineHud] (~52dp pill + 16dp margin) con un par de dp de aire.
+ */
+private val BottomBandHeight = 80.dp
+
+/**
+ * Qué se pinta en la banda inferior según el cruce escena × pipeline.
+ * Centralizamos aquí la decisión para que el contenedor reserve el
+ * inset exacto y el `when` de overlays no se vuelva a desincronizar.
+ */
+private enum class BottomBand { Chip, Hud, None }
+
+private fun bottomBandFor(scene: Scene, pipeline: PipelineState): BottomBand = when {
+    // Error / Reconnecting tapan la pantalla entera: no hay banda.
+    pipeline is PipelineState.Error || pipeline is PipelineState.Reconnecting -> BottomBand.None
+    // Vista de pared en reposo: nada en pantalla.
+    scene === Scene.Ambient && pipeline is PipelineState.Idle -> BottomBand.None
+    // En reposo (cualquier otra escena): el chip "Habla con Kiwi".
+    pipeline is PipelineState.Idle -> BottomBand.Chip
+    // Home + conversación activa: overlay fullscreen, sin banda.
+    scene is Scene.Idle -> BottomBand.None
+    // Resto de escenas con conversación activa: HUD compacto.
+    else -> BottomBand.Hud
 }
 
 /**
