@@ -47,6 +47,7 @@ import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
+import com.kiwi.assistant.ui.PlanChip
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
 import com.kiwi.assistant.ui.theme.KiwiOpacity
@@ -98,6 +99,7 @@ fun HomeScene(
     onOpenCalendar: () -> Unit = {},
     onOpenNowPlaying: () -> Unit = {},
     onOpenShoppingList: () -> Unit = {},
+    onOpenPlansList: () -> Unit = {},
     onCheckForUpdate: () -> Unit = {},
     updateStatus: String? = null,
 ) {
@@ -160,6 +162,11 @@ fun HomeScene(
                         .weight(1f)
                         .fillMaxHeight(),
                 )
+            }
+
+            snapshot?.planChip?.let { chip ->
+                Spacer(Modifier.height(KiwiSpacing.md))
+                PlanCountdownBar(chip = chip, onOpen = onOpenPlansList)
             }
 
             snapshot?.nowPlaying?.let { chip ->
@@ -495,6 +502,50 @@ private fun NowPlayingBar(chip: NowPlayingChip, onOpen: () -> Unit) {
                     chip.title.takeIf { it.isNotBlank() },
                     chip.artist.takeIf { it.isNotBlank() },
                 ).joinToString(" · "),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Chip de cuenta atrás de un plan / viaje. Se renderiza sólo en los
+ * días-milestone definidos por el backend (1, 2, 3, 5, 7… 30 días),
+ * así aparece como un pequeño chute de ilusión sin saturar. El tap
+ * abre la escena [Scene.PlansList] con todos los planes apuntados.
+ */
+@Composable
+private fun PlanCountdownBar(chip: PlanChip, onOpen: () -> Unit) {
+    val countdown = when {
+        chip.daysUntil <= 0 -> "Hoy"
+        chip.daysUntil == 1 -> "Mañana"
+        else -> "En ${chip.daysUntil} días"
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG))
+            .clickable { onOpen() }
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "✨",
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Spacer(Modifier.width(KiwiSpacing.sm + KiwiSpacing.xs))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = countdown,
+                color = Color.White.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                text = chip.label,
                 color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,

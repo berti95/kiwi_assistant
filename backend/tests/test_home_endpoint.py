@@ -349,6 +349,50 @@ def test_get_home_happy_path_with_todos_and_no_calendar_no_spotify(
     assert body["now_playing"] is None
 
 
+def test_get_home_plan_chip_appears_only_on_milestone_days(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """plan_chip aparece sólo si algún plan cae en un día-milestone."""
+    from datetime import date, timedelta
+
+    from kiwi_backend import plans
+
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+
+    # 6 días no es milestone (5 sí, 7 sí, 6 no) → sin chip.
+    plans.add("Fuera de milestone", (date.today() + timedelta(days=6)).isoformat())
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["plan_chip"] is None
+
+    # 5 días sí es milestone → chip.
+    plans.add("Cantabria", (date.today() + timedelta(days=5)).isoformat())
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    chip = body["plan_chip"]
+    assert chip is not None
+    assert chip["label"] == "Cantabria"
+    assert chip["days_until"] == 5
+
+
+def test_get_home_plan_chip_picks_closest_milestone(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Con varios planes en milestone, gana el más cercano."""
+    from datetime import date, timedelta
+
+    from kiwi_backend import plans
+
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+
+    plans.add("Lejano", (date.today() + timedelta(days=30)).isoformat())
+    plans.add("Pronto", (date.today() + timedelta(days=3)).isoformat())
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["plan_chip"]["label"] == "Pronto"
+
+
 def test_get_home_includes_today_calendar_events(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

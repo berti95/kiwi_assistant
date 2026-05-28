@@ -11,10 +11,30 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import alarms, google_auth, log_buffer, shopping, timer, todos, tools, usage, weather
+from . import (
+    alarms,
+    google_auth,
+    log_buffer,
+    plans,
+    shopping,
+    timer,
+    todos,
+    tools,
+    usage,
+    weather,
+)
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
+
+# Días-milestone hasta la fecha de un plan en los que el chip aparece
+# en la home. Elegidos para que el aviso "aparezca de vez en cuando" sin
+# saturar: cada día la última semana (anticipación), luego saltos
+# naturales (una/dos semanas, 20 días, un mes). El usuario lo siente
+# como una alegría periódica, no como un recordatorio insistente.
+_PLAN_CHIP_MILESTONE_DAYS: frozenset[int] = frozenset(
+    {0, 1, 2, 3, 4, 5, 7, 10, 14, 20, 30},
+)
 
 # Cloud Run's log capture relies on stdout/stderr, but Python's root
 # logger defaults to WARNING which hides our per-turn INFO traces. Bump
@@ -285,6 +305,23 @@ async def get_home(token: str = "") -> dict[str, object]:
             "home: alarms unavailable: %s: %s", type(exc).__name__, exc,
         )
 
+    # Plans: chip de cuenta atrás SOLO en días-milestone, para que la
+    # home no muestre el viaje todos los días (haría ruido) pero sí
+    # aparezca de vez en cuando como una alegría. Elegimos el plan más
+    # cercano cuya cuenta atrás cae en _PLAN_CHIP_MILESTONE_DAYS.
+    plan_chip: dict | None = None
+    try:
+        plan_items = await asyncio.to_thread(plans.list_all, tools.DEFAULT_TIMEZONE)
+        for p in plan_items:  # plan_items ya viene en orden ascendente
+            d = plans.days_until(p, tools.DEFAULT_TIMEZONE)
+            if d in _PLAN_CHIP_MILESTONE_DAYS:
+                plan_chip = {"id": p.id, "label": p.label, "date": p.date, "days_until": d}
+                break
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: plans unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
     return {
         "events_today": events_today,
         "events_today_error": events_today_error,
@@ -292,6 +329,7 @@ async def get_home(token: str = "") -> dict[str, object]:
         "now_playing": now_playing,
         "weather": current_weather,
         "alarms": alarm_items,
+        "plan_chip": plan_chip,
     }
 
 
@@ -301,6 +339,19 @@ async def get_shopping(token: str = "") -> dict[str, object]:
     _require_dev_token(token)
     items = await asyncio.to_thread(shopping.list_all)
     return {"items": shopping.to_wire(items)}
+
+
+@app.get("/api/plans")
+async def get_plans(token: str = "") -> dict[str, object]:
+    """Read-only listing de los planes (dev-token gated).
+
+    El tap en el chip de la home lo usa para abrir la escena sin pasar
+    por un tool / conversación. Devuelve la misma forma de wire que
+    ``plan_list``.
+    """
+    _require_dev_token(token)
+    items = await asyncio.to_thread(plans.list_all, tools.DEFAULT_TIMEZONE)
+    return {"items": plans.to_wire(items, tools.DEFAULT_TIMEZONE)}
 
 
 @app.post("/api/shopping/{item_id}/complete")

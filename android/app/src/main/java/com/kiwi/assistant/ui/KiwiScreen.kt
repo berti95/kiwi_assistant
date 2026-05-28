@@ -51,6 +51,7 @@ import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
 import com.kiwi.assistant.ui.scenes.ShoppingListScene
 import com.kiwi.assistant.ui.scenes.TimerScene
+import com.kiwi.assistant.ui.scenes.PlansListScene
 import com.kiwi.assistant.ui.scenes.TodoListScene
 import com.kiwi.assistant.ui.scenes.UsageStatsScene
 import com.kiwi.assistant.ui.scenes.VideoListScene
@@ -147,6 +148,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenCalendar = viewModel::onOpenCalendar,
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
+                onOpenPlansList = viewModel::onOpenPlansList,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
                 onCheckForUpdate = viewModel::onCheckForUpdate,
                 updateStatus = updateStatus,
@@ -377,6 +379,7 @@ private fun SceneLayer(
     onOpenCalendar: () -> Unit,
     onOpenNowPlaying: () -> Unit,
     onOpenShoppingList: () -> Unit,
+    onOpenPlansList: () -> Unit,
     onRenovarGoogle: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
@@ -390,6 +393,7 @@ private fun SceneLayer(
             onOpenCalendar = onOpenCalendar,
             onOpenNowPlaying = onOpenNowPlaying,
             onOpenShoppingList = onOpenShoppingList,
+            onOpenPlansList = onOpenPlansList,
             onCheckForUpdate = onCheckForUpdate,
             updateStatus = updateStatus,
         )
@@ -410,6 +414,7 @@ private fun SceneLayer(
         )
         is Scene.ShoppingList -> ShoppingListScene(scene, onItemTap = onShoppingTap)
         is Scene.UsageStats -> UsageStatsScene(scene, onSelectPeriod = onSelectUsagePeriod)
+        is Scene.PlansList -> PlansListScene(scene)
     }
 }
 

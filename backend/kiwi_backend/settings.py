@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     kiwi_state_alarms_path: str = "alarms.json"
     kiwi_state_shopping_path: str = "shopping.json"
     kiwi_state_usage_path: str = "usage.json"
+    kiwi_state_plans_path: str = "plans.json"
 
     # Tarifas para estimar el coste en la pantalla de Uso. Calibradas
     # contra el gasto REAL observado en el billing de Gemini: con ~30

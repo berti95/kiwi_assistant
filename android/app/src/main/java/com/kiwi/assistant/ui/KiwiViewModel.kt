@@ -439,6 +439,21 @@ class KiwiViewModel(application: Application) :
     }
 
     /**
+     * Abre la lista de planes desde el chip del Home (o desde el tap
+     * sobre la cuenta atrás cuando aparece). No vive en el snapshot
+     * — sólo el chip viaja con cada /api/home — así que hay que ir a
+     * /api/plans para traer la lista entera. Si la red falla,
+     * empujamos una escena vacía: el usuario al menos aterriza y
+     * puede pedir por voz.
+     */
+    fun onOpenPlansList() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val scene = todoApi.fetchPlans() ?: Scene.PlansList(items = emptyList())
+            enterScene(scene)
+        }
+    }
+
+    /**
      * Abre la lista de despertadores desde el chip de la home. Sin
      * red: la lista la tenemos cacheada en homeSnapshot porque viene
      * con cada /api/home. Si por algo el snapshot está vacío,

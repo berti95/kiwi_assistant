@@ -1,6 +1,7 @@
 package com.kiwi.assistant.network
 
 import com.kiwi.assistant.log.KLog
+import com.kiwi.assistant.ui.Plan
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.TodoItem
@@ -143,6 +144,47 @@ class TodoApi(
      * no parsea — el caller decide qué mostrar (típicamente:
      * la escena con conversation_count=0).
      */
+    /**
+     * GET /api/plans. Devuelve [Scene.PlansList] lista para empujar
+     * cuando el usuario tapea el chip del Home (o pidiera una vista
+     * sin pasar por voz). Null en caso de fallo de red — el caller
+     * decide si mostrar una escena vacía o ignorar el tap.
+     */
+    suspend fun fetchPlans(): Scene.PlansList? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/plans?token=$devToken"
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "GET $url returned ${response.code}")
+                    return null
+                }
+                parsePlansList(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "GET $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    private fun parsePlansList(body: String): Scene.PlansList? {
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }
+            .getOrNull() ?: return null
+        val arr = root["items"] as? JsonArray ?: JsonArray(emptyList())
+        val items = arr.mapNotNull { el ->
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            Plan(
+                id = (obj["id"] as? JsonPrimitive)?.contentOrNull
+                    ?: return@mapNotNull null,
+                label = (obj["label"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                date = (obj["date"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                daysUntil = (obj["days_until"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+        }
+        return Scene.PlansList(items = items)
+    }
+
     suspend fun fetchUsageStats(period: String = "today"): Scene.UsageStats? {
         if (baseUrl.isEmpty() || devToken.isEmpty()) return null
         val url = "${baseUrl.trimEnd('/')}/api/stats?period=$period&token=$devToken"

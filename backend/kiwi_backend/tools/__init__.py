@@ -75,6 +75,7 @@ from .youtube import (  # noqa: F401
 # alfabético para que sea fácil ver de un vistazo qué grupos hay.
 from . import (  # noqa: F401
     alarm_tools,
+    plan_tools,
     shopping_tools,
     system,
     timer_tools,

@@ -163,6 +163,15 @@ sealed interface Scene {
         /** Coste por día (UTC) en el periodo, para el gráfico de barras. */
         val byDay: List<UsageDay> = emptyList(),
     ) : Scene
+
+    /**
+     * Lista de planes / viajes / eventos especiales separados del
+     * Google Calendar. Empujada por los tools ``plan_add`` /
+     * ``plan_list`` / ``plan_remove``. Un chip en el [Idle] dashboard
+     * avisa cuando un plan cae en un día-milestone vía
+     * [HomeSnapshot.planChip].
+     */
+    data class PlansList(val items: List<Plan>) : Scene
 }
 
 /** Una entrada de "tool más usada" dentro de [Scene.UsageStats]. */
@@ -170,6 +179,32 @@ data class UsageToolCount(val name: String, val count: Int)
 
 /** Coste de un día concreto, para el gráfico de [Scene.UsageStats]. */
 data class UsageDay(val date: String, val costEur: Double)
+
+/**
+ * Un plan / viaje / evento especial. ``date`` es ISO YYYY-MM-DD;
+ * ``daysUntil`` viene calculado por el backend para evitar mismatches
+ * de TZ entre tablet y servidor (días al plan según hora de Madrid).
+ * Negativo => plan pasado (puede aparecer en el grace post-fecha).
+ */
+data class Plan(
+    val id: String,
+    val label: String,
+    val date: String,
+    val daysUntil: Int,
+)
+
+/**
+ * Chip de cuenta atrás que muestra el dashboard del Home cuando un
+ * plan cae en un día-milestone (1, 2, 3, 5, 7… definidos en el
+ * backend). Es nullable en [HomeSnapshot] — la mayoría de días no
+ * hay milestone y el chip no se pinta.
+ */
+data class PlanChip(
+    val id: String,
+    val label: String,
+    val date: String,
+    val daysUntil: Int,
+)
 
 /**
  * Un artículo de la lista de la compra. Reutiliza la misma forma que
@@ -251,6 +286,8 @@ data class HomeSnapshot(
     val nowPlaying: NowPlayingChip?,
     val weather: WeatherInfo?,
     val alarms: List<AlarmItem>,
+    /** Cuenta atrás del próximo plan, solo presente en días-milestone. */
+    val planChip: PlanChip? = null,
 )
 
 /** A YouTube video item, used in [Scene.VideoList]. */

@@ -5,8 +5,10 @@ import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
+import com.kiwi.assistant.ui.PlanChip
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.doubleOrNull
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
@@ -113,6 +115,15 @@ class HomeStatePoller(
             )
         }
 
+        val planChip = (root["plan_chip"] as? JsonObject)?.let { obj ->
+            PlanChip(
+                id = obj.string("id") ?: return@let null,
+                label = obj.string("label").orEmpty(),
+                date = obj.string("date").orEmpty(),
+                daysUntil = (obj["days_until"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+        }
+
         return HomeSnapshot(
             eventsToday = events,
             eventsTodayError = root.string("events_today_error"),
@@ -120,6 +131,7 @@ class HomeStatePoller(
             nowPlaying = nowPlaying,
             weather = weather,
             alarms = alarms,
+            planChip = planChip,
         )
     }
 

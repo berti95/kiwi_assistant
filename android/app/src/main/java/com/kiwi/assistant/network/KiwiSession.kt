@@ -17,6 +17,7 @@ import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.CalendarEvent
+import com.kiwi.assistant.ui.Plan
 import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.ShoppingItem
@@ -302,6 +303,7 @@ class KiwiSession(
             "alarm_list" -> parseAlarmListScene(scene)
             "shopping_list" -> parseShoppingListScene(scene)
             "usage_stats" -> parseUsageStatsScene(scene)
+            "plans_list" -> parsePlansListScene(scene)
             else -> {
                 KLog.w(TAG, "Unknown scene type: ${scene.string("type")}")
                 null
@@ -461,6 +463,20 @@ class KiwiSession(
             )
         }
         return Scene.TodoList(items = items)
+    }
+
+    private fun parsePlansListScene(scene: JsonObject): Scene.PlansList {
+        val raw = scene["items"] as? JsonArray ?: emptyList()
+        val items = raw.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            Plan(
+                id = obj.string("id") ?: return@mapNotNull null,
+                label = obj.string("label").orEmpty(),
+                date = obj.string("date").orEmpty(),
+                daysUntil = (obj["days_until"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+        }
+        return Scene.PlansList(items = items)
     }
 
     private fun parseNowPlayingScene(scene: JsonObject): Scene.NowPlaying? {
