@@ -49,7 +49,7 @@ import com.kiwi.assistant.ui.theme.spotifyGreen
  * grande y centrada, con un fondo difuminado de la misma portada para
  * darle ambiente (en vez del negro pelado). Debajo: título + artista +
  * álbum, barra de progreso que avanza en vivo, y una fila de controles
- * (⏮ ⏯ ⏭) que pegan directamente al backend vía /api/spotify/*.
+ * (⏮ ⏯ ⏭) que pegan directamente a los endpoints de /api/spotify.
  */
 @Composable
 fun NowPlayingScene(
