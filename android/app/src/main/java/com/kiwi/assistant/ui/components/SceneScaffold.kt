@@ -23,7 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.theme.KiwiOpacity
@@ -54,12 +56,19 @@ fun SceneScaffold(
     onClose: (() -> Unit)? = null,
     horizontalPadding: androidx.compose.ui.unit.Dp = KiwiSpacing.xxl,
     verticalPadding: androidx.compose.ui.unit.Dp = KiwiSpacing.huge,
+    /**
+     * Fondo opcional. Por defecto negro sólido (compatibilidad con
+     * las escenas existentes); pásale un gradiente o color custom
+     * cuando quieras darle personalidad a una escena concreta sin
+     * romper las demás.
+     */
+    background: Brush = SolidColor(Color.Black),
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(background)
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {

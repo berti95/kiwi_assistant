@@ -172,6 +172,35 @@ async def get_todos(token: str = "") -> dict[str, object]:
     return {"items": todos.to_wire(items)}
 
 
+class _TodoCreate(BaseModel):
+    text: str
+    owner: str = Field(default="mine")
+    due_date: str | None = Field(default=None)
+
+
+@app.post("/api/todos")
+async def add_todo(payload: _TodoCreate, token: str = "") -> dict[str, object]:
+    """Create a TODO via tap (the '+' button in TodoList).
+
+    Voice flow uses ``todo_add`` via Gemini; this endpoint is the
+    tablet equivalent so the user can teclear con fecha sin tener
+    que dictar. Espera ``text`` y opcionalmente ``owner`` ('mine' /
+    'kiwi') + ``due_date`` (ISO YYYY-MM-DD para owner='mine').
+    """
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(
+            todos.add,
+            payload.text,
+            owner=payload.owner,
+            due_date=payload.due_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    items = await asyncio.to_thread(todos.list_all)
+    return {"items": todos.to_wire(items)}
+
+
 @app.post("/api/todos/{todo_id}/complete")
 async def complete_todo(todo_id: str, token: str = "") -> dict[str, object]:
     """Mark a TODO as completed. Used by the tablet's tap-to-check

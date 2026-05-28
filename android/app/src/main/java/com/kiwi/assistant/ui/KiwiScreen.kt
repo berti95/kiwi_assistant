@@ -148,6 +148,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 homeSnapshot = homeSnapshot,
                 onExitScene = viewModel::onExitScene,
                 onTodoTap = viewModel::onTodoTap,
+                onAddTodo = viewModel::onAddTodo,
                 onOpenTodoList = viewModel::onOpenTodoList,
                 onTimerDismiss = viewModel::onTimerDismiss,
                 onAlarmDismiss = viewModel::onAlarmDismiss,
@@ -376,6 +377,7 @@ private fun SceneLayer(
     homeSnapshot: HomeSnapshot?,
     onExitScene: () -> Unit,
     onTodoTap: (TodoItem) -> Unit,
+    onAddTodo: (String, TodoOwner, String?) -> Unit,
     onOpenTodoList: () -> Unit,
     onTimerDismiss: () -> Unit,
     onAlarmDismiss: (String) -> Unit,
@@ -422,7 +424,11 @@ private fun SceneLayer(
             onNext = onSpotifyNext,
             onPrevious = onSpotifyPrevious,
         )
-        is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
+        is Scene.TodoList -> TodoListScene(
+            scene = scene,
+            onTodoTap = onTodoTap,
+            onAddTodo = onAddTodo,
+        )
         is Scene.Timer -> TimerScene(scene, onDismiss = onTimerDismiss)
         is Scene.AlarmList -> AlarmListScene(scene)
         is Scene.AlarmRinging -> AlarmRingingScene(

@@ -732,6 +732,22 @@ class KiwiViewModel(application: Application) :
     }
 
     /**
+     * Crear una tarea desde el botón "+" del TodoListScene. Replica
+     * el flujo de [onAddPlan]: POST a /api/todos, reemplazo de escena
+     * con la lista nueva, y refresh del snapshot del home por si la
+     * tarea recién creada toca contadores del chip.
+     */
+    fun onAddTodo(text: String, owner: TodoOwner, dueDate: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = todoApi.addTodo(text, owner, dueDate) ?: return@launch
+            if (_scene.value is Scene.TodoList) {
+                enterScene(Scene.TodoList(items = updated))
+            }
+            refreshHomeSnapshot()
+        }
+    }
+
+    /**
      * Tap-to-toggle para la escena de la compra. Mismo modelo que
      * [onTodoTap]: pendiente → comprado, comprado → eliminado.
      */

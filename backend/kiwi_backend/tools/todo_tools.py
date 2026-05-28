@@ -18,13 +18,26 @@ def _todo_list_scene(items: list[todos.TodoItem]) -> dict[str, Any]:
     return {"type": "todo_list", "items": todos.to_wire(items)}
 
 
-async def _todo_add(text: str) -> ToolResult:
-    """Append a TODO and push the updated list to the tablet."""
+async def _todo_add(
+    text: str,
+    owner: str = todos.DEFAULT_OWNER,
+    due_date: str | None = None,
+) -> ToolResult:
+    """Append a TODO and push the updated list to the tablet.
+
+    ``owner`` controla en qué sección cae:
+    - ``"mine"`` (default): tarea del usuario, puede llevar fecha.
+    - ``"kiwi"``: encargo para la IA — ignora ``due_date``.
+    """
     if not text or not text.strip():
         return ToolResult(response={"error": "missing text"})
     try:
-        item = await asyncio.to_thread(todos.add, text)
+        item = await asyncio.to_thread(
+            todos.add, text, owner=owner, due_date=due_date,
+        )
         items = await asyncio.to_thread(todos.list_all)
+    except ValueError as exc:
+        return ToolResult(response={"error": str(exc)})
     except Exception as exc:  # noqa: BLE001
         log.exception("todo_add failed")
         return ToolResult(
@@ -32,10 +45,42 @@ async def _todo_add(text: str) -> ToolResult:
         )
     return ToolResult(
         response={
-            "added": {"id": item.id, "text": item.text},
+            "added": {
+                "id": item.id,
+                "text": item.text,
+                "owner": item.owner,
+                "due_date": item.due_date,
+            },
             "count": len(items),
         },
         scene=_todo_list_scene(items),
+    )
+
+
+async def _todo_list_for_kiwi() -> ToolResult:
+    """Devuelve los encargos pendientes para la IA (owner=kiwi).
+
+    Llamado cuando el usuario dice "revisa la lista", "mira los recados
+    que te dejé" o equivalente. La respuesta es texto plano para que el
+    modelo lo procese como instrucciones independientes; no
+    actualizamos la escena (el usuario suele estar pidiéndolas para
+    que las EJECUTES, no para verlas en pantalla).
+    """
+    try:
+        items = await asyncio.to_thread(todos.list_all)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("todo_list_for_kiwi failed")
+        return ToolResult(response={"error": f"{type(exc).__name__}: {exc}"})
+    pending_kiwi = [
+        {"id": it.id, "text": it.text}
+        for it in items
+        if it.owner == "kiwi" and it.completed_ms is None
+    ]
+    return ToolResult(
+        response={
+            "count": len(pending_kiwi),
+            "items": pending_kiwi,
+        },
     )
 
 
@@ -136,7 +181,16 @@ register(
         "'recuérdame', 'añade a la lista', 'tengo que', 'no se me olvide' "
         "o variantes similares. La pantalla del tablet se actualiza con "
         "la lista completa; tu respuesta hablada confirma brevemente lo "
-        "que apuntaste."
+        "que apuntaste.\n\n"
+        "Hay dos clases de tarea según quién la vaya a hacer:\n"
+        "- owner='mine' (por defecto): la hará el usuario. Si menciona "
+        "  una fecha ('para el lunes', 'mañana', 'el día 15') resuelve "
+        "  la fecha en ISO YYYY-MM-DD y pásala en due_date. Para 'hoy', "
+        "  usa la fecha de hoy.\n"
+        "- owner='kiwi': encargo para ti (la IA), cosas que el usuario "
+        "  quiere que TÚ hagas más tarde ('apunta para que tú me busques "
+        "  X', 'añade para que mires Y', 'recuérdate que tienes que…'). "
+        "  Ignora due_date en este caso."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
@@ -151,10 +205,43 @@ register(
                     "implementarla. Captura completa > captura corta."
                 ),
             ),
+            "owner": types.Schema(
+                type=types.Type.STRING,
+                enum=["mine", "kiwi"],
+                description=(
+                    "'mine' (default) si la hace el usuario; 'kiwi' si es "
+                    "un encargo para ti que ejecutarás luego cuando el "
+                    "usuario diga 'revisa la lista'."
+                ),
+            ),
+            "due_date": types.Schema(
+                type=types.Type.STRING,
+                description=(
+                    "Fecha límite ISO YYYY-MM-DD (sólo con owner='mine'). "
+                    "Resuelve expresiones relativas ('mañana', 'el lunes') "
+                    "respecto a la fecha de hoy. Omite si no hay fecha."
+                ),
+            ),
         },
         required=["text"],
     ),
     handler=_todo_add,
+)
+
+register(
+    name="todo_list_for_kiwi",
+    description=(
+        "Devuelve los encargos que el usuario te ha dejado a TI (las "
+        "tareas con owner='kiwi'). Llama a este tool cuando el usuario "
+        "diga 'revisa la lista', 'mira los recados que te dejé', 'haz "
+        "las cosas que te apunté', 'revisa lo tuyo' o similar. Una vez "
+        "que tengas los items, procesa cada uno como una instrucción "
+        "independiente — busca info, calcula, llama a otros tools, etc. "
+        "Cuando termines con uno, marca esa tarea como completada con "
+        "todo_complete pasando su id."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_todo_list_for_kiwi,
 )
 
 register(

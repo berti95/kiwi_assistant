@@ -39,3 +39,25 @@ val ColorScheme.eventBanner: Color
 /** Night-mode warm overlay tint. */
 val ColorScheme.nightWarmth: Color
     get() = Color(0xFF1A0E00)
+
+// ---- TODO sections / due-date badges --------------------------------
+// Acentos para la pantalla Pendientes. Tonos suaves para no chillar
+// sobre fondo oscuro; los badges de fecha (vencida / hoy) usan un
+// fondo de color saturado discreto + texto en blanco / negro para
+// contraste sin estridencias.
+
+/** Sage green — sección "Para mí" (tareas del usuario). */
+val ColorScheme.todoMineAccent: Color
+    get() = Color(0xFF7FB39C)
+
+/** Soft purple — sección "Para Kiwi" (encargos para la IA). */
+val ColorScheme.todoKiwiAccent: Color
+    get() = Color(0xFFB084FF)
+
+/** Badge de fecha vencida. Saturado pero no estridente. */
+val ColorScheme.todoOverdue: Color
+    get() = Color(0xFFE57373)
+
+/** Badge "vence hoy". */
+val ColorScheme.todoDueToday: Color
+    get() = Color(0xFFFFB74D)

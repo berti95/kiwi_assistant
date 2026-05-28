@@ -244,12 +244,23 @@ data class AlarmItem(
  * One persistent TODO. ``completed`` reflects whether the user already
  * marked it done — items still appear in the list (visually struck
  * through) until they are explicitly removed.
+ *
+ * Las tareas tienen dueño:
+ * - [TodoOwner.Mine] (default): el usuario las hará. Pueden traer
+ *   [dueDate] (ISO YYYY-MM-DD) y el UI las pinta en rojo si están
+ *   vencidas, en ámbar si vencen hoy.
+ * - [TodoOwner.Kiwi]: encargos para la IA. Sin fecha — el usuario las
+ *   acumula y dice "revisa la lista" para que Kiwi las ejecute.
  */
 data class TodoItem(
     val id: String,
     val text: String,
     val completed: Boolean,
+    val owner: TodoOwner = TodoOwner.Mine,
+    val dueDate: String? = null,
 )
+
+enum class TodoOwner { Mine, Kiwi }
 
 /**
  * "Now playing" chip rendered on the home dashboard. Slimmer than

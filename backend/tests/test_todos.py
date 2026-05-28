@@ -129,6 +129,8 @@ def test_to_wire_shape() -> None:
         "text": "hola",
         "completed": False,
         "created_ms": item.created_ms,
+        "owner": "mine",
+        "due_date": None,
     }]
 
 
@@ -137,6 +139,87 @@ def test_to_wire_marks_completed() -> None:
     todos.complete(item.id)
     wire = todos.to_wire(todos.list_all())
     assert wire[0]["completed"] is True
+
+
+# ---- owner + due_date -------------------------------------------------
+
+
+def test_add_defaults_to_mine_owner_without_due_date() -> None:
+    item = todos.add("comprar pan")
+    assert item.owner == "mine"
+    assert item.due_date is None
+
+
+def test_add_accepts_kiwi_owner_and_drops_due_date() -> None:
+    # owner=kiwi siempre limpia la fecha: los encargos para la IA no
+    # tienen sentido fechados (los procesa cuando el usuario diga
+    # "revisa la lista", no en una fecha concreta).
+    item = todos.add("búscame info de X", owner="kiwi", due_date="2030-01-01")
+    assert item.owner == "kiwi"
+    assert item.due_date is None
+
+
+def test_add_mine_with_valid_due_date() -> None:
+    item = todos.add("ir al médico", owner="mine", due_date="2030-06-15")
+    assert item.owner == "mine"
+    assert item.due_date == "2030-06-15"
+
+
+def test_add_rejects_invalid_owner() -> None:
+    with pytest.raises(ValueError):
+        todos.add("hola", owner="nobody")
+
+
+def test_add_rejects_non_iso_due_date() -> None:
+    with pytest.raises(ValueError):
+        todos.add("ir al médico", due_date="next monday")
+
+
+def test_complete_preserves_owner_and_due_date() -> None:
+    item = todos.add("dentista", owner="mine", due_date="2030-03-10")
+    completed = todos.complete(item.id)
+    # Antes complete reconstruía el dataclass perdiendo los campos
+    # nuevos; el cambio a ``dataclasses.replace`` lo blinda.
+    assert completed.owner == "mine"
+    assert completed.due_date == "2030-03-10"
+    assert completed.completed_ms is not None
+
+
+def test_load_coerces_unknown_owner_to_mine(
+    _fake_state: dict[str, Any], caplog: pytest.LogCaptureFixture,
+) -> None:
+    _fake_state["todos.json"] = [{
+        "id": "x", "text": "t", "created_ms": 1, "completed_ms": None,
+        "owner": "alien", "due_date": None,
+    }]
+    listed = todos.list_all()
+    assert listed[0].owner == "mine"
+    assert any("unknown owner" in r.message for r in caplog.records)
+
+
+def test_load_drops_invalid_due_date(
+    _fake_state: dict[str, Any], caplog: pytest.LogCaptureFixture,
+) -> None:
+    _fake_state["todos.json"] = [{
+        "id": "x", "text": "t", "created_ms": 1, "completed_ms": None,
+        "owner": "mine", "due_date": "tomorrow",
+    }]
+    listed = todos.list_all()
+    assert listed[0].due_date is None
+    assert any("not ISO" in r.message for r in caplog.records)
+
+
+def test_load_backwards_compatible_without_new_fields(
+    _fake_state: dict[str, Any],
+) -> None:
+    # Entradas del JSON anterior a la migración (sin owner/due_date)
+    # deben cargarse como owner='mine', due_date=None.
+    _fake_state["todos.json"] = [{
+        "id": "legacy", "text": "old", "created_ms": 1, "completed_ms": None,
+    }]
+    listed = todos.list_all()
+    assert listed[0].owner == "mine"
+    assert listed[0].due_date is None
 
 
 def test_load_skips_malformed_entries(_fake_state: dict[str, Any]) -> None:

@@ -7,6 +7,7 @@ import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.PlanChip
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.TodoOwner
 import com.kiwi.assistant.ui.WeatherInfo
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -82,6 +83,11 @@ class HomeStatePoller(
                 text = obj.string("text").orEmpty(),
                 completed = (obj["completed"] as? JsonPrimitive)
                     ?.booleanOrNull ?: false,
+                owner = when (obj.string("owner")) {
+                    "kiwi" -> TodoOwner.Kiwi
+                    else -> TodoOwner.Mine
+                },
+                dueDate = obj.string("due_date"),
             )
         }
 

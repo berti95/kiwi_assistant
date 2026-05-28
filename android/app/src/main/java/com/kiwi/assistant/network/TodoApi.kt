@@ -3,8 +3,9 @@ package com.kiwi.assistant.network
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.ui.Plan
 import com.kiwi.assistant.ui.Scene
-import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.TodoItem
+import com.kiwi.assistant.ui.TodoOwner
+import com.kiwi.assistant.ui.UsageDay
 import com.kiwi.assistant.ui.UsageToolCount
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
@@ -42,6 +43,44 @@ class TodoApi(
     suspend fun complete(id: String): List<TodoItem>? = post("$id/complete")
 
     suspend fun remove(id: String): List<TodoItem>? = post("$id/remove")
+
+    /**
+     * Crear una tarea desde la tablet (botón "+"). Por voz se usa el
+     * tool ``todo_add``; este endpoint replica el flujo para el "+"
+     * con date picker. ``owner`` controla la sección; ``dueDate`` es
+     * ISO ``YYYY-MM-DD`` y se ignora si owner=Kiwi.
+     */
+    suspend fun addTodo(
+        text: String,
+        owner: TodoOwner,
+        dueDate: String?,
+    ): List<TodoItem>? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/todos?token=$devToken"
+        val ownerWire = when (owner) {
+            TodoOwner.Mine -> "mine"
+            TodoOwner.Kiwi -> "kiwi"
+        }
+        val dueField = if (dueDate != null) ",\"due_date\":${jsonString(dueDate)}" else ""
+        val payload =
+            "{\"text\":${jsonString(text)},\"owner\":\"$ownerWire\"$dueField}"
+        val request = Request.Builder()
+            .url(url)
+            .post(payload.toRequestBody("application/json".toMediaType()))
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "POST $url returned ${response.code}")
+                    return null
+                }
+                parseItems(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
 
     /** Mark a shopping item as bought (server returns updated list). */
     suspend fun completeShopping(id: String): List<ShoppingItemDto>? =
@@ -353,12 +392,18 @@ class TodoApi(
         val arr = root["items"] as? JsonArray ?: return emptyList()
         return arr.mapNotNull { el ->
             val obj = el as? JsonObject ?: return@mapNotNull null
+            val ownerWire = (obj["owner"] as? JsonPrimitive)?.contentOrNull
             TodoItem(
                 id = (obj["id"] as? JsonPrimitive)?.contentOrNull
                     ?: return@mapNotNull null,
                 text = (obj["text"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
                 completed = (obj["completed"] as? JsonPrimitive)
                     ?.booleanOrNull ?: false,
+                owner = when (ownerWire) {
+                    "kiwi" -> TodoOwner.Kiwi
+                    else -> TodoOwner.Mine  // null, "mine", o desconocido
+                },
+                dueDate = (obj["due_date"] as? JsonPrimitive)?.contentOrNull,
             )
         }
     }
