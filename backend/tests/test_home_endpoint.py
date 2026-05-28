@@ -403,12 +403,12 @@ def test_get_home_plan_chip_appears_only_on_milestone_days(
     _stub_calendar_unavailable(monkeypatch)
     _stub_spotify_off(monkeypatch)
 
-    # 6 días no es milestone (5 sí, 7 sí, 6 no) → sin chip.
-    plans.add("Fuera de milestone", (date.today() + timedelta(days=6)).isoformat())
+    # 12 días no es milestone (10 sí, 14 sí, 11/12/13 no) → sin chip.
+    plans.add("Fuera de milestone", (date.today() + timedelta(days=12)).isoformat())
     body = client.get(f"/api/home?token={DEV_TOKEN}").json()
     assert body["plan_chip"] is None
 
-    # 5 días sí es milestone → chip.
+    # 5 días sí es milestone (cae en la zona "últimos 10 días") → chip.
     plans.add("Cantabria", (date.today() + timedelta(days=5)).isoformat())
     body = client.get(f"/api/home?token={DEV_TOKEN}").json()
     chip = body["plan_chip"]

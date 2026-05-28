@@ -28,12 +28,15 @@ from .session import run_session
 from .settings import settings
 
 # Días-milestone hasta la fecha de un plan en los que el chip aparece
-# en la home. Elegidos para que el aviso "aparezca de vez en cuando" sin
-# saturar: cada día la última semana (anticipación), luego saltos
-# naturales (una/dos semanas, 20 días, un mes). El usuario lo siente
-# como una alegría periódica, no como un recordatorio insistente.
+# en la home. Diseño en dos zonas:
+#  - Los últimos 10 días salen TODOS los días, para que cuando algo
+#    está cerca lo veas cada vez que miras (los nervios suben, ya no
+#    hace falta dosificar la sorpresa).
+#  - 14, 20, 30, 60, 100 son hitos puntuales para planes lejanos —
+#    aparecen un día y desaparecen, dando "asomadas" sin saturar.
+# El usuario lo siente como una alegría que crece según se acerca.
 _PLAN_CHIP_MILESTONE_DAYS: frozenset[int] = frozenset(
-    {0, 1, 2, 3, 4, 5, 7, 10, 14, 20, 30},
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 20, 30, 60, 100},
 )
 
 # Cloud Run's log capture relies on stdout/stderr, but Python's root
