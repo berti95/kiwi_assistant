@@ -530,6 +530,11 @@ class KiwiViewModel(application: Application) :
      */
     fun onOpenNowPlaying() {
         val chip = _homeSnapshot.value?.nowPlaying ?: return
+        // Pintamos lo que sabemos del chip al instante (transición
+        // inmediata) y, en paralelo, pedimos el estado completo al
+        // backend para rellenar álbum / duración / progreso y arrancar
+        // la barra. durationMs == 0 → el composable oculta la barra
+        // hasta que llega el fetch.
         enterScene(
             Scene.NowPlaying(
                 title = chip.title,
@@ -541,6 +546,78 @@ class KiwiViewModel(application: Application) :
                 progressMs = 0L,
             ),
         )
+        viewModelScope.launch(Dispatchers.IO) {
+            applySpotifyStatus(todoApi.spotifyStatus())
+        }
+    }
+
+    /**
+     * Play/pause desde el botón central del reproductor. Toggle
+     * optimista (la UI responde al instante) y luego confirmamos con
+     * el estado que devuelve el backend.
+     */
+    fun onSpotifyPlayPause() {
+        val current = _scene.value as? Scene.NowPlaying ?: return
+        val wasPlaying = current.isPlaying
+        _scene.value = current.copy(isPlaying = !wasPlaying)
+        viewModelScope.launch(Dispatchers.IO) {
+            val status = if (wasPlaying) todoApi.spotifyPause() else todoApi.spotifyResume()
+            applySpotifyStatus(status)
+        }
+    }
+
+    /** ⏭ siguiente canción. */
+    fun onSpotifyNext() = spotifyControl { todoApi.spotifyNext() }
+
+    /** ⏮ canción anterior. */
+    fun onSpotifyPrevious() = spotifyControl { todoApi.spotifyPrevious() }
+
+    private fun spotifyControl(action: suspend () -> com.kiwi.assistant.network.TodoApi.SpotifyStatus?) {
+        if (_scene.value !is Scene.NowPlaying) return
+        viewModelScope.launch(Dispatchers.IO) {
+            applySpotifyStatus(action())
+        }
+    }
+
+    /**
+     * Vuelca el estado devuelto por el backend en la escena NowPlaying.
+     * Defensivo: ignora null (red caída / Spotify rechazó → mantenemos
+     * lo que hay) y no pisa la escena si el usuario ya navegó a otra.
+     */
+    private fun applySpotifyStatus(status: com.kiwi.assistant.network.TodoApi.SpotifyStatus?) {
+        if (status == null) return
+        if (_scene.value !is Scene.NowPlaying) return
+        // status sin track (nada sonando) → no blanqueamos la pantalla.
+        if (status.title.isBlank()) return
+        _scene.value = Scene.NowPlaying(
+            title = status.title,
+            artist = status.artist,
+            album = status.album,
+            albumArtUrl = status.albumArtUrl,
+            isPlaying = status.playing,
+            durationMs = status.durationMs,
+            progressMs = status.progressMs,
+        )
+    }
+
+    /**
+     * Hace avanzar la barra de progreso en vivo mientras hay música
+     * sonando en la pantalla NowPlaying. Sin esto la barra quedaría
+     * congelada entre fetches y no parecería un reproductor de verdad.
+     * Actualiza _scene directamente (mismo tipo → sin tocar el stack).
+     */
+    private val nowPlayingTickJob: Job = viewModelScope.launch {
+        while (true) {
+            delay(1_000)
+            val s = _scene.value
+            if (s is Scene.NowPlaying && s.isPlaying &&
+                s.durationMs > 0 && s.progressMs < s.durationMs
+            ) {
+                _scene.value = s.copy(
+                    progressMs = (s.progressMs + 1_000).coerceAtMost(s.durationMs),
+                )
+            }
+        }
     }
 
     /**
@@ -1018,6 +1095,7 @@ class KiwiViewModel(application: Application) :
         homePollerJob.cancel()
         sceneAutoCloseJob.cancel()
         eventSoonJob.cancel()
+        nowPlayingTickJob.cancel()
         super.onCleared()
     }
 

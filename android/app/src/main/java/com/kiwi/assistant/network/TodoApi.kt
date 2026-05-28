@@ -13,6 +13,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -185,6 +186,82 @@ class TodoApi(
             audioTotalSeconds = double("audio_total_seconds"),
             estimatedCostEur = double("estimated_cost_eur"),
             topTools = tools,
+        )
+    }
+
+    /**
+     * Estado de reproducción de Spotify que consume la pantalla
+     * NowPlaying (botones ⏮ ⏯ ⏭ + barra de progreso). Espejo del
+     * payload de ``/api/spotify/status`` del backend.
+     */
+    data class SpotifyStatus(
+        val playing: Boolean,
+        val title: String,
+        val artist: String,
+        val album: String,
+        val albumArtUrl: String?,
+        val durationMs: Long,
+        val progressMs: Long,
+    )
+
+    /** GET estado actual de Spotify. Null si la red falla o no hay nada. */
+    suspend fun spotifyStatus(): SpotifyStatus? =
+        spotifyCall("/api/spotify/status", post = false)
+
+    /** Pausa la reproducción y devuelve el estado resultante. */
+    suspend fun spotifyPause(): SpotifyStatus? =
+        spotifyCall("/api/spotify/pause", post = true)
+
+    /** Reanuda la reproducción y devuelve el estado resultante. */
+    suspend fun spotifyResume(): SpotifyStatus? =
+        spotifyCall("/api/spotify/resume", post = true)
+
+    /** Salta a la siguiente canción y devuelve el estado resultante. */
+    suspend fun spotifyNext(): SpotifyStatus? =
+        spotifyCall("/api/spotify/next", post = true)
+
+    /** Vuelve a la canción anterior y devuelve el estado resultante. */
+    suspend fun spotifyPrevious(): SpotifyStatus? =
+        spotifyCall("/api/spotify/previous", post = true)
+
+    private fun spotifyCall(path: String, post: Boolean): SpotifyStatus? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}$path?token=$devToken"
+        val builder = Request.Builder().url(url)
+        val request = if (post) builder.post(EMPTY_BODY).build() else builder.get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "${if (post) "POST" else "GET"} $url returned ${response.code}")
+                    return null
+                }
+                parseSpotifyStatus(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "$url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    private fun parseSpotifyStatus(body: String): SpotifyStatus? {
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }
+            .getOrNull() ?: return null
+        // Los endpoints de control devuelven {"ok": false, "error": …}
+        // cuando Spotify rechaza (p.ej. sin dispositivo activo): el
+        // caller conserva el estado previo, así que devolvemos null.
+        if ((root["ok"] as? JsonPrimitive)?.booleanOrNull == false) return null
+        fun str(key: String): String =
+            (root[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        fun long(key: String): Long =
+            (root[key] as? JsonPrimitive)?.longOrNull ?: 0L
+        return SpotifyStatus(
+            playing = (root["playing"] as? JsonPrimitive)?.booleanOrNull ?: false,
+            title = str("title"),
+            artist = str("artist"),
+            album = str("album"),
+            albumArtUrl = (root["album_art_url"] as? JsonPrimitive)?.contentOrNull,
+            durationMs = long("duration_ms"),
+            progressMs = long("progress_ms"),
         )
     }
 

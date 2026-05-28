@@ -145,6 +145,9 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenAlarmList = viewModel::onOpenAlarmList,
                 onOpenCalendar = viewModel::onOpenCalendar,
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
+                onSpotifyPlayPause = viewModel::onSpotifyPlayPause,
+                onSpotifyNext = viewModel::onSpotifyNext,
+                onSpotifyPrevious = viewModel::onSpotifyPrevious,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
                 onCheckForUpdate = viewModel::onCheckForUpdate,
@@ -374,6 +377,9 @@ private fun SceneLayer(
     onOpenAlarmList: () -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenNowPlaying: () -> Unit,
+    onSpotifyPlayPause: () -> Unit,
+    onSpotifyNext: () -> Unit,
+    onSpotifyPrevious: () -> Unit,
     onOpenShoppingList: () -> Unit,
     onRenovarGoogle: () -> Unit,
     onCheckForUpdate: () -> Unit,
@@ -397,7 +403,12 @@ private fun SceneLayer(
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
-        is Scene.NowPlaying -> NowPlayingScene(scene)
+        is Scene.NowPlaying -> NowPlayingScene(
+            scene = scene,
+            onPlayPause = onSpotifyPlayPause,
+            onNext = onSpotifyNext,
+            onPrevious = onSpotifyPrevious,
+        )
         is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
         is Scene.Timer -> TimerScene(scene, onDismiss = onTimerDismiss)
         is Scene.AlarmList -> AlarmListScene(scene)

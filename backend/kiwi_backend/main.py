@@ -295,6 +295,88 @@ async def get_home(token: str = "") -> dict[str, object]:
     }
 
 
+def _spotify_status_payload() -> dict[str, object]:
+    """Build the playback-status dict the tablet's player UI consumes.
+
+    Reuses ``_spotify_currently_playing_blocking`` (same call /api/home
+    uses for the chip) and flattens its scene into the wire fields the
+    NowPlaying player reads. Errors / nothing-playing degrade to
+    ``{"playing": False}`` so the client just keeps its last state.
+    """
+    try:
+        _, scene = tools._spotify_currently_playing_blocking()
+    except Exception:  # noqa: BLE001 — UI degrades gracefully
+        return {"playing": False}
+    if scene is None:
+        return {"playing": False}
+    return {
+        "playing": bool(scene.get("is_playing")),
+        "title": scene.get("title", ""),
+        "artist": scene.get("artist", ""),
+        "album": scene.get("album", ""),
+        "album_art_url": scene.get("album_art_url"),
+        "duration_ms": scene.get("duration_ms", 0),
+        "progress_ms": scene.get("progress_ms", 0),
+    }
+
+
+@app.get("/api/spotify/status")
+async def get_spotify_status(token: str = "") -> dict[str, object]:
+    """Current Spotify playback state for the tablet's player screen.
+
+    Lets the NowPlaying scene refresh its album art / progress / play
+    state without a Gemini round-trip — the same dev-token path the
+    rest of the tap-driven UI uses."""
+    _require_dev_token(token)
+    return await asyncio.to_thread(_spotify_status_payload)
+
+
+async def _spotify_control(method: str, path: str) -> dict[str, object]:
+    """Run a playback command then return the fresh status.
+
+    On error we surface ``{"ok": False, "error": …}`` (no 500) so the
+    tablet can keep showing the current track instead of blanking. On
+    success we give Spotify a beat to settle before re-reading
+    /me/player — otherwise next/previous would echo the *previous*
+    track because the change hadn't propagated yet."""
+    result = await asyncio.to_thread(
+        tools.spotify._spotify_simple_command, method, path,
+    )
+    if "error" in result:
+        return {"ok": False, "error": result["error"]}
+    await asyncio.sleep(0.4)
+    status = await asyncio.to_thread(_spotify_status_payload)
+    return {"ok": True, **status}
+
+
+@app.post("/api/spotify/pause")
+async def spotify_pause_ctl(token: str = "") -> dict[str, object]:
+    """Pause playback (tablet player ⏯ button)."""
+    _require_dev_token(token)
+    return await _spotify_control("PUT", "/me/player/pause")
+
+
+@app.post("/api/spotify/resume")
+async def spotify_resume_ctl(token: str = "") -> dict[str, object]:
+    """Resume paused playback (tablet player ⏯ button)."""
+    _require_dev_token(token)
+    return await _spotify_control("PUT", "/me/player/play")
+
+
+@app.post("/api/spotify/next")
+async def spotify_next_ctl(token: str = "") -> dict[str, object]:
+    """Skip to the next track (tablet player ⏭ button)."""
+    _require_dev_token(token)
+    return await _spotify_control("POST", "/me/player/next")
+
+
+@app.post("/api/spotify/previous")
+async def spotify_previous_ctl(token: str = "") -> dict[str, object]:
+    """Go to the previous track (tablet player ⏮ button)."""
+    _require_dev_token(token)
+    return await _spotify_control("POST", "/me/player/previous")
+
+
 @app.get("/api/shopping")
 async def get_shopping(token: str = "") -> dict[str, object]:
     """Read-only listing of the shopping list (dev-token gated)."""
