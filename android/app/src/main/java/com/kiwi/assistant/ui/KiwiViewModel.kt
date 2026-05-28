@@ -583,6 +583,64 @@ class KiwiViewModel(application: Application) :
     }
 
     /**
+     * Botón ⏯ de la pantalla NowPlaying. Flip optimista del icono +
+     * POST a /api/spotify/{pause,resume}. Si la red o Spotify rechazan,
+     * deshacemos el flip; si todo va bien el siguiente /api/home
+     * reconcilia el chip por si Spotify hubiera cambiado de pista
+     * (típico cuando la música ya había terminado y "resume" arranca
+     * una nueva).
+     */
+    fun onSpotifyPlayPause() {
+        val current = _scene.value as? Scene.NowPlaying ?: return
+        val wasPlaying = current.isPlaying
+        _scene.value = current.copy(isPlaying = !wasPlaying)
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = if (wasPlaying) todoApi.spotifyPause() else todoApi.spotifyResume()
+            if (!ok) {
+                val now = _scene.value
+                if (now is Scene.NowPlaying && now.isPlaying != wasPlaying) {
+                    _scene.value = now.copy(isPlaying = wasPlaying)
+                }
+            }
+        }
+    }
+
+    /** Botón ⏭ — siguiente canción. */
+    fun onSpotifyNext() = spotifySkip(forward = true)
+
+    /** Botón ⏮ — anterior canción (Spotify reinicia la actual si lleva >3s). */
+    fun onSpotifyPrevious() = spotifySkip(forward = false)
+
+    /**
+     * Lanza el comando de skip y refresca la escena con la nueva pista.
+     * Spotify tarda medio segundo largo en exponer la pista nueva en
+     * /me/player tras un next/previous, así que esperamos antes de
+     * pedir /api/home y rebrindar el chip a la escena.
+     */
+    private fun spotifySkip(forward: Boolean) {
+        if (_scene.value !is Scene.NowPlaying) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = if (forward) todoApi.spotifyNext() else todoApi.spotifyPrevious()
+            if (!ok) return@launch
+            delay(SPOTIFY_SKIP_REFRESH_DELAY_MS)
+            refreshHomeSnapshot()
+            val chip = _homeSnapshot.value?.nowPlaying ?: return@launch
+            val now = _scene.value
+            if (now is Scene.NowPlaying) {
+                _scene.value = Scene.NowPlaying(
+                    title = chip.title,
+                    artist = chip.artist,
+                    album = "",
+                    albumArtUrl = chip.albumArtUrl,
+                    isPlaying = true,
+                    durationMs = 0L,
+                    progressMs = 0L,
+                )
+            }
+        }
+    }
+
+    /**
      * Abre la lista de la compra desde la quick-actions row. Fetch
      * fresco a /api/shopping (no está en el snapshot del home) en
      * background; mientras tanto entramos a la escena vacía para que
@@ -1080,6 +1138,14 @@ class KiwiViewModel(application: Application) :
         // (SILENCE_END_OF_TURN_MS / NO_SPEECH_TIMEOUT_MS /
         // MAX_CONNECT_ATTEMPTS viven ahora en ConversationEngine, que
         // es quien gestiona los turnos y la reconexión.)
+
+        // Spotify tarda un instante en exponer la pista nueva en
+        // /me/player tras un next/previous. Sin este retardo, /api/home
+        // nos devolvería todavía la pista anterior y la escena
+        // NowPlaying parpadearía a la canción vieja. ~600 ms es lo
+        // mínimo que aguanta la latencia de Spotify+/api/home sin
+        // notarse en mano.
+        const val SPOTIFY_SKIP_REFRESH_DELAY_MS = 600L
 
         // Tras un device_command tipo "open_app_then_return" lanzamos
         // la app target con un Intent y, transcurrido este delay,

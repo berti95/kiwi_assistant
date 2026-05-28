@@ -62,7 +62,13 @@ from .calendar import (  # noqa: F401
     _calendar_window,
     _list_events_blocking,
 )
-from .spotify import _spotify_currently_playing_blocking  # noqa: F401
+from .spotify import (  # noqa: F401
+    _spotify_currently_playing_blocking,
+    _spotify_next,
+    _spotify_pause,
+    _spotify_previous,
+    _spotify_resume,
+)
 from .youtube import (  # noqa: F401
     _YT_MAX_RESULTS_HARD_CAP,
     _parse_iso8601_duration,

@@ -137,6 +137,18 @@ class TodoApi(
         "/api/alarms/$id/snooze?minutes=$minutes",
     )
 
+    /** Pausa la reproducción de Spotify (botón ⏯ con música sonando). */
+    suspend fun spotifyPause(): Boolean = simplePost("/api/spotify/pause")
+
+    /** Reanuda la reproducción de Spotify (botón ⏯ con música en pausa). */
+    suspend fun spotifyResume(): Boolean = simplePost("/api/spotify/resume")
+
+    /** Salta a la siguiente canción (botón ⏭). */
+    suspend fun spotifyNext(): Boolean = simplePost("/api/spotify/next")
+
+    /** Vuelve a la canción anterior (botón ⏮). */
+    suspend fun spotifyPrevious(): Boolean = simplePost("/api/spotify/previous")
+
     /**
      * GET /api/stats con un periodo. Devuelve directamente
      * [Scene.UsageStats] para que el ViewModel sólo tenga que

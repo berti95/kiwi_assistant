@@ -1,9 +1,11 @@
 package com.kiwi.assistant.ui.scenes
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,10 +13,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,13 +44,18 @@ import com.kiwi.assistant.ui.theme.spotifyGreen
 
 /**
  * Spotify NowPlaying card. Album art is the centerpiece — large
- * square, centered — with title + artist + album under it. Bottom
- * has a thin progress bar (static; the user can ask "qué suena"
- * again to refresh; the live-progress refresh is a Fase 8 thing
- * paired with the unified MediaController).
+ * square, centered — with title + artist + album under it, una
+ * barra fina de progreso y la fila de controles ⏮ ⏯ ⏭ que pegan
+ * directamente a los endpoints REST de /api/spotify (sin pasar por
+ * Gemini para que la respuesta sea inmediata al tap).
  */
 @Composable
-fun NowPlayingScene(scene: Scene.NowPlaying) {
+fun NowPlayingScene(
+    scene: Scene.NowPlaying,
+    onPlayPause: () -> Unit = {},
+    onNext: () -> Unit = {},
+    onPrevious: () -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -56,10 +67,7 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            AlbumArt(
-                url = scene.albumArtUrl,
-                isPlaying = scene.isPlaying,
-            )
+            AlbumArt(url = scene.albumArtUrl)
             Spacer(Modifier.height(KiwiSpacing.lg + KiwiSpacing.xs))
             Text(
                 text = scene.title,
@@ -100,12 +108,19 @@ fun NowPlayingScene(scene: Scene.NowPlaying) {
                     durationMs = scene.durationMs,
                 )
             }
+            Spacer(Modifier.height(KiwiSpacing.lg))
+            Controls(
+                isPlaying = scene.isPlaying,
+                onPlayPause = onPlayPause,
+                onNext = onNext,
+                onPrevious = onPrevious,
+            )
         }
     }
 }
 
 @Composable
-private fun AlbumArt(url: String?, isPlaying: Boolean) {
+private fun AlbumArt(url: String?) {
     Box(
         modifier = Modifier
             .fillMaxWidth(0.55f)
@@ -122,25 +137,74 @@ private fun AlbumArt(url: String?, isPlaying: Boolean) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        // Translucent play/pause indicator overlay so the user can
-        // tell at a glance whether the music is sounding or paused.
+    }
+}
+
+/**
+ * Fila de controles del reproductor: anterior · play/pausa · siguiente.
+ * El botón central es un círculo verde Spotify, más grande, que es la
+ * acción principal; ⏮ ⏭ son pulsadores blancos a los lados.
+ */
+@Composable
+private fun Controls(
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(0.55f),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SideControl(
+            icon = Icons.Filled.SkipPrevious,
+            contentDescription = "Anterior",
+            onClick = onPrevious,
+        )
         Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(12.dp)
-                .size(48.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.6f)),
+                .size(76.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.spotifyGreen)
+                .clickable(onClick = onPlayPause),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = if (isPlaying) Icons.Filled.PlayArrow
-                              else Icons.Filled.Pause,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.9f),
-                modifier = Modifier.size(28.dp),
+                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (isPlaying) "Pausar" else "Reproducir",
+                tint = Color.Black,
+                modifier = Modifier.size(40.dp),
             )
         }
+        SideControl(
+            icon = Icons.Filled.SkipNext,
+            contentDescription = "Siguiente",
+            onClick = onNext,
+        )
+    }
+}
+
+@Composable
+private fun SideControl(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White.copy(alpha = 0.92f),
+            modifier = Modifier.size(34.dp),
+        )
     }
 }
 

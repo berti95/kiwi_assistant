@@ -474,6 +474,43 @@ async def snooze_alarm(
     }
 
 
+# ---------- Spotify playback controls -------------------------------
+#
+# Las acciones por voz (pausa, sigue, siguiente, anterior) van por las
+# Gemini tools ``spotify_pause`` / ``_resume`` / ``_next`` / ``_previous``.
+# Cuando el usuario toca los botones de la pantalla NowPlaying, en
+# cambio, queremos respuesta inmediata sin pasar por Gemini — mismo
+# helper async por debajo, expuesto como HTTP gated por dev token.
+
+
+@app.post("/api/spotify/pause")
+async def spotify_pause(token: str = "") -> dict[str, object]:
+    """Pause playback on the active Spotify device."""
+    _require_dev_token(token)
+    return await tools._spotify_pause()
+
+
+@app.post("/api/spotify/resume")
+async def spotify_resume(token: str = "") -> dict[str, object]:
+    """Resume playback on the active Spotify device."""
+    _require_dev_token(token)
+    return await tools._spotify_resume()
+
+
+@app.post("/api/spotify/next")
+async def spotify_next(token: str = "") -> dict[str, object]:
+    """Skip to the next track."""
+    _require_dev_token(token)
+    return await tools._spotify_next()
+
+
+@app.post("/api/spotify/previous")
+async def spotify_previous(token: str = "") -> dict[str, object]:
+    """Skip to the previous track (or restart current, per Spotify rules)."""
+    _require_dev_token(token)
+    return await tools._spotify_previous()
+
+
 # ---------- Google OAuth web flow -----------------------------------
 #
 # Cuando el refresh token de Google caduca / se revoca, el backend
