@@ -349,6 +349,48 @@ def test_get_home_happy_path_with_todos_and_no_calendar_no_spotify(
     assert body["now_playing"] is None
 
 
+# ---- POST /api/plans + remove ---------------------------------------
+
+
+def test_post_plans_adds_and_returns_full_list(client: TestClient) -> None:
+    from datetime import date, timedelta
+
+    body = {"label": "Cantabria", "date": (date.today() + timedelta(days=5)).isoformat()}
+    response = client.post(f"/api/plans?token={DEV_TOKEN}", json=body)
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [it["label"] for it in items] == ["Cantabria"]
+
+
+def test_post_plans_rejects_past_date(client: TestClient) -> None:
+    from datetime import date, timedelta
+
+    body = {"label": "X", "date": (date.today() - timedelta(days=1)).isoformat()}
+    response = client.post(f"/api/plans?token={DEV_TOKEN}", json=body)
+    assert response.status_code == 400
+
+
+def test_post_plans_rejects_missing_token(client: TestClient) -> None:
+    response = client.post("/api/plans", json={"label": "x", "date": "2099-01-01"})
+    assert response.status_code == 403
+
+
+def test_remove_plan_endpoint(client: TestClient) -> None:
+    from datetime import date, timedelta
+
+    from kiwi_backend import plans
+
+    item = plans.add("Cantabria", (date.today() + timedelta(days=5)).isoformat())
+    response = client.post(f"/api/plans/{item.id}/remove?token={DEV_TOKEN}")
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+
+
+def test_remove_plan_endpoint_unknown_id_returns_404(client: TestClient) -> None:
+    response = client.post(f"/api/plans/phantom/remove?token={DEV_TOKEN}")
+    assert response.status_code == 404
+
+
 def test_get_home_plan_chip_appears_only_on_milestone_days(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

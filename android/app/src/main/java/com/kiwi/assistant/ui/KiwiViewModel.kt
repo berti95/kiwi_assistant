@@ -455,6 +455,29 @@ class KiwiViewModel(application: Application) :
     }
 
     /**
+     * Add a plan from the tablet UI (form en la escena [Scene.PlansList]).
+     * Re-enters la escena con la lista refrescada para que la nueva
+     * entrada salte en pantalla; refresca también el snapshot del Home
+     * por si el nuevo plan toca milestone (chip ✨).
+     */
+    fun onAddPlan(label: String, date: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = todoApi.addPlan(label, date) ?: return@launch
+            enterScene(updated)
+            refreshHomeSnapshot()
+        }
+    }
+
+    /** Remove a plan via tap del ✕ en la escena. */
+    fun onRemovePlan(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = todoApi.removePlan(id) ?: return@launch
+            enterScene(updated)
+            refreshHomeSnapshot()
+        }
+    }
+
+    /**
      * Abre la lista de despertadores desde el chip de la home. Sin
      * red: la lista la tenemos cacheada en homeSnapshot porque viene
      * con cada /api/home. Si por algo el snapshot está vacío,

@@ -149,6 +149,8 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
                 onOpenPlansList = viewModel::onOpenPlansList,
+                onAddPlan = viewModel::onAddPlan,
+                onRemovePlan = viewModel::onRemovePlan,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
                 onCheckForUpdate = viewModel::onCheckForUpdate,
                 updateStatus = updateStatus,
@@ -380,6 +382,8 @@ private fun SceneLayer(
     onOpenNowPlaying: () -> Unit,
     onOpenShoppingList: () -> Unit,
     onOpenPlansList: () -> Unit,
+    onAddPlan: (String, String) -> Unit,
+    onRemovePlan: (String) -> Unit,
     onRenovarGoogle: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
@@ -414,7 +418,11 @@ private fun SceneLayer(
         )
         is Scene.ShoppingList -> ShoppingListScene(scene, onItemTap = onShoppingTap)
         is Scene.UsageStats -> UsageStatsScene(scene, onSelectPeriod = onSelectUsagePeriod)
-        is Scene.PlansList -> PlansListScene(scene)
+        is Scene.PlansList -> PlansListScene(
+            scene = scene,
+            onAdd = onAddPlan,
+            onRemove = onRemovePlan,
+        )
     }
 }
 

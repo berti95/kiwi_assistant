@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueryStats
@@ -180,6 +181,7 @@ fun HomeScene(
             onOpenShoppingList = onOpenShoppingList,
             onOpenCalendar = onOpenCalendar,
             onOpenAlarmList = onOpenAlarmList,
+            onOpenPlansList = onOpenPlansList,
             onOpenUsageStats = onOpenUsageStats,
             onCheckForUpdate = onCheckForUpdate,
             updateStatus = updateStatus,
@@ -205,6 +207,7 @@ private fun QuickActionsRow(
     onOpenShoppingList: () -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenAlarmList: () -> Unit,
+    onOpenPlansList: () -> Unit,
     onOpenUsageStats: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
@@ -237,6 +240,11 @@ private fun QuickActionsRow(
                 else -> "$alarmsCount alarmas"
             },
             onClick = onOpenAlarmList,
+        )
+        QuickActionChip(
+            icon = Icons.Default.AutoAwesome,
+            label = "Planes",
+            onClick = onOpenPlansList,
         )
         QuickActionChip(
             icon = Icons.Default.QueryStats,

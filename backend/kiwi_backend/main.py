@@ -354,6 +354,42 @@ async def get_plans(token: str = "") -> dict[str, object]:
     return {"items": plans.to_wire(items, tools.DEFAULT_TIMEZONE)}
 
 
+class _PlanAddBody(BaseModel):
+    """JSON body para POST /api/plans (tap-driven add desde la escena)."""
+    label: str
+    date: str  # ISO YYYY-MM-DD
+
+
+@app.post("/api/plans")
+async def add_plan(
+    body: _PlanAddBody, token: str = "",
+) -> dict[str, object]:
+    """Add a plan from the tablet UI (no Gemini round-trip)."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(
+            plans.add, body.label, body.date, tools.DEFAULT_TIMEZONE,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    items = await asyncio.to_thread(plans.list_all, tools.DEFAULT_TIMEZONE)
+    return {"items": plans.to_wire(items, tools.DEFAULT_TIMEZONE)}
+
+
+@app.post("/api/plans/{plan_id}/remove")
+async def remove_plan(plan_id: str, token: str = "") -> dict[str, object]:
+    """Delete a plan from the tablet UI (×-icon tap on a row)."""
+    _require_dev_token(token)
+    try:
+        await asyncio.to_thread(plans.remove, plan_id, tools.DEFAULT_TIMEZONE)
+    except plans.PlanNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"plan not found: {plan_id}",
+        ) from exc
+    items = await asyncio.to_thread(plans.list_all, tools.DEFAULT_TIMEZONE)
+    return {"items": plans.to_wire(items, tools.DEFAULT_TIMEZONE)}
+
+
 @app.post("/api/shopping/{item_id}/complete")
 async def complete_shopping(item_id: str, token: str = "") -> dict[str, object]:
     """Mark a shopping item as bought (tablet tap-to-check path)."""

@@ -185,6 +185,66 @@ class TodoApi(
         return Scene.PlansList(items = items)
     }
 
+    /**
+     * POST /api/plans — añadir un plan a mano desde la escena. ``date``
+     * es ISO YYYY-MM-DD (el caller ya hizo el picker). Devuelve la
+     * escena con la lista actualizada, null si la red falla o el
+     * backend rechaza la fecha (p.ej. pasada).
+     */
+    suspend fun addPlan(label: String, date: String): Scene.PlansList? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/plans?token=$devToken"
+        val payload = """{"label":${jsonString(label)},"date":${jsonString(date)}}"""
+        val request = Request.Builder()
+            .url(url)
+            .post(payload.toRequestBody("application/json".toMediaType()))
+            .build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "POST $url returned ${response.code}")
+                    return null
+                }
+                parsePlansList(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /** POST /api/plans/{id}/remove — borrar un plan vía tap. */
+    suspend fun removePlan(id: String): Scene.PlansList? {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return null
+        val url = "${baseUrl.trimEnd('/')}/api/plans/$id/remove?token=$devToken"
+        val request = Request.Builder().url(url).post(EMPTY_BODY).build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    KLog.w(TAG, "POST $url returned ${response.code}")
+                    return null
+                }
+                parsePlansList(response.body?.string().orEmpty())
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /** Codificación mínima de un string para usar en JSON. */
+    private fun jsonString(s: String): String {
+        val sb = StringBuilder("\"")
+        for (c in s) when (c) {
+            '\\', '"' -> sb.append('\\').append(c)
+            '\n' -> sb.append("\\n")
+            '\r' -> sb.append("\\r")
+            '\t' -> sb.append("\\t")
+            else -> if (c.code < 0x20) sb.append("\\u%04x".format(c.code)) else sb.append(c)
+        }
+        return sb.append('"').toString()
+    }
+
     suspend fun fetchUsageStats(period: String = "today"): Scene.UsageStats? {
         if (baseUrl.isEmpty() || devToken.isEmpty()) return null
         val url = "${baseUrl.trimEnd('/')}/api/stats?period=$period&token=$devToken"
