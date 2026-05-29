@@ -510,34 +510,54 @@ async def snooze_alarm(
 # Cuando el usuario toca los botones de la pantalla NowPlaying, en
 # cambio, queremos respuesta inmediata sin pasar por Gemini — mismo
 # helper async por debajo, expuesto como HTTP gated por dev token.
+#
+# Los tools de voz devuelven un dict ``{"ok": True}`` o
+# ``{"error": "..."}`` siempre con HTTP 200 (Gemini espera ese
+# contrato). Para el tablet en cambio promovemos el error a HTTP 502
+# con ``detail`` para que el cliente sepa diferenciar "fue bien" de
+# "fue mal y por qué" — sin esa promoción Android leía 200 OK aunque
+# Spotify hubiera fallado, dejaba el icono en estado optimista y la
+# música seguía sonando ("el pause no va").
+
+
+def _surface_spotify_result(result: dict[str, object]) -> dict[str, object]:
+    """Convert a Spotify-tool dict into an HTTP response.
+
+    OK → returns the dict. Error → raises ``HTTPException(502, detail)``
+    so the tablet receives a non-2xx and the UI can show feedback.
+    """
+    err = result.get("error")
+    if err:
+        raise HTTPException(status_code=502, detail=str(err))
+    return result
 
 
 @app.post("/api/spotify/pause")
 async def spotify_pause(token: str = "") -> dict[str, object]:
     """Pause playback on the active Spotify device."""
     _require_dev_token(token)
-    return await tools._spotify_pause()
+    return _surface_spotify_result(await tools._spotify_pause())
 
 
 @app.post("/api/spotify/resume")
 async def spotify_resume(token: str = "") -> dict[str, object]:
     """Resume playback on the active Spotify device."""
     _require_dev_token(token)
-    return await tools._spotify_resume()
+    return _surface_spotify_result(await tools._spotify_resume())
 
 
 @app.post("/api/spotify/next")
 async def spotify_next(token: str = "") -> dict[str, object]:
     """Skip to the next track."""
     _require_dev_token(token)
-    return await tools._spotify_next()
+    return _surface_spotify_result(await tools._spotify_next())
 
 
 @app.post("/api/spotify/previous")
 async def spotify_previous(token: str = "") -> dict[str, object]:
     """Skip to the previous track (or restart current, per Spotify rules)."""
     _require_dev_token(token)
-    return await tools._spotify_previous()
+    return _surface_spotify_result(await tools._spotify_previous())
 
 
 # ---------- Google OAuth web flow -----------------------------------

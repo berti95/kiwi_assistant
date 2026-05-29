@@ -1,5 +1,10 @@
 package com.kiwi.assistant.ui.scenes
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,9 +18,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -40,6 +48,7 @@ import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.theme.KiwiOpacity
 import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
+import com.kiwi.assistant.ui.theme.kiwiError
 import com.kiwi.assistant.ui.theme.spotifyGreen
 
 /**
@@ -55,6 +64,8 @@ fun NowPlayingScene(
     onPlayPause: () -> Unit = {},
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
+    errorMessage: String? = null,
+    onDismissError: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -114,6 +125,63 @@ fun NowPlayingScene(
                 onPlayPause = onPlayPause,
                 onNext = onNext,
                 onPrevious = onPrevious,
+            )
+        }
+
+        // Banner de error de control: aparece sólo cuando Spotify
+        // rechazó un tap (sin device, premium, etc.). Anclado abajo
+        // para no tapar la portada / controles. Se autodescarta tras
+        // unos segundos desde el ViewModel; el usuario también puede
+        // cerrarlo con el ✕.
+        AnimatedVisibility(
+            visible = errorMessage != null,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            ErrorBanner(
+                message = errorMessage.orEmpty(),
+                onDismiss = onDismissError,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String, onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(KiwiRadii.sm))
+            .background(MaterialTheme.colorScheme.kiwiError.copy(alpha = 0.18f))
+            .padding(horizontal = KiwiSpacing.lg, vertical = KiwiSpacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.ErrorOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.kiwiError,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(KiwiSpacing.md))
+        Text(
+            text = message,
+            color = Color.White.copy(alpha = 0.95f),
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Cerrar",
+                tint = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+                modifier = Modifier.size(20.dp),
             )
         }
     }

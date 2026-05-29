@@ -176,17 +176,63 @@ class TodoApi(
         "/api/alarms/$id/snooze?minutes=$minutes",
     )
 
+    /**
+     * Resultado de un comando de Spotify. ``Ok`` cuando el backend
+     * devuelve 2xx; ``Err(message)`` cuando devuelve 4xx/5xx o falla
+     * la red — el ``message`` lleva el ``detail`` del backend (p.ej.
+     * "no active spotify device. Abre Spotify…") para que la UI lo
+     * muestre como banner.
+     *
+     * Antes estos métodos devolvían ``Boolean`` mirando solo
+     * ``response.isSuccessful``, pero los endpoints de control de
+     * Spotify devolvían 200 incluso cuando Spotify había fallado
+     * (body ``{"error": "..."}``). Resultado: el icono de play/pausa
+     * cambiaba en pantalla pero la música seguía sonando ("el pause
+     * no va"). El backend ahora promueve esos errores a HTTP 502 y
+     * aquí los parseamos para feedback real.
+     */
+    sealed class SpotifyResult {
+        data object Ok : SpotifyResult()
+        data class Err(val message: String) : SpotifyResult()
+    }
+
     /** Pausa la reproducción de Spotify (botón ⏯ con música sonando). */
-    suspend fun spotifyPause(): Boolean = simplePost("/api/spotify/pause")
+    suspend fun spotifyPause(): SpotifyResult = spotifyCommand("/api/spotify/pause")
 
     /** Reanuda la reproducción de Spotify (botón ⏯ con música en pausa). */
-    suspend fun spotifyResume(): Boolean = simplePost("/api/spotify/resume")
+    suspend fun spotifyResume(): SpotifyResult = spotifyCommand("/api/spotify/resume")
 
     /** Salta a la siguiente canción (botón ⏭). */
-    suspend fun spotifyNext(): Boolean = simplePost("/api/spotify/next")
+    suspend fun spotifyNext(): SpotifyResult = spotifyCommand("/api/spotify/next")
 
     /** Vuelve a la canción anterior (botón ⏮). */
-    suspend fun spotifyPrevious(): Boolean = simplePost("/api/spotify/previous")
+    suspend fun spotifyPrevious(): SpotifyResult = spotifyCommand("/api/spotify/previous")
+
+    private fun spotifyCommand(pathAndQuery: String): SpotifyResult {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) {
+            return SpotifyResult.Err("Backend no configurado")
+        }
+        val sep = if ('?' in pathAndQuery) '&' else '?'
+        val url = "${baseUrl.trimEnd('/')}$pathAndQuery${sep}token=$devToken"
+        val request = Request.Builder().url(url).post(EMPTY_BODY).build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    SpotifyResult.Ok
+                } else {
+                    val body = response.body?.string().orEmpty()
+                    val detail = runCatching {
+                        ((json.parseToJsonElement(body) as? JsonObject)
+                            ?.get("detail") as? JsonPrimitive)?.contentOrNull
+                    }.getOrNull()
+                    SpotifyResult.Err(detail ?: "Spotify respondió ${response.code}")
+                }
+            }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            SpotifyResult.Err("Sin conexión con el backend")
+        }
+    }
 
     /**
      * GET /api/stats con un periodo. Devuelve directamente

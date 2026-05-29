@@ -140,6 +140,13 @@ class KiwiViewModel(application: Application) :
     private val _updateStatus = MutableStateFlow<String?>(null)
     val updateStatus: StateFlow<String?> = _updateStatus.asStateFlow()
 
+    // Banner transitorio que muestra el NowPlayingScene cuando un
+    // tap en ⏯ / ⏭ / ⏮ falla. ``null`` = oculto. El mensaje viene
+    // del backend ("no active spotify device…") y se autolimpia
+    // tras unos segundos.
+    private val _spotifyError = MutableStateFlow<String?>(null)
+    val spotifyError: StateFlow<String?> = _spotifyError.asStateFlow()
+
     /**
      * El usuario pulsó "Actualizar" en el Home. Comprueba el backend,
      * y si hay versión nueva descarga + instala (silenciosa con Device
@@ -595,14 +602,40 @@ class KiwiViewModel(application: Application) :
         val wasPlaying = current.isPlaying
         _scene.value = current.copy(isPlaying = !wasPlaying)
         viewModelScope.launch(Dispatchers.IO) {
-            val ok = if (wasPlaying) todoApi.spotifyPause() else todoApi.spotifyResume()
-            if (!ok) {
+            val result = if (wasPlaying) todoApi.spotifyPause()
+                         else todoApi.spotifyResume()
+            if (result is TodoApi.SpotifyResult.Err) {
+                // Spotify rechazó el comando (sin device, premium,
+                // restriction…). Deshacer el flip optimista para que
+                // el icono refleje la realidad, y mostrar mensaje.
                 val now = _scene.value
                 if (now is Scene.NowPlaying && now.isPlaying != wasPlaying) {
                     _scene.value = now.copy(isPlaying = wasPlaying)
                 }
+                emitSpotifyError(result.message)
             }
         }
+    }
+
+    // Job del auto-clear del banner de error de Spotify. Si dos taps
+    // seguidos fallan, cancelamos el delay anterior antes de empezar
+    // uno nuevo — si no, el primero limpiaría el mensaje del segundo
+    // a la mitad del segundo timeout.
+    private var spotifyErrorClearJob: Job? = null
+
+    private fun emitSpotifyError(message: String) {
+        _spotifyError.value = message
+        spotifyErrorClearJob?.cancel()
+        spotifyErrorClearJob = viewModelScope.launch {
+            delay(SPOTIFY_ERROR_BANNER_MS)
+            _spotifyError.value = null
+        }
+    }
+
+    /** Descartar el banner desde un tap del usuario. */
+    fun dismissSpotifyError() {
+        spotifyErrorClearJob?.cancel()
+        _spotifyError.value = null
     }
 
     /** Botón ⏭ — siguiente canción. */
@@ -620,8 +653,12 @@ class KiwiViewModel(application: Application) :
     private fun spotifySkip(forward: Boolean) {
         if (_scene.value !is Scene.NowPlaying) return
         viewModelScope.launch(Dispatchers.IO) {
-            val ok = if (forward) todoApi.spotifyNext() else todoApi.spotifyPrevious()
-            if (!ok) return@launch
+            val result = if (forward) todoApi.spotifyNext()
+                         else todoApi.spotifyPrevious()
+            if (result is TodoApi.SpotifyResult.Err) {
+                emitSpotifyError(result.message)
+                return@launch
+            }
             delay(SPOTIFY_SKIP_REFRESH_DELAY_MS)
             refreshHomeSnapshot()
             val chip = _homeSnapshot.value?.nowPlaying ?: return@launch
@@ -1162,6 +1199,11 @@ class KiwiViewModel(application: Application) :
         // mínimo que aguanta la latencia de Spotify+/api/home sin
         // notarse en mano.
         const val SPOTIFY_SKIP_REFRESH_DELAY_MS = 600L
+
+        // Cuánto dura el banner de error de Spotify visible antes de
+        // autodesvanecerse. 5 s es suficiente para leerlo cómodo desde
+        // 2 m sin ser invasivo.
+        const val SPOTIFY_ERROR_BANNER_MS = 5_000L
 
         // Tras un device_command tipo "open_app_then_return" lanzamos
         // la app target con un Intent y, transcurrido este delay,

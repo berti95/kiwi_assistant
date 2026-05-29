@@ -92,6 +92,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val canGoBack by viewModel.canGoBack.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
     val updateStatus by viewModel.updateStatus.collectAsState()
+    val spotifyError by viewModel.spotifyError.collectAsState()
     // Modo nocturno: el tablet vive en pared cerca del dormitorio.
     // Entre 22:00 y 07:00 aplicamos un overlay marrón cálido para
     // que no moleste. La transición dura 1s al cruzar el umbral.
@@ -162,6 +163,8 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onSpotifyPlayPause = viewModel::onSpotifyPlayPause,
                 onSpotifyNext = viewModel::onSpotifyNext,
                 onSpotifyPrevious = viewModel::onSpotifyPrevious,
+                spotifyError = spotifyError,
+                onDismissSpotifyError = viewModel::dismissSpotifyError,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
                 onOpenPlansList = viewModel::onOpenPlansList,
                 onAddPlan = viewModel::onAddPlan,
@@ -391,6 +394,8 @@ private fun SceneLayer(
     onSpotifyPlayPause: () -> Unit,
     onSpotifyNext: () -> Unit,
     onSpotifyPrevious: () -> Unit,
+    spotifyError: String?,
+    onDismissSpotifyError: () -> Unit,
     onOpenShoppingList: () -> Unit,
     onOpenPlansList: () -> Unit,
     onAddPlan: (String, String) -> Unit,
@@ -423,6 +428,8 @@ private fun SceneLayer(
             onPlayPause = onSpotifyPlayPause,
             onNext = onSpotifyNext,
             onPrevious = onSpotifyPrevious,
+            errorMessage = spotifyError,
+            onDismissError = onDismissSpotifyError,
         )
         is Scene.TodoList -> TodoListScene(
             scene = scene,
