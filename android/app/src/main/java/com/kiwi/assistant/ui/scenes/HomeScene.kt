@@ -486,7 +486,6 @@ private fun TodosCard(
 }
 
 @Composable
-@Composable
 private fun SpotifyAuthBar(onRenovar: () -> Unit) {
     // Mismo tamaño y shape que NowPlayingBar para que el cambio entre
     // "Suena ahora" y "Renovar Spotify" no rompa el ritmo visual del
