@@ -14,6 +14,26 @@ from .registry import SceneSink, ToolResult, register
 
 log = logging.getLogger(__name__)
 
+# Mensaje único para errores de auth de Spotify. Se devuelve al modelo
+# Gemini en el campo "error" del tool result — Gemini lo lee al usuario
+# por voz tal cual. La frase está pensada para sonar natural ("Pulsa
+# el botón…") y para apuntar a la acción concreta del tablet, no a
+# arreglarlo desde el móvil. El endpoint HTTP del tablet (que tocan
+# los botones de NowPlaying) usa esta misma constante para detectar
+# auth-broken y promover a HTTP 401, así Android pinta el overlay
+# 'Renovar Spotify' en lugar del banner rojo de errores transitorios.
+SPOTIFY_AUTH_ERROR_MSG = (
+    "Mi acceso a Spotify ha caducado. Pulsa el botón 'Renovar Spotify' "
+    "en el tablet para volverlo a vincular."
+)
+
+
+def _auth_error_result() -> dict[str, Any]:
+    """Tool result for SpotifyAuthUnavailableError. Includes ``error_kind``
+    so the HTTP layer can distinguish from no-device / api errors.
+    """
+    return {"error": SPOTIFY_AUTH_ERROR_MSG, "error_kind": "auth"}
+
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 
 
@@ -129,8 +149,8 @@ def _spotify_currently_playing_blocking() -> tuple[dict, dict | None]:
         payload = _spotify_get("/me/player")
     except requests.HTTPError as exc:
         return {"error": f"spotify api error: {exc.response.status_code}"}, None
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return {"error": str(exc)}, None
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return _auth_error_result(), None
     if not payload:
         return {"playing": False, "track": None}, None
     track = _spotify_track_dto(payload.get("item"))
@@ -228,8 +248,8 @@ async def _spotify_search(
         return ToolResult(
             response={"error": f"spotify api error: {exc.response.status_code}"},
         )
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return ToolResult(response={"error": str(exc)})
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return ToolResult(response=_auth_error_result())
     return ToolResult(response=result)
 
 
@@ -284,8 +304,8 @@ def _spotify_play_blocking(
         }, None
     except requests.HTTPError as exc:
         return {"error": f"spotify api error: {exc.response.status_code}"}, None
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return {"error": str(exc)}, None
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return _auth_error_result(), None
 
     # Build a NowPlaying scene from what we know plus a best-effort
     # /me/player snapshot (the start can lag a beat so the snapshot
@@ -417,8 +437,8 @@ def _spotify_simple_command(method: str, path: str) -> dict:
         }
     except requests.HTTPError as exc:
         return {"error": f"spotify api error: {exc.response.status_code}"}
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return {"error": str(exc)}
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return _auth_error_result()
 
 
 async def _spotify_pause() -> dict:
@@ -580,8 +600,8 @@ def _spotify_transfer_blocking(device_id: str) -> tuple[dict, dict | None]:
         )}, None
     except requests.HTTPError as exc:
         return {"error": f"spotify api error: {exc.response.status_code}"}, None
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return {"error": str(exc)}, None
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return _auth_error_result(), None
 
     # Best-effort: read /me/player so we can show a now-playing card.
     scene: dict | None = None
@@ -604,8 +624,8 @@ async def _spotify_play_here() -> ToolResult:
         return ToolResult(
             response={"error": f"spotify api error: {exc.response.status_code}"},
         )
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return ToolResult(response={"error": str(exc)})
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return ToolResult(response=_auth_error_result())
 
     target = next(
         (d for d in devices if pattern in (d.get("name") or "").lower()),
@@ -639,8 +659,8 @@ async def _spotify_transfer_to(target: str) -> ToolResult:
         return ToolResult(
             response={"error": f"spotify api error: {exc.response.status_code}"},
         )
-    except spotify_auth.SpotifyAuthUnavailableError as exc:
-        return ToolResult(response={"error": str(exc)})
+    except spotify_auth.SpotifyAuthUnavailableError:
+        return ToolResult(response=_auth_error_result())
 
     from .. import state_store
 

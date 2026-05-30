@@ -17,6 +17,7 @@ from . import (
     log_buffer,
     plans,
     shopping,
+    spotify_auth,
     timer,
     todos,
     tools,
@@ -362,6 +363,13 @@ async def get_home(token: str = "") -> dict[str, object]:
         "weather": current_weather,
         "alarms": alarm_items,
         "plan_chip": plan_chip,
+        # Flag para el chip "Renovar Spotify" en el home. spotify_auth
+        # lo setea cuando el último refresh falló y lo limpia en el
+        # siguiente refresh exitoso (post-save_bundle). Sin esto el
+        # único sitio donde el usuario vería el botón es NowPlaying,
+        # pero NowPlaying solo es alcanzable si hay música sonando
+        # — justo lo que Spotify-broken impide.
+        "spotify_auth_required": spotify_auth.auth_required(),
     }
 
 
@@ -523,13 +531,17 @@ async def snooze_alarm(
 def _surface_spotify_result(result: dict[str, object]) -> dict[str, object]:
     """Convert a Spotify-tool dict into an HTTP response.
 
-    OK → returns the dict. Error → raises ``HTTPException(502, detail)``
-    so the tablet receives a non-2xx and the UI can show feedback.
+    OK → returns the dict. ``error_kind == "auth"`` → HTTP 401 so
+    Android can pintar the 'Renovar Spotify' overlay (auth-broken is
+    different from no-device — un retry no lo arregla). Other errors
+    → HTTP 502 con detail para el banner transitorio.
     """
     err = result.get("error")
-    if err:
-        raise HTTPException(status_code=502, detail=str(err))
-    return result
+    if not err:
+        return result
+    if result.get("error_kind") == "auth":
+        raise HTTPException(status_code=401, detail=str(err))
+    raise HTTPException(status_code=502, detail=str(err))
 
 
 @app.post("/api/spotify/pause")
@@ -740,6 +752,162 @@ async def oauth_google_callback(
             "Refresh token renovado correctamente. Puedes cerrar esta "
             "pestaña y volver al tablet — la agenda volverá a aparecer "
             "en la siguiente actualización.",
+        ),
+    )
+
+
+# ---------- Spotify OAuth (Authorization Code) ----------------------
+#
+# Mismo patrón que el de Google: ``/start`` redirige al consent de
+# Spotify; ``/callback`` intercambia el code, llama a
+# ``spotify_auth.save_bundle`` y deja el bundle en GCS para futuros
+# arranques. La diferencia clave con Google es que Spotify requiere
+# el client_secret en el intercambio (no en la URL del consent), y
+# usa Basic auth para token endpoint.
+#
+# Para que el callback funcione hay que registrar
+# ``https://<cloud-run-url>/oauth/spotify/callback`` en el dashboard
+# de Spotify Developer → tu app → Redirect URIs.
+
+
+def _spotify_callback_url(request: Request | None) -> str:
+    """Build the redirect_uri Spotify compara con el registrado.
+
+    Misma defensa-en-profundidad que ``_oauth_callback_url``: Cloud
+    Run termina TLS en el LB y pasa la petición como HTTP, así que
+    forzamos https para no chocar con redirect_uri_mismatch.
+    """
+    if request is None:
+        return "/oauth/spotify/callback"
+    base = str(request.base_url).rstrip("/")
+    if base.startswith("http://") and "localhost" not in base:
+        base = "https://" + base[len("http://"):]
+    return f"{base}/oauth/spotify/callback"
+
+
+@app.get("/oauth/spotify/start")
+async def oauth_spotify_start(token: str = "", request: Request = None):  # type: ignore[assignment]
+    """Inicia el flujo OAuth de Spotify — redirige al consent."""
+    _require_dev_token(token)
+    try:
+        cfg = spotify_auth.client_config()
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    _prune_oauth_states()
+    state = secrets.token_urlsafe(24)
+    _OAUTH_STATES[state] = time.time()
+
+    redirect_uri = _spotify_callback_url(request)
+    params = {
+        "client_id": cfg["client_id"],
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": " ".join(cfg["scopes"]),
+        "state": state,
+        # ``show_dialog=true`` fuerza el consent siempre — sin esto,
+        # Spotify reusa el grant previo y no necesariamente vuelve a
+        # emitir refresh_token. Al estar renovando explícitamente
+        # queremos uno nuevo siempre.
+        "show_dialog": "true",
+    }
+    auth_endpoint = "https://accounts.spotify.com/authorize"
+    return RedirectResponse(f"{auth_endpoint}?{urlencode(params)}")
+
+
+@app.get("/oauth/spotify/callback")
+async def oauth_spotify_callback(
+    code: str = "", state: str = "", error: str = "", request: Request = None,  # type: ignore[assignment]
+):
+    """Recibe el code de Spotify, lo intercambia y guarda el bundle."""
+    if error:
+        return HTMLResponse(
+            _oauth_html("Error de Spotify", f"Spotify devolvió un error: {error}"),
+            status_code=400,
+        )
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="missing code/state")
+    _prune_oauth_states()
+    if _OAUTH_STATES.pop(state, None) is None:
+        raise HTTPException(status_code=400, detail="invalid or expired state")
+
+    try:
+        cfg = spotify_auth.client_config()
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    redirect_uri = _spotify_callback_url(request)
+    try:
+        response = await asyncio.to_thread(
+            requests.post,
+            cfg["token_uri"],
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+            },
+            # Spotify requiere las credenciales en Basic auth para el
+            # token endpoint — no en el body como Google.
+            auth=(cfg["client_id"], cfg["client_secret"]),
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        return HTMLResponse(
+            _oauth_html("Error de red", f"No se pudo contactar a Spotify: {exc}"),
+            status_code=502,
+        )
+    if not response.ok:
+        return HTMLResponse(
+            _oauth_html(
+                "Spotify rechazó el code",
+                f"Status {response.status_code}: {response.text[:300]}",
+            ),
+            status_code=502,
+        )
+    payload = response.json()
+    refresh_token = payload.get("refresh_token")
+    if not refresh_token:
+        return HTMLResponse(
+            _oauth_html(
+                "Sin refresh_token",
+                "Spotify devolvió access_token pero no refresh_token. "
+                "Revisa la configuración del OAuth client.",
+            ),
+            status_code=500,
+        )
+
+    new_bundle = {
+        "refresh_token": refresh_token,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "token_uri": cfg["token_uri"],
+        "scopes": cfg["scopes"],
+    }
+    try:
+        await asyncio.to_thread(spotify_auth.save_bundle, new_bundle)
+    except Exception as exc:  # noqa: BLE001
+        return HTMLResponse(
+            _oauth_html("Error guardando", f"{type(exc).__name__}: {exc}"),
+            status_code=500,
+        )
+    # Forzar primer refresh para que falle aquí si el bundle es malo,
+    # no en el siguiente tap del usuario en el tablet.
+    try:
+        await asyncio.to_thread(lambda: spotify_auth.token_holder().access_token())
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return HTMLResponse(
+            _oauth_html(
+                "Guardado pero refresh falló",
+                f"El bundle se persistió pero el primer refresh dio: {exc}",
+            ),
+            status_code=500,
+        )
+    return HTMLResponse(
+        _oauth_html(
+            "Listo",
+            "Spotify renovado correctamente. Puedes cerrar esta pestaña "
+            "y volver al tablet — los controles vuelven a funcionar al "
+            "instante.",
         ),
     )
 

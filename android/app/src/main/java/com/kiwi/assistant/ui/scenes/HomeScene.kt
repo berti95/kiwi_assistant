@@ -54,6 +54,7 @@ import com.kiwi.assistant.ui.WeatherInfo
 import com.kiwi.assistant.ui.theme.KiwiOpacity
 import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
+import com.kiwi.assistant.ui.theme.spotifyGreen
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -103,6 +104,7 @@ fun HomeScene(
     onOpenPlansList: () -> Unit = {},
     onCheckForUpdate: () -> Unit = {},
     updateStatus: String? = null,
+    onRenovarSpotify: () -> Unit = {},
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
@@ -174,6 +176,17 @@ fun HomeScene(
                 Spacer(Modifier.height(KiwiSpacing.md))
                 NowPlayingBar(chip = chip, onOpen = onOpenNowPlaying)
             }
+        }
+
+        // Chip discreto que sale cuando el backend reporta que el
+        // refresh_token de Spotify caducó. Una sola pulsación abre
+        // el OAuth de Spotify en Chrome. Sale igual en home vacío y
+        // en home con contenido — es el caso "Spotify roto + no hay
+        // música", justamente cuando el chip 'Suena ahora' tampoco
+        // aparecería.
+        if (snapshot?.spotifyAuthRequired == true) {
+            Spacer(Modifier.height(KiwiSpacing.md))
+            SpotifyAuthBar(onRenovar = onRenovarSpotify)
         }
 
         Spacer(Modifier.height(KiwiSpacing.md))
@@ -468,6 +481,43 @@ private fun TodosCard(
             // completed so the card feels lived-in.
             val display = (pending + items.filter { it.completed }).take(MAX_TODO_ROWS)
             display.forEach { item -> TodoRow(item) }
+        }
+    }
+}
+
+@Composable
+@Composable
+private fun SpotifyAuthBar(onRenovar: () -> Unit) {
+    // Mismo tamaño y shape que NowPlayingBar para que el cambio entre
+    // "Suena ahora" y "Renovar Spotify" no rompa el ritmo visual del
+    // home — solo cambia el contenido y el verde sutil de Spotify.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(KiwiRadii.md))
+            .background(MaterialTheme.colorScheme.spotifyGreen.copy(alpha = 0.14f))
+            .clickable { onRenovar() }
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm + KiwiSpacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.spotifyGreen,
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(Modifier.width(KiwiSpacing.md))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Spotify desconectado",
+                color = Color.White.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                text = "Pulsa para renovar",
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
     }
 }

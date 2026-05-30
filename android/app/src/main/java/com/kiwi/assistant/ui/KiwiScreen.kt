@@ -170,6 +170,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onAddPlan = viewModel::onAddPlan,
                 onRemovePlan = viewModel::onRemovePlan,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
+                onRenovarSpotify = viewModel::onRenovarSpotifyClick,
                 onCheckForUpdate = viewModel::onCheckForUpdate,
                 updateStatus = updateStatus,
             )
@@ -401,6 +402,7 @@ private fun SceneLayer(
     onAddPlan: (String, String) -> Unit,
     onRemovePlan: (String) -> Unit,
     onRenovarGoogle: () -> Unit,
+    onRenovarSpotify: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
 ) {
@@ -416,6 +418,7 @@ private fun SceneLayer(
             onOpenPlansList = onOpenPlansList,
             onCheckForUpdate = onCheckForUpdate,
             updateStatus = updateStatus,
+            onRenovarSpotify = onRenovarSpotify,
         )
         Scene.Ambient -> AmbientHomeScene(snapshot = homeSnapshot)
         is Scene.Calendar -> CalendarScene(scene, onRenovarGoogle = onRenovarGoogle)
@@ -430,6 +433,8 @@ private fun SceneLayer(
             onPrevious = onSpotifyPrevious,
             errorMessage = spotifyError,
             onDismissError = onDismissSpotifyError,
+            authBroken = homeSnapshot?.spotifyAuthRequired == true,
+            onRenovarSpotify = onRenovarSpotify,
         )
         is Scene.TodoList -> TodoListScene(
             scene = scene,

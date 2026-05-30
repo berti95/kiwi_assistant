@@ -299,6 +299,15 @@ data class HomeSnapshot(
     val alarms: List<AlarmItem>,
     /** Cuenta atrás del próximo plan, solo presente en días-milestone. */
     val planChip: PlanChip? = null,
+    /**
+     * ``true`` cuando el backend reporta que el refresh_token de
+     * Spotify caducó. El home pinta un chip "Renovar Spotify" para
+     * que el usuario pueda relanzar el OAuth sin tener que entrar en
+     * NowPlaying (donde el botón también aparece) — caso "Spotify
+     * roto + sin música" en el que el chip 'Suena ahora' habría
+     * desaparecido y dejaría al usuario sin acceso al reauth.
+     */
+    val spotifyAuthRequired: Boolean = false,
 )
 
 /** A YouTube video item, used in [Scene.VideoList]. */

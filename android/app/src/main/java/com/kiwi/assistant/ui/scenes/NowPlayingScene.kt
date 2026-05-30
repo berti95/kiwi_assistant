@@ -24,10 +24,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -66,7 +70,18 @@ fun NowPlayingScene(
     onPrevious: () -> Unit = {},
     errorMessage: String? = null,
     onDismissError: () -> Unit = {},
+    authBroken: Boolean = false,
+    onRenovarSpotify: () -> Unit = {},
 ) {
+    if (authBroken) {
+        // Auth-broken se lleva toda la pantalla — los botones de control
+        // no van a funcionar hasta renovar, así que ocultarlos evita
+        // que el usuario tape los mismos para mostrarse "no funciona"
+        // una y otra vez. Mismo estilo que CalendarScene's ErrorState
+        // (botón "Renovar Google") para que la UX se sienta familiar.
+        SpotifyReauthScreen(onRenovar = onRenovarSpotify)
+        return
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -306,6 +321,74 @@ private fun ProgressBar(progressMs: Long, durationMs: Long) {
                 color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpotifyReauthScreen(onRenovar: () -> Unit) {
+    // Mismo layout que CalendarScene.ErrorState (botón Renovar
+    // Google) para que la experiencia sea predecible entre proveedores
+    // OAuth. No mostramos los controles ⏯⏭⏮ — no van a funcionar
+    // hasta renovar y ofrecerlos sería engañoso.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .padding(horizontal = KiwiSpacing.xxl, vertical = KiwiSpacing.huge),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.spotifyGreen,
+                modifier = Modifier.size(72.dp),
+            )
+            Spacer(Modifier.height(KiwiSpacing.lg))
+            Text(
+                text = "Spotify desconectado",
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.Light,
+                ),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(KiwiSpacing.md))
+            Text(
+                text = "El backend ya no puede hablar con Spotify — el OAuth ha caducado o se ha revocado.",
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = KiwiSpacing.xl),
+            )
+            Spacer(Modifier.height(KiwiSpacing.xl))
+            FilledTonalButton(
+                onClick = onRenovar,
+                shape = RoundedCornerShape(KiwiRadii.lg),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.spotifyGreen.copy(alpha = 0.22f),
+                    contentColor = Color.White,
+                ),
+                contentPadding = PaddingValues(
+                    horizontal = KiwiSpacing.xl,
+                    vertical = KiwiSpacing.sm + 6.dp,
+                ),
+            ) {
+                Text(
+                    text = "Renovar Spotify",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            Spacer(Modifier.height(KiwiSpacing.sm))
+            Text(
+                text = "Se abrirá el navegador para volver a autorizar.",
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
             )
         }
     }

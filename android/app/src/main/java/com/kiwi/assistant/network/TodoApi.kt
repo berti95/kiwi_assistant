@@ -193,7 +193,14 @@ class TodoApi(
      */
     sealed class SpotifyResult {
         data object Ok : SpotifyResult()
+        // 4xx/5xx transitorio (no device, premium, 403…). Banner rojo
+        // y se intenta de nuevo en el siguiente tap.
         data class Err(val message: String) : SpotifyResult()
+        // HTTP 401: el refresh_token de Spotify caducó / fue revocado.
+        // Reintentar no arregla — hay que ir al flujo OAuth desde el
+        // tablet. La UI pinta el overlay "Renovar Spotify" en vez del
+        // banner transitorio.
+        data class AuthExpired(val message: String) : SpotifyResult()
     }
 
     /** Pausa la reproducción de Spotify (botón ⏯ con música sonando). */
@@ -225,7 +232,11 @@ class TodoApi(
                         ((json.parseToJsonElement(body) as? JsonObject)
                             ?.get("detail") as? JsonPrimitive)?.contentOrNull
                     }.getOrNull()
-                    SpotifyResult.Err(detail ?: "Spotify respondió ${response.code}")
+                    val msg = detail ?: "Spotify respondió ${response.code}"
+                    // 401 = el backend dice "auth roto, hace falta reauth".
+                    // El resto son fallos transitorios que ofrecen reintento.
+                    if (response.code == 401) SpotifyResult.AuthExpired(msg)
+                    else SpotifyResult.Err(msg)
                 }
             }
         } catch (e: Exception) {

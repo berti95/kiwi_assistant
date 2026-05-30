@@ -130,6 +130,9 @@ class HomeStatePoller(
             )
         }
 
+        val spotifyAuthRequired = (root["spotify_auth_required"] as? JsonPrimitive)
+            ?.booleanOrNull ?: false
+
         return HomeSnapshot(
             eventsToday = events,
             eventsTodayError = root.string("events_today_error"),
@@ -138,6 +141,7 @@ class HomeStatePoller(
             weather = weather,
             alarms = alarms,
             planChip = planChip,
+            spotifyAuthRequired = spotifyAuthRequired,
         )
     }
 

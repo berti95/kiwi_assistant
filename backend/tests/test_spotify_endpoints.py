@@ -95,3 +95,56 @@ def test_skip_endpoints_surface_errors(
 def test_pause_requires_dev_token(client: TestClient) -> None:
     resp = client.post("/api/spotify/pause")
     assert resp.status_code == 403
+
+
+# ---- auth-broken: distinct surface vs no-device ----------------------
+
+
+def test_auth_error_surfaces_as_http_401_not_502(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Cuando el refresh_token de Spotify caduca, los tools devuelven
+    # ``error_kind == "auth"``. El endpoint HTTP debe promoverlo a
+    # 401 (no 502) para que Android distinga: 502 = banner rojo
+    # transitorio, 401 = overlay 'Renovar Spotify' que abre el flujo
+    # OAuth. Tratarlos igual significaría que el usuario reintenta y
+    # reintenta sin saber que tiene que reauth.
+    async def fake_pause() -> dict[str, object]:
+        return {
+            "error": "Mi acceso a Spotify ha caducado…",
+            "error_kind": "auth",
+        }
+
+    monkeypatch.setattr(tools, "_spotify_pause", fake_pause)
+    resp = client.post(f"/api/spotify/pause?token={DEV_TOKEN}")
+    assert resp.status_code == 401
+    assert "caducado" in resp.json()["detail"]
+
+
+# ---- home flag --------------------------------------------------------
+
+
+def test_home_exposes_spotify_auth_required_flag(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # /api/home debe llevar la flag para que el home pueda pintar el
+    # chip 'Renovar Spotify' sin esperar a que el usuario entre en
+    # NowPlaying (caso "Spotify roto + sin música" — el chip 'Suena
+    # ahora' habría desaparecido y dejaría al usuario sin acceso al
+    # botón de reauth).
+    from kiwi_backend import spotify_auth
+
+    monkeypatch.setattr(spotify_auth, "auth_required", lambda: True)
+    resp = client.get(f"/api/home?token={DEV_TOKEN}")
+    assert resp.status_code == 200
+    assert resp.json()["spotify_auth_required"] is True
+
+
+def test_home_omits_flag_when_spotify_healthy(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kiwi_backend import spotify_auth
+
+    monkeypatch.setattr(spotify_auth, "auth_required", lambda: False)
+    resp = client.get(f"/api/home?token={DEV_TOKEN}")
+    assert resp.json()["spotify_auth_required"] is False

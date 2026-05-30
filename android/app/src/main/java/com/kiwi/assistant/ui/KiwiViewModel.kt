@@ -547,21 +547,38 @@ class KiwiViewModel(application: Application) :
      * más — el flujo manual sigue funcionando vía móvil/PC.
      */
     fun onRenovarGoogleClick() {
+        openOauthStart("/oauth/google/start", "onRenovarGoogleClick")
+    }
+
+    /**
+     * El usuario pulsó "Renovar Spotify" (chip en home cuando
+     * [HomeSnapshot.spotifyAuthRequired] o overlay grande dentro de
+     * NowPlaying si entra desde el chip "Suena ahora"). Mismo
+     * mecanismo que Google: abre Chrome al endpoint OAuth del
+     * backend → Spotify reconoce la sesión del usuario y basta con
+     * 1 tap de consent → el callback persiste el bundle en GCS y la
+     * siguiente llamada a /api/home limpia el chip.
+     */
+    fun onRenovarSpotifyClick() {
+        openOauthStart("/oauth/spotify/start", "onRenovarSpotifyClick")
+    }
+
+    private fun openOauthStart(path: String, source: String) {
         val baseUrl = BuildConfig.CLOUD_RUN_URL.trimEnd('/')
         val token = BuildConfig.DEV_LOGS_TOKEN
         if (baseUrl.isEmpty() || token.isEmpty()) {
-            KLog.w(TAG, "onRenovarGoogleClick: missing CLOUD_RUN_URL or DEV_LOGS_TOKEN")
+            KLog.w(TAG, "$source: missing CLOUD_RUN_URL or DEV_LOGS_TOKEN")
             return
         }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$baseUrl/oauth/google/start?token=$token")).apply {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$baseUrl$path?token=$token")).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         try {
             getApplication<Application>().startActivity(intent)
         } catch (exc: Exception) {
-            // Tablet sin navegador (poco probable) — el flujo
-            // manual sigue funcionando desde móvil/PC.
-            KLog.w(TAG, "onRenovarGoogleClick: no browser? $exc")
+            // Tablet sin navegador (poco probable) — el flujo manual
+            // sigue funcionando desde móvil/PC.
+            KLog.w(TAG, "$source: no browser? $exc")
         }
     }
 
@@ -604,16 +621,50 @@ class KiwiViewModel(application: Application) :
         viewModelScope.launch(Dispatchers.IO) {
             val result = if (wasPlaying) todoApi.spotifyPause()
                          else todoApi.spotifyResume()
-            if (result is TodoApi.SpotifyResult.Err) {
-                // Spotify rechazó el comando (sin device, premium,
-                // restriction…). Deshacer el flip optimista para que
-                // el icono refleje la realidad, y mostrar mensaje.
-                val now = _scene.value
-                if (now is Scene.NowPlaying && now.isPlaying != wasPlaying) {
-                    _scene.value = now.copy(isPlaying = wasPlaying)
-                }
+            handleSpotifyControlResult(result, wasPlaying)
+        }
+    }
+
+    /**
+     * Reglas comunes para los 3 controles (play/pause + next + previous):
+     * - ``Ok``: nada que hacer; el flip optimista ya quedó bien.
+     * - ``Err``: deshacer el flip + banner transitorio con el detail.
+     * - ``AuthExpired``: deshacer flip + marcar el snapshot como
+     *   auth-broken para que el chip "Renovar Spotify" salga en home
+     *   y el overlay grande aparezca en NowPlaying. No emitimos el
+     *   banner rojo — el overlay ya cuenta la historia y duplicar es
+     *   ruido visual.
+     */
+    private fun handleSpotifyControlResult(
+        result: TodoApi.SpotifyResult,
+        wasPlaying: Boolean,
+    ) {
+        when (result) {
+            TodoApi.SpotifyResult.Ok -> Unit
+            is TodoApi.SpotifyResult.Err -> {
+                revertPlayPauseFlip(wasPlaying)
                 emitSpotifyError(result.message)
             }
+            is TodoApi.SpotifyResult.AuthExpired -> {
+                revertPlayPauseFlip(wasPlaying)
+                markSpotifyAuthRequired()
+            }
+        }
+    }
+
+    private fun revertPlayPauseFlip(wasPlaying: Boolean) {
+        val now = _scene.value
+        if (now is Scene.NowPlaying && now.isPlaying != wasPlaying) {
+            _scene.value = now.copy(isPlaying = wasPlaying)
+        }
+    }
+
+    /** Mark Spotify-auth-broken en el snapshot local para feedback inmediato.
+     *  El próximo /api/home refleja el mismo flag desde el backend. */
+    private fun markSpotifyAuthRequired() {
+        val snap = _homeSnapshot.value ?: return
+        if (!snap.spotifyAuthRequired) {
+            _homeSnapshot.value = snap.copy(spotifyAuthRequired = true)
         }
     }
 
@@ -655,9 +706,16 @@ class KiwiViewModel(application: Application) :
         viewModelScope.launch(Dispatchers.IO) {
             val result = if (forward) todoApi.spotifyNext()
                          else todoApi.spotifyPrevious()
-            if (result is TodoApi.SpotifyResult.Err) {
-                emitSpotifyError(result.message)
-                return@launch
+            when (result) {
+                TodoApi.SpotifyResult.Ok -> Unit
+                is TodoApi.SpotifyResult.Err -> {
+                    emitSpotifyError(result.message)
+                    return@launch
+                }
+                is TodoApi.SpotifyResult.AuthExpired -> {
+                    markSpotifyAuthRequired()
+                    return@launch
+                }
             }
             delay(SPOTIFY_SKIP_REFRESH_DELAY_MS)
             refreshHomeSnapshot()
