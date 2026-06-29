@@ -45,9 +45,15 @@ SCOPES = [
     "user-modify-playback-state",
     "user-read-currently-playing",
     "user-read-recently-played",
-    # Library + content.
+    # Library + content (read).
     "user-library-read",
     "playlist-read-private",
+    # Library + content (write) — añadidos en la fase S9/S11 del
+    # rediseño del subsistema Spotify para soportar spotify_like /
+    # spotify_unlike (user-library-modify) y los carruseles "te
+    # encantan" y "tus artistas" (user-top-read).
+    "user-library-modify",
+    "user-top-read",
     # Required by the Web Playback SDK so a future fase can register
     # the tablet itself as a Spotify Connect device. Asking for it
     # now means the user only goes through OAuth consent once.
