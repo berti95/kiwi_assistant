@@ -20,11 +20,14 @@ import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.PlaylistItem
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.ShoppingItem
+import com.kiwi.assistant.ui.SpotifyDevice
+import com.kiwi.assistant.ui.SpotifyResultItem
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.UsageToolCount
 import com.kiwi.assistant.ui.VideoItem
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * High-level event surfaced to the ViewModel.
@@ -290,6 +293,7 @@ class KiwiSession(
             "video_player" -> parseVideoPlayerScene(scene)
             "browse_youtube" -> parseBrowseYouTubeScene(scene)
             "now_playing" -> parseNowPlayingScene(scene)
+            "spotify_results" -> parseSpotifyResultsScene(scene)
             "todo_list" -> parseTodoListScene(scene)
             "timer" -> parseTimerScene(scene)
             "alarm_list" -> parseAlarmListScene(scene)
@@ -449,6 +453,7 @@ class KiwiSession(
 
     private fun parseNowPlayingScene(scene: JsonObject): Scene.NowPlaying? {
         val title = scene.string("title") ?: return null
+        val device = (scene["device"] as? JsonObject)?.let(::parseSpotifyDevice)
         return Scene.NowPlaying(
             title = title,
             artist = scene.string("artist") ?: "",
@@ -460,6 +465,48 @@ class KiwiSession(
                 ?.contentOrNull?.toLongOrNull() ?: 0L,
             progressMs = (scene["progress_ms"] as? JsonPrimitive)
                 ?.contentOrNull?.toLongOrNull() ?: 0L,
+            trackUri = scene.string("track_uri"),
+            shuffle = (scene["shuffle"] as? JsonPrimitive)?.booleanOrNull ?: false,
+            repeatState = scene.string("repeat_state") ?: "off",
+            liked = (scene["liked"] as? JsonPrimitive)?.booleanOrNull,
+            device = device,
+        )
+    }
+
+    private fun parseSpotifyResultsScene(scene: JsonObject): Scene.SpotifyResults {
+        val kind = scene.string("kind") ?: "track"
+        val title = scene.string("title") ?: ""
+        val raw = scene["items"] as? JsonArray ?: emptyList()
+        val items = raw.mapNotNull { el ->
+            (el as? JsonObject)?.let(::parseSpotifyResultItem)
+        }
+        return Scene.SpotifyResults(kind = kind, title = title, items = items)
+    }
+
+    private fun parseSpotifyResultItem(obj: JsonObject): SpotifyResultItem? {
+        val uri = obj.string("uri") ?: return null
+        return SpotifyResultItem(
+            uri = uri,
+            title = obj.string("title") ?: "",
+            artist = obj.string("artist") ?: "",
+            album = obj.string("album") ?: "",
+            albumArtUrl = obj.string("album_art_url"),
+            owner = obj.string("owner") ?: "",
+            itemCount = (obj["item_count"] as? JsonPrimitive)?.intOrNull ?: 0,
+            durationMs = (obj["duration_ms"] as? JsonPrimitive)?.longOrNull ?: 0L,
+        )
+    }
+
+    private fun parseSpotifyDevice(obj: JsonObject): SpotifyDevice? {
+        val id = obj.string("id") ?: return null
+        return SpotifyDevice(
+            id = id,
+            name = obj.string("name") ?: "",
+            type = obj.string("type") ?: "",
+            isActive = (obj["is_active"] as? JsonPrimitive)?.booleanOrNull ?: false,
+            volumePercent = (obj["volume_percent"] as? JsonPrimitive)?.intOrNull,
+            supportsVolume = (obj["supports_volume"] as? JsonPrimitive)?.booleanOrNull
+                ?: false,
         )
     }
 

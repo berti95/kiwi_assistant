@@ -145,6 +145,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
 
     implementation(libs.okhttp)
+    implementation(libs.okhttp.sse)
     implementation(libs.kotlinx.serialization.json)
     // Async image loading for video / playlist thumbnails on the YouTube
     // scenes. Disk + memory caching, drop-in AsyncImage composable.

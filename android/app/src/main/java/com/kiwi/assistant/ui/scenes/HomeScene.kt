@@ -98,6 +98,7 @@ fun HomeScene(
     onOpenCalendar: () -> Unit = {},
     onOpenNowPlaying: () -> Unit = {},
     onOpenShoppingList: () -> Unit = {},
+    onOpenSpotifyHub: () -> Unit = {},
     onCheckForUpdate: () -> Unit = {},
     updateStatus: String? = null,
 ) {
@@ -174,6 +175,7 @@ fun HomeScene(
             onOpenCalendar = onOpenCalendar,
             onOpenAlarmList = onOpenAlarmList,
             onOpenUsageStats = onOpenUsageStats,
+            onOpenSpotifyHub = onOpenSpotifyHub,
             onCheckForUpdate = onCheckForUpdate,
             updateStatus = updateStatus,
             alarmsCount = alarmsCount,
@@ -199,6 +201,7 @@ private fun QuickActionsRow(
     onOpenCalendar: () -> Unit,
     onOpenAlarmList: () -> Unit,
     onOpenUsageStats: () -> Unit,
+    onOpenSpotifyHub: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
     alarmsCount: Int,
@@ -221,6 +224,11 @@ private fun QuickActionsRow(
             icon = Icons.Default.CalendarMonth,
             label = "Agenda",
             onClick = onOpenCalendar,
+        )
+        QuickActionChip(
+            icon = Icons.Default.MusicNote,
+            label = "Música",
+            onClick = onOpenSpotifyHub,
         )
         QuickActionChip(
             icon = Icons.Default.Alarm,

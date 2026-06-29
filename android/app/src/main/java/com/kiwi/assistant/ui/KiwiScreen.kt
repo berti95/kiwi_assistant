@@ -47,9 +47,14 @@ import com.kiwi.assistant.ui.scenes.AmbientHomeScene
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.HomeScene
+import com.kiwi.assistant.ui.SpotifyResultItem
 import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
 import com.kiwi.assistant.ui.scenes.ShoppingListScene
+import com.kiwi.assistant.ui.scenes.SpotifyDeviceSheet
+import com.kiwi.assistant.ui.scenes.SpotifyHubScene
+import com.kiwi.assistant.ui.scenes.SpotifyQueueSheet
+import com.kiwi.assistant.ui.scenes.SpotifyResultsScene
 import com.kiwi.assistant.ui.scenes.TimerScene
 import com.kiwi.assistant.ui.scenes.TodoListScene
 import com.kiwi.assistant.ui.scenes.UsageStatsScene
@@ -91,6 +96,11 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val canGoBack by viewModel.canGoBack.collectAsState()
     val interactionSource = remember { MutableInteractionSource() }
     val updateStatus by viewModel.updateStatus.collectAsState()
+    val spotifyPlayer by viewModel.spotifyPlayer.collectAsState()
+    val spotifyDevices by viewModel.spotifyDevices.collectAsState()
+    val spotifyDeviceSheetOpen by viewModel.spotifyDeviceSheetOpen.collectAsState()
+    val spotifyQueueSheetOpen by viewModel.spotifyQueueSheetOpen.collectAsState()
+    val spotifyQueue by viewModel.spotifyQueue.collectAsState()
     // Modo nocturno: el tablet vive en pared cerca del dormitorio.
     // Entre 22:00 y 07:00 aplicamos un overlay marrón cálido para
     // que no moleste. La transición dura 1s al cruzar el umbral.
@@ -146,9 +156,46 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onOpenCalendar = viewModel::onOpenCalendar,
                 onOpenNowPlaying = viewModel::onOpenNowPlaying,
                 onOpenShoppingList = viewModel::onOpenShoppingList,
+                onOpenSpotifyHub = viewModel::onOpenSpotifyHub,
                 onRenovarGoogle = viewModel::onRenovarGoogleClick,
                 onCheckForUpdate = viewModel::onCheckForUpdate,
                 updateStatus = updateStatus,
+                onPlayPause = viewModel::onPlayPause,
+                onNext = viewModel::onNext,
+                onPrevious = viewModel::onPrevious,
+                onSeek = viewModel::onSeek,
+                onToggleShuffle = viewModel::onToggleShuffle,
+                onCycleRepeat = viewModel::onCycleRepeat,
+                onToggleLike = viewModel::onToggleLike,
+                onOpenSpotifyDeviceSheet = viewModel::onOpenSpotifyDeviceSheet,
+                onOpenSpotifyQueueSheet = viewModel::onOpenSpotifyQueueSheet,
+                onSpotifyResultTap = viewModel::onSpotifyResultTap,
+                onSpotifyResultLongPress = viewModel::onSpotifyResultLongPress,
+                onSpotifyHubItemTap = viewModel::onSpotifyHubItemTap,
+            )
+        }
+
+        // Bottom sheets — viven al nivel del Box raíz para que se
+        // superpongan a cualquier scene activa. Solo se montan
+        // cuando están abiertos para no tener componentes ocultos
+        // con state listeners corriendo en vano.
+        if (spotifyDeviceSheetOpen) {
+            SpotifyDeviceSheet(
+                devices = spotifyDevices,
+                activeVolumePercent = spotifyPlayer?.device
+                    ?.takeIf { it.supportsVolume }?.volumePercent,
+                onDismiss = viewModel::onCloseSpotifyDeviceSheet,
+                onPick = { device ->
+                    viewModel.onSpotifyDevicePick(device)
+                    viewModel.onCloseSpotifyDeviceSheet()
+                },
+                onVolumeChange = viewModel::onSpotifyVolumeChange,
+            )
+        }
+        if (spotifyQueueSheetOpen) {
+            SpotifyQueueSheet(
+                queue = spotifyQueue,
+                onDismiss = viewModel::onCloseSpotifyQueueSheet,
             )
         }
 
@@ -375,9 +422,22 @@ private fun SceneLayer(
     onOpenCalendar: () -> Unit,
     onOpenNowPlaying: () -> Unit,
     onOpenShoppingList: () -> Unit,
+    onOpenSpotifyHub: () -> Unit,
     onRenovarGoogle: () -> Unit,
     onCheckForUpdate: () -> Unit,
     updateStatus: String?,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onToggleLike: () -> Unit,
+    onOpenSpotifyDeviceSheet: () -> Unit,
+    onOpenSpotifyQueueSheet: () -> Unit,
+    onSpotifyResultTap: (SpotifyResultItem, String) -> Unit,
+    onSpotifyResultLongPress: (SpotifyResultItem) -> Unit,
+    onSpotifyHubItemTap: (SpotifyResultItem, String) -> Unit,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -388,6 +448,7 @@ private fun SceneLayer(
             onOpenCalendar = onOpenCalendar,
             onOpenNowPlaying = onOpenNowPlaying,
             onOpenShoppingList = onOpenShoppingList,
+            onOpenSpotifyHub = onOpenSpotifyHub,
             onCheckForUpdate = onCheckForUpdate,
             updateStatus = updateStatus,
         )
@@ -397,7 +458,27 @@ private fun SceneLayer(
         is Scene.PlaylistList -> PlaylistListScene(scene)
         is Scene.VideoPlayer -> VideoPlayerScene(scene, onExit = onExitScene)
         is Scene.BrowseYouTube -> BrowseYouTubeScene(scene, onExit = onExitScene)
-        is Scene.NowPlaying -> NowPlayingScene(scene)
+        is Scene.NowPlaying -> NowPlayingScene(
+            scene = scene,
+            onPlayPause = onPlayPause,
+            onNext = onNext,
+            onPrevious = onPrevious,
+            onSeek = onSeek,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeat = onCycleRepeat,
+            onToggleLike = onToggleLike,
+            onOpenDeviceSheet = onOpenSpotifyDeviceSheet,
+            onOpenQueueSheet = onOpenSpotifyQueueSheet,
+        )
+        is Scene.SpotifyResults -> SpotifyResultsScene(
+            scene = scene,
+            onItemTap = { item -> onSpotifyResultTap(item, scene.kind) },
+            onItemLongPress = onSpotifyResultLongPress,
+        )
+        is Scene.SpotifyHub -> SpotifyHubScene(
+            scene = scene,
+            onItemTap = onSpotifyHubItemTap,
+        )
         is Scene.TodoList -> TodoListScene(scene, onTodoTap = onTodoTap)
         is Scene.Timer -> TimerScene(scene, onDismiss = onTimerDismiss)
         is Scene.AlarmList -> AlarmListScene(scene)

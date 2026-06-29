@@ -87,12 +87,17 @@ sealed interface Scene {
 
     /**
      * Lo que está sonando en Spotify ahora mismo. Carátula grande,
-     * título, artista, álbum, indicador play/pause y barra de
-     * progreso (estática — refresca al pedir "qué suena" de nuevo).
+     * título, artista, álbum, controles tappables (play/pause, next,
+     * previous, seek, shuffle, repeat, like) y barra de progreso
+     * **viva** alimentada por SSE (con tick local de interpolación
+     * entre eventos).
+     *
+     * ``trackUri`` se usa para like/unlike sin tener que pedir el
+     * snapshot de vuelta. ``device`` puede ser ``null`` si Spotify
+     * no devuelve device en el snapshot (caso muy raro).
      *
      * Renderiza para cualquier dispositivo Spotify Connect activo
-     * del usuario (móvil, PC, altavoz) — el tablet aún no es un
-     * dispositivo de Connect.
+     * del usuario (móvil, PC, altavoz, tablet).
      */
     data class NowPlaying(
         val title: String,
@@ -102,6 +107,33 @@ sealed interface Scene {
         val isPlaying: Boolean,
         val durationMs: Long,
         val progressMs: Long,
+        val trackUri: String? = null,
+        val shuffle: Boolean = false,
+        val repeatState: String = "off",  // "off" / "context" / "track"
+        val liked: Boolean? = null,        // null = unknown
+        val device: SpotifyDevice? = null,
+    ) : Scene
+
+    /**
+     * Lista de resultados de Spotify (search, library, recently played,
+     * top tracks, recommend, etc.). Un solo composable parametrizado
+     * por ``kind`` ("track" / "album" / "artist" / "playlist"). Cada
+     * row es tappable → reproduce; long-press → menú (cola/like).
+     */
+    data class SpotifyResults(
+        val kind: String,
+        val title: String,
+        val items: List<SpotifyResultItem>,
+    ) : Scene
+
+    /**
+     * Hub de música: pantalla con varios carruseles horizontales —
+     * recientes, mis playlists, hechas para ti, top tracks, top
+     * artistas. Cada sección puede estar vacía si la cuenta no
+     * tiene datos (ej. cuenta nueva sin scope user-top-read).
+     */
+    data class SpotifyHub(
+        val sections: List<SpotifyHubSection>,
     ) : Scene
 
     /**
@@ -278,4 +310,51 @@ data class CalendarEvent(
     val endsAt: String,
     val location: String?,
     val allDay: Boolean,
+)
+
+/**
+ * Una entrada genérica en [Scene.SpotifyResults]. Reusable para tracks,
+ * álbumes, artistas y playlists — el ``kind`` de la scene padre dice
+ * cómo interpretarlo.
+ *
+ * ``uri`` se usa tal cual con ``POST /api/spotify/play?uri=...``. El
+ * resto son metadatos opcionales para pintar la row (no todos los
+ * tipos los rellenan: artistas no tienen álbum, playlists no tienen
+ * artist, etc.).
+ */
+data class SpotifyResultItem(
+    val uri: String,
+    val title: String,
+    val artist: String = "",
+    val album: String = "",
+    val albumArtUrl: String? = null,
+    val owner: String = "",          // sólo playlists
+    val itemCount: Int = 0,          // sólo playlists
+    val durationMs: Long = 0L,       // sólo tracks
+)
+
+/**
+ * Una sección del [Scene.SpotifyHub] (un carrusel horizontal).
+ * ``id`` distingue de qué tipo de fuente viene para que el ViewModel
+ * decida cómo "ver más" (abre la scene de resultados completa).
+ */
+data class SpotifyHubSection(
+    val id: String,              // "recent", "mine", "featured", "top_tracks", "top_artists"
+    val title: String,
+    val kind: String,            // mismo dominio que SpotifyResults.kind
+    val items: List<SpotifyResultItem>,
+)
+
+/**
+ * Un dispositivo Spotify Connect. Espejo de lo que devuelve
+ * ``GET /api/spotify/devices`` y ``snapshot.device``.
+ */
+data class SpotifyDevice(
+    val id: String,
+    val name: String,
+    val type: String,             // "smartphone" / "computer" / "speaker" / "tablet" / ...
+    val isActive: Boolean,
+    val volumePercent: Int?,
+    val supportsVolume: Boolean,
+    val isRestricted: Boolean = false,
 )

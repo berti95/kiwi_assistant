@@ -14,6 +14,10 @@ import com.kiwi.assistant.audio.VoskKeywordListener
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.network.HomeStatePoller
 import com.kiwi.assistant.network.KiwiSessionEvent
+import com.kiwi.assistant.network.SpotifyApi
+import com.kiwi.assistant.network.SpotifyQueue
+import com.kiwi.assistant.network.SpotifyState
+import com.kiwi.assistant.network.SpotifyStateRepository
 import com.kiwi.assistant.network.TodoApi
 import com.kiwi.assistant.updater.AutoUpdater
 import com.kiwi.assistant.voice.ConversationEngine
@@ -177,6 +181,52 @@ class KiwiViewModel(application: Application) :
         baseUrl = BuildConfig.CLOUD_RUN_URL,
         devToken = BuildConfig.DEV_LOGS_TOKEN,
     )
+
+    // Cliente HTTP + repositorio reactivo del estado de Spotify.
+    // ``spotifyApi`` ofrece los POST/GET puntuales (play, pause,
+    // search, library…); ``spotifyState`` expone un StateFlow alimentado
+    // por SSE para que cualquier scene que pinte el player vea cambios
+    // en <1s sin polling.
+    private val spotifyApi = SpotifyApi(
+        baseUrl = BuildConfig.CLOUD_RUN_URL,
+        devToken = BuildConfig.DEV_LOGS_TOKEN,
+    )
+
+    private val spotifyState = SpotifyStateRepository(
+        baseUrl = BuildConfig.CLOUD_RUN_URL,
+        devToken = BuildConfig.DEV_LOGS_TOKEN,
+        api = spotifyApi,
+    ).also { it.start(viewModelScope) }
+
+    /**
+     * Reactive view of Spotify player state. ``null`` antes del
+     * primer fetch (red caída en arranque); luego se actualiza vía
+     * SSE.
+     */
+    val spotifyPlayer: StateFlow<SpotifyState?>
+        get() = spotifyState.state
+
+    /**
+     * Lista de dispositivos para el SpotifyDeviceSheet. Se llena bajo
+     * demanda — abrir el sheet la refresca; entre tanto vive en
+     * memoria pero stale es preferible a vacío.
+     */
+    private val _spotifyDevices = MutableStateFlow<List<SpotifyDevice>>(emptyList())
+    val spotifyDevices: StateFlow<List<SpotifyDevice>> =
+        _spotifyDevices.asStateFlow()
+
+    /** Cola actual; se llena cuando se abre el QueueSheet. */
+    private val _spotifyQueue =
+        MutableStateFlow<SpotifyQueue?>(null)
+    val spotifyQueue: StateFlow<SpotifyQueue?> =
+        _spotifyQueue.asStateFlow()
+
+    /** Bottom-sheet de devices visible si != null. */
+    private val _spotifyDeviceSheetOpen = MutableStateFlow(false)
+    val spotifyDeviceSheetOpen: StateFlow<Boolean> = _spotifyDeviceSheetOpen.asStateFlow()
+
+    private val _spotifyQueueSheetOpen = MutableStateFlow(false)
+    val spotifyQueueSheetOpen: StateFlow<Boolean> = _spotifyQueueSheetOpen.asStateFlow()
 
     private val alarmScheduler = AlarmScheduler(application.applicationContext)
 
@@ -521,16 +571,32 @@ class KiwiViewModel(application: Application) :
 
     /**
      * Tap en la barra "Suena ahora" del home → pantalla NowPlaying
-     * grande. Solo tiene sentido cuando ya hay música; en otro caso
-     * no se pinta la barra (no hay tap). El backend no expone HTTP
-     * para el estado completo de Spotify (es un voice tool) así que
-     * reconstruimos lo que podemos del chip: title, artist, carátula.
-     * Album / duración / progreso quedan vacíos y el composable los
-     * oculta (durationMs == 0 → sin progress bar).
+     * grande. Primero pintamos lo que tenemos en el chip (carátula +
+     * título + artista) para que la transición sea inmediata, luego
+     * el ``spotifyState`` (alimentado por SSE) se encarga de
+     * sustituirlo por el snapshot completo con duración, progreso,
+     * shuffle, repeat, etc.
      */
     fun onOpenNowPlaying() {
-        val chip = _homeSnapshot.value?.nowPlaying ?: return
-        enterScene(
+        val live = spotifyState.state.value
+        val live_track = live?.track
+        val scene = if (live != null && live_track != null) {
+            Scene.NowPlaying(
+                title = live_track.title,
+                artist = live_track.artist,
+                album = live_track.album,
+                albumArtUrl = live_track.albumArtUrl,
+                isPlaying = live.playing,
+                durationMs = live.durationMs,
+                progressMs = live.progressMs,
+                trackUri = live_track.uri,
+                shuffle = live.shuffle,
+                repeatState = live.repeatState,
+                liked = live.liked,
+                device = live.device,
+            )
+        } else {
+            val chip = _homeSnapshot.value?.nowPlaying ?: return
             Scene.NowPlaying(
                 title = chip.title,
                 artist = chip.artist,
@@ -539,8 +605,196 @@ class KiwiViewModel(application: Application) :
                 isPlaying = true,
                 durationMs = 0L,
                 progressMs = 0L,
+            )
+        }
+        enterScene(scene)
+    }
+
+    /**
+     * Abre el SpotifyHub (carruseles de biblioteca + descubrimiento).
+     * Fetch en background del paquete completo; entramos a la scene
+     * vacía para que la transición sea instantánea, luego
+     * reemplazamos cuando arriba el contenido.
+     */
+    fun onOpenSpotifyHub() {
+        enterScene(Scene.SpotifyHub(sections = emptyList()))
+        viewModelScope.launch(Dispatchers.IO) {
+            val sections = spotifyApi.fetchHub()
+            if (_scene.value is Scene.SpotifyHub) {
+                enterScene(Scene.SpotifyHub(sections = sections))
+            }
+        }
+    }
+
+    /** Tap en una row de un carrusel del Hub → reproducir + abrir NowPlaying. */
+    fun onSpotifyHubItemTap(item: SpotifyResultItem, kind: String) {
+        // Tracks individuales: play uri. Playlists / albums / artists:
+        // play context. Artistas en particular tienen su "top tracks"
+        // como contexto por defecto cuando se les pasa a /me/player/play.
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.play(uri = item.uri)
+            // Tras pulsar play, abre NowPlaying optimista — el SSE
+            // pintará el resto cuando llegue.
+        }
+        openNowPlayingOptimistic(item, kind)
+    }
+
+    /**
+     * Tap en una row de [Scene.SpotifyResults] (search / library /
+     * recommend). Mismo flow que el Hub: play + NowPlaying.
+     */
+    fun onSpotifyResultTap(item: SpotifyResultItem, kind: String) {
+        onSpotifyHubItemTap(item, kind)
+    }
+
+    /** Long-press en una row de SpotifyResults → añadir a cola. */
+    fun onSpotifyResultLongPress(item: SpotifyResultItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.addToQueue(uri = item.uri)
+        }
+    }
+
+    /**
+     * "Optimistic" play: entramos a NowPlaying con la info que
+     * tenemos del item, mientras el SSE rellena lo que falta
+     * (progresión, duración real, device, etc.).
+     */
+    private fun openNowPlayingOptimistic(
+        item: SpotifyResultItem,
+        kind: String,
+    ) {
+        enterScene(
+            Scene.NowPlaying(
+                title = item.title,
+                artist = if (kind == "artist") "" else item.artist,
+                album = item.album,
+                albumArtUrl = item.albumArtUrl,
+                isPlaying = true,
+                durationMs = item.durationMs,
+                progressMs = 0L,
+                trackUri = item.uri,
             ),
         )
+    }
+
+    // ---- NowPlayingScene callbacks (tap-to-control) -------------
+
+    fun onPlayPause() {
+        val playing = spotifyState.state.value?.playing ?: false
+        // Optimistic flip — el SSE lo confirmará en breve.
+        spotifyState.applyOptimistic { s -> s?.copy(playing = !playing) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (playing) spotifyApi.pause() else spotifyApi.resume()
+        }
+    }
+
+    fun onNext() {
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.next()
+            // Refresh manual: las pistas cambian rápido y el SSE
+            // tarda hasta 2s en el peor caso.
+            kotlinx.coroutines.delay(250)
+            spotifyState.refresh()
+        }
+    }
+
+    fun onPrevious() {
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.previous()
+            kotlinx.coroutines.delay(250)
+            spotifyState.refresh()
+        }
+    }
+
+    fun onSeek(positionMs: Long) {
+        spotifyState.applyOptimistic { s -> s?.copy(progressMs = positionMs) }
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.seek(positionMs)
+        }
+    }
+
+    fun onToggleShuffle() {
+        val next = !(spotifyState.state.value?.shuffle ?: false)
+        spotifyState.applyOptimistic { s -> s?.copy(shuffle = next) }
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.setShuffle(next)
+        }
+    }
+
+    fun onCycleRepeat() {
+        val current = spotifyState.state.value?.repeatState ?: "off"
+        val next = when (current) {
+            "off" -> "context"
+            "context" -> "track"
+            else -> "off"
+        }
+        spotifyState.applyOptimistic { s -> s?.copy(repeatState = next) }
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.setRepeat(next)
+        }
+    }
+
+    fun onToggleLike() {
+        val liked = spotifyState.state.value?.liked == true
+        spotifyState.applyOptimistic { s -> s?.copy(liked = !liked) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (liked) spotifyApi.unlike() else spotifyApi.like()
+        }
+    }
+
+    fun onOpenSpotifyDeviceSheet() {
+        _spotifyDeviceSheetOpen.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            _spotifyDevices.value = spotifyApi.fetchDevices()
+        }
+    }
+
+    fun onCloseSpotifyDeviceSheet() {
+        _spotifyDeviceSheetOpen.value = false
+    }
+
+    fun onSpotifyDevicePick(device: SpotifyDevice) {
+        viewModelScope.launch(Dispatchers.IO) {
+            spotifyApi.transferToDevice(device.id)
+            kotlinx.coroutines.delay(400)
+            spotifyState.refresh()
+            _spotifyDevices.value = spotifyApi.fetchDevices()
+        }
+    }
+
+    /**
+     * Volumen contextual: si el device activo es el tablet (o no hay
+     * device remoto), usamos AudioManager local. Si es remoto, pasamos
+     * por la API REST → Spotify Connect → device.
+     */
+    fun onSpotifyVolumeChange(percent: Int) {
+        val device = spotifyState.state.value?.device
+        if (device != null && !device.type.contains("tablet", ignoreCase = true)
+            && device.supportsVolume
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                spotifyApi.setVolume(percent)
+            }
+        } else {
+            // Local — usar AudioManager (mismo handler que set_volume).
+            applyVolume(level = percent, delta = null)
+        }
+        // Optimistic local update para que el slider responda.
+        spotifyState.applyOptimistic { s ->
+            val d = s?.device ?: return@applyOptimistic s
+            s.copy(device = d.copy(volumePercent = percent))
+        }
+    }
+
+    fun onOpenSpotifyQueueSheet() {
+        _spotifyQueueSheetOpen.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            _spotifyQueue.value = spotifyApi.fetchQueue()
+        }
+    }
+
+    fun onCloseSpotifyQueueSheet() {
+        _spotifyQueueSheetOpen.value = false
     }
 
     /**
