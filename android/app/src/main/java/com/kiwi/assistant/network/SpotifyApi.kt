@@ -6,6 +6,8 @@ import com.kiwi.assistant.ui.SpotifyHubSection
 import com.kiwi.assistant.ui.SpotifyResultItem
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -210,15 +212,17 @@ class SpotifyApi(
         return arr.mapNotNull { el -> (el as? JsonObject)?.let(::parseResultItem) }
     }
 
-    suspend fun fetchHub(): List<SpotifyHubSection> {
+    suspend fun fetchHub(): List<SpotifyHubSection> = withContext(Dispatchers.IO) {
         // 5 secciones en paralelo. Cada una tolera fallos: si una falla,
         // se omite y el hub se renderiza con las que sí cargaron.
-        return withContext(Dispatchers.IO) {
-            val recent = kotlinx.coroutines.async { fetchRecentlyPlayed(12) }
-            val mine = kotlinx.coroutines.async { fetchMyPlaylists(20) }
-            val featured = kotlinx.coroutines.async { fetchFeaturedPlaylists(12) }
-            val topTracks = kotlinx.coroutines.async { fetchTopTracks(20) }
-            val topArtists = kotlinx.coroutines.async { fetchTopArtists(20) }
+        // ``coroutineScope`` da contexto explícito de CoroutineScope
+        // para que ``async`` resuelva como extension.
+        coroutineScope {
+            val recent = async { fetchRecentlyPlayed(12) }
+            val mine = async { fetchMyPlaylists(20) }
+            val featured = async { fetchFeaturedPlaylists(12) }
+            val topTracks = async { fetchTopTracks(20) }
+            val topArtists = async { fetchTopArtists(20) }
             val sections = mutableListOf<SpotifyHubSection>()
             recent.await().takeIf { it.isNotEmpty() }?.let {
                 sections += SpotifyHubSection(
