@@ -11,7 +11,19 @@ from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from . import alarms, google_auth, log_buffer, shopping, timer, todos, tools, usage, weather
+from . import (
+    alarms,
+    google_auth,
+    log_buffer,
+    shopping,
+    spotify_service,
+    spotify_stream,
+    timer,
+    todos,
+    tools,
+    usage,
+    weather,
+)
 from .auth import is_valid_api_key
 from .session import run_session
 from .settings import settings
@@ -382,6 +394,245 @@ async def snooze_alarm(
         "fires_at_ms": updated.fires_at_ms,
         "items": alarms.to_wire(items),
     }
+
+
+# ---------- Spotify REST + SSE ---------------------------------------
+#
+# Estos endpoints sirven al tablet para controlar Spotify *sin* pasar
+# por Gemini Live. Un POST tiene <200 ms vs >1 s del round-trip por
+# tool — y no consume tokens. Todos comparten el mismo dev_token que
+# el resto de endpoints de tablet (igual de ámbito y rotación).
+#
+# La capa de business logic vive en ``spotify_service``; aquí sólo
+# traducimos errores estructurados ``{"error": "...", "status": N}``
+# a ``HTTPException``.
+
+
+def _spotify_response(payload: dict[str, object]) -> dict[str, object]:
+    """Lanza HTTPException si el service marcó error; si no, devuelve payload."""
+    if isinstance(payload, dict) and "error" in payload:
+        status = int(payload.get("status") or 502)
+        # Quita el "status" del cuerpo para no doble-exponerlo.
+        body = {k: v for k, v in payload.items() if k != "status"}
+        raise HTTPException(status_code=status, detail=body)
+    return payload
+
+
+@app.get("/api/spotify/state")
+async def spotify_state(token: str = "") -> dict[str, object]:
+    """Snapshot completo del player. Siempre 200 — el cuerpo dice si
+    hay datos disponibles vía ``available`` y/o ``playing``."""
+    _require_dev_token(token)
+    return await spotify_service.current_state()
+
+
+@app.get("/api/spotify/devices")
+async def spotify_devices(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return _spotify_response(await spotify_service.list_devices())
+
+
+@app.get("/api/spotify/search")
+async def spotify_search(
+    q: str = "", kind: str = "track", limit: int = 20, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return _spotify_response(await spotify_service.search(q, kind, limit))
+
+
+@app.post("/api/spotify/play")
+async def spotify_play(
+    uri: str = "", query: str = "", token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return _spotify_response(
+        await spotify_service.play(uri or None, query or None),
+    )
+
+
+@app.post("/api/spotify/pause")
+async def spotify_pause(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.pause()
+
+
+@app.post("/api/spotify/resume")
+async def spotify_resume(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.resume()
+
+
+@app.post("/api/spotify/next")
+async def spotify_next(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.next_track()
+
+
+@app.post("/api/spotify/previous")
+async def spotify_previous(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.previous_track()
+
+
+@app.post("/api/spotify/seek")
+async def spotify_seek(position_ms: int = 0, token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.seek(position_ms)
+
+
+@app.post("/api/spotify/shuffle")
+async def spotify_shuffle(enabled: bool = True, token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.shuffle(enabled)
+
+
+@app.post("/api/spotify/repeat")
+async def spotify_repeat(mode: str = "off", token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.repeat(mode)
+
+
+@app.post("/api/spotify/volume")
+async def spotify_volume(percent: int = 50, token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.set_volume(percent)
+
+
+@app.post("/api/spotify/transfer")
+async def spotify_transfer(
+    device_id: str = "", target: str = "", token: str = "",
+) -> dict[str, object]:
+    """Transfiere playback. Acepta ``device_id`` (exacto) O ``target``
+    (fuzzy-match contra el nombre, p.ej. 'tablet')."""
+    _require_dev_token(token)
+    if device_id:
+        return _spotify_response(await spotify_service.transfer(device_id))
+    if target:
+        return _spotify_response(await spotify_service.transfer_to_name(target))
+    raise HTTPException(status_code=400, detail="provide device_id or target")
+
+
+@app.post("/api/spotify/like")
+async def spotify_like(uri: str = "", token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.like(uri or None)
+
+
+@app.post("/api/spotify/unlike")
+async def spotify_unlike(uri: str = "", token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.unlike(uri or None)
+
+
+@app.get("/api/spotify/queue")
+async def spotify_queue(token: str = "") -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.queue()
+
+
+@app.post("/api/spotify/queue")
+async def spotify_queue_add(
+    uri: str = "", query: str = "", token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return _spotify_response(
+        await spotify_service.add_to_queue(uri or None, query or None),
+    )
+
+
+@app.get("/api/spotify/library/playlists")
+async def spotify_library_playlists(
+    limit: int = 20, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.my_playlists(limit)
+
+
+@app.get("/api/spotify/library/recently_played")
+async def spotify_library_recent(
+    limit: int = 20, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.recently_played(limit)
+
+
+@app.get("/api/spotify/library/liked")
+async def spotify_library_liked(
+    limit: int = 30, offset: int = 0, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.liked_songs(limit, offset)
+
+
+@app.get("/api/spotify/library/featured")
+async def spotify_library_featured(
+    limit: int = 12, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.featured_playlists(limit)
+
+
+@app.get("/api/spotify/library/top_tracks")
+async def spotify_library_top_tracks(
+    limit: int = 20, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.top_tracks(limit)
+
+
+@app.get("/api/spotify/library/top_artists")
+async def spotify_library_top_artists(
+    limit: int = 20, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return await spotify_service.top_artists(limit)
+
+
+@app.get("/api/spotify/playlist")
+async def spotify_playlist_tracks(
+    uri: str = "", limit: int = 50, token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    if not uri:
+        raise HTTPException(status_code=400, detail="uri required")
+    return _spotify_response(
+        await spotify_service.playlist_tracks(uri, limit),
+    )
+
+
+@app.get("/api/spotify/recommend")
+async def spotify_recommend(
+    seed_track: str = "",
+    seed_artist: str = "",
+    seed_genre: str = "",
+    mood: str = "",
+    limit: int = 20,
+    token: str = "",
+) -> dict[str, object]:
+    _require_dev_token(token)
+    return _spotify_response(
+        await spotify_service.recommend(
+            seed_track or None, seed_artist or None,
+            seed_genre or None, mood or None, limit,
+        ),
+    )
+
+
+@app.get("/api/spotify/stream")
+async def spotify_stream_endpoint(token: str = ""):
+    """SSE stream con el player state. Multiplexado por el state-pump."""
+    _require_dev_token(token)
+    from fastapi.responses import StreamingResponse
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",  # nginx (si lo hubiera) deja pasar sin buffer
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(
+        spotify_stream.event_stream(),
+        media_type="text/event-stream",
+        headers=headers,
+    )
 
 
 # ---------- Google OAuth web flow -----------------------------------

@@ -1,4 +1,21 @@
-"""Tools de Spotify: estado, búsqueda, control y transferencia entre devices."""
+"""Tools de Spotify: estado, búsqueda, control y transferencia entre devices.
+
+Este módulo contiene los **helpers de bajo nivel** (HTTP + token + DTOs +
+operaciones blocking) que el resto del sistema reutiliza. Tres familias
+de callers entran aquí:
+
+  • Las propias *Gemini tools* registradas al final del archivo.
+  • ``kiwi_backend.spotify_service`` — capa de servicio que envuelve
+    estos helpers en operaciones de negocio reusables y los expone a
+    los endpoints HTTP REST (``/api/spotify/*``) y al state-pump SSE.
+  • Tests, que hacen ``monkeypatch.setattr(tools.spotify, "...", ...)``
+    sobre los nombres concretos (``_spotify_devices_blocking``, etc.).
+
+Las funciones blocking se mantienen aquí (no se mueven al service)
+precisamente porque los tests monkeypatchean estos nombres; mover
+rompería la suite. El service importa desde aquí y deja la inversión
+de la dependencia para futuro si nos hace falta.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +32,12 @@ from .registry import SceneSink, ToolResult, register
 log = logging.getLogger(__name__)
 
 SPOTIFY_API_BASE = "https://api.spotify.com/v1"
+
+# Spotify Premium-only error body marker. Devuelto como 403 con
+# ``reason: "PREMIUM_REQUIRED"`` en el cuerpo cuando intentamos
+# operar playback con una cuenta free. Lo detectamos para dar un
+# error claro en vez del genérico "spotify api error: 403".
+_PREMIUM_REQUIRED_MARKER = "PREMIUM_REQUIRED"
 
 
 def _spotify_get(path: str, params: dict | None = None) -> dict:
@@ -38,7 +61,16 @@ def _spotify_get(path: str, params: dict | None = None) -> dict:
 
 
 def _spotify_send(method: str, path: str, json_body: dict | None = None) -> dict:
-    """PUT/POST/DELETE helper. Returns {} on 204 (Spotify's "ok empty")."""
+    """PUT/POST/DELETE helper. Returns {} on 204 (Spotify's "ok empty").
+
+    Detecta tres errores semánticamente importantes y los promueve a
+    excepciones específicas en lugar de un genérico ``HTTPError``:
+
+    * 404 con "device" en el body → :class:`SpotifyNoDeviceError`.
+    * 403 con ``PREMIUM_REQUIRED`` en el body → :class:`SpotifyPremiumRequiredError`.
+    * 429 (rate limit) → :class:`SpotifyRateLimitedError` con
+      ``retry_after`` extraído de la cabecera.
+    """
     holder = spotify_auth.token_holder()
     response = requests.request(
         method,
@@ -50,10 +82,23 @@ def _spotify_send(method: str, path: str, json_body: dict | None = None) -> dict
     if response.status_code == 204:
         return {}
     if not response.ok:
+        body_text = response.text or ""
         # Spotify-specific 404: "no active device". Surface a friendly
         # message that Gemini can relay verbatim instead of "404".
-        if response.status_code == 404 and "device" in response.text.lower():
+        if response.status_code == 404 and "device" in body_text.lower():
             raise SpotifyNoDeviceError()
+        if (
+            response.status_code == 403
+            and _PREMIUM_REQUIRED_MARKER in body_text
+        ):
+            raise SpotifyPremiumRequiredError()
+        if response.status_code == 429:
+            retry_raw = response.headers.get("Retry-After", "1")
+            try:
+                retry_after = max(1, int(retry_raw))
+            except ValueError:
+                retry_after = 1
+            raise SpotifyRateLimitedError(retry_after)
         response.raise_for_status()
     # Defensive parse: algunos endpoints de playback control devuelven
     # 200 OK con cuerpo vacío o no-JSON (visto en producción con
@@ -76,6 +121,18 @@ def _spotify_send(method: str, path: str, json_body: dict | None = None) -> dict
 
 class SpotifyNoDeviceError(RuntimeError):
     """Spotify has no active device to send the command to."""
+
+
+class SpotifyPremiumRequiredError(RuntimeError):
+    """The user's Spotify account is not Premium — playback control rejected."""
+
+
+class SpotifyRateLimitedError(RuntimeError):
+    """Spotify returned 429. ``retry_after`` is the seconds to wait."""
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(f"rate limited; retry after {retry_after}s")
+        self.retry_after = retry_after
 
 
 def _spotify_image_url(images: list[dict] | None) -> str | None:
@@ -104,10 +161,19 @@ def _spotify_track_dto(track: dict | None) -> dict[str, Any] | None:
 
 
 def _now_playing_scene(payload: dict | None, *, is_playing: bool) -> dict | None:
-    """Build the wire-format NowPlaying scene from /me/player payload."""
+    """Build the wire-format NowPlaying scene from /me/player payload.
+
+    Wire-format extendido con respecto a la V1 inicial: además del track
+    + estado de play, ahora viajan shuffle, repeat, device + volumen y
+    ``track_uri`` para que el cliente pueda pedir like / unlike sin
+    tener que llamar de vuelta. Los campos nuevos son siempre opcionales
+    en el lado cliente — versiones anteriores del tablet siguen
+    parseando lo que entienden.
+    """
     track = _spotify_track_dto(payload.get("item") if payload else None)
     if not track:
         return None
+    device = (payload or {}).get("device") or {}
     return {
         "type": "now_playing",
         "title": track["title"],
@@ -117,6 +183,77 @@ def _now_playing_scene(payload: dict | None, *, is_playing: bool) -> dict | None
         "is_playing": is_playing,
         "duration_ms": track["duration_ms"],
         "progress_ms": (payload or {}).get("progress_ms") or 0,
+        "track_uri": track["uri"],
+        "shuffle": bool((payload or {}).get("shuffle_state")),
+        "repeat_state": (payload or {}).get("repeat_state") or "off",
+        "device": {
+            "id": device.get("id"),
+            "name": device.get("name") or "",
+            "type": (device.get("type") or "").lower(),
+            "is_active": bool(device.get("is_active")),
+            "volume_percent": device.get("volume_percent"),
+            "supports_volume": bool(device.get("supports_volume")),
+        } if device else None,
+    }
+
+
+def _spotify_full_state_blocking() -> dict[str, Any]:
+    """Snapshot completo del player en formato wire (incluye ``liked``).
+
+    Diferencias con :func:`_spotify_currently_playing_blocking`:
+
+    * Siempre devuelve un dict (nunca tupla); el cliente decide cómo
+      degradar cuando ``track`` es ``None``.
+    * Resuelve ``liked`` consultando ``/me/tracks/contains`` si hay
+      track activa (una sola request adicional, ~50 ms).
+    * Incluye ``error`` con tipo + mensaje cuando algo falla, en vez
+      de devolver una respuesta sin contexto.
+    """
+    try:
+        payload = _spotify_get("/me/player")
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"available": False, "error": str(exc)}
+    except requests.HTTPError as exc:
+        return {
+            "available": False,
+            "error": f"spotify api error: {exc.response.status_code}",
+        }
+
+    if not payload:
+        return {"available": True, "playing": False, "track": None}
+
+    track = _spotify_track_dto(payload.get("item"))
+    is_playing = bool(payload.get("is_playing"))
+    liked: bool | None = None
+    if track and track["uri"]:
+        track_id = track["uri"].split(":")[-1]
+        try:
+            check = _spotify_get(
+                "/me/tracks/contains", params={"ids": track_id},
+            )
+            if isinstance(check, list) and check:
+                liked = bool(check[0])
+        except (requests.HTTPError, spotify_auth.SpotifyAuthUnavailableError):
+            # Best-effort — un fallo aquí no debe tumbar el snapshot.
+            liked = None
+    device = payload.get("device") or {}
+    return {
+        "available": True,
+        "playing": is_playing,
+        "track": track,
+        "duration_ms": (track or {}).get("duration_ms", 0),
+        "progress_ms": payload.get("progress_ms") or 0,
+        "shuffle": bool(payload.get("shuffle_state")),
+        "repeat_state": payload.get("repeat_state") or "off",
+        "liked": liked,
+        "device": {
+            "id": device.get("id"),
+            "name": device.get("name") or "",
+            "type": (device.get("type") or "").lower(),
+            "is_active": bool(device.get("is_active")),
+            "volume_percent": device.get("volume_percent"),
+            "supports_volume": bool(device.get("supports_volume")),
+        } if device else None,
     }
 
 
@@ -554,6 +691,455 @@ register(
 )
 
 
+# ---- new playback ops: seek, shuffle, repeat, volume, like -------
+
+
+def _spotify_seek_blocking(position_ms: int) -> dict:
+    """Salta a ``position_ms`` en la pista actual."""
+    try:
+        _spotify_send("PUT", f"/me/player/seek?position_ms={position_ms}")
+        return {"ok": True, "position_ms": position_ms}
+    except SpotifyNoDeviceError:
+        return {"error": "no active spotify device"}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+def _spotify_shuffle_blocking(enabled: bool) -> dict:
+    """Activa/desactiva shuffle."""
+    state = "true" if enabled else "false"
+    try:
+        _spotify_send("PUT", f"/me/player/shuffle?state={state}")
+        return {"ok": True, "shuffle": enabled}
+    except SpotifyNoDeviceError:
+        return {"error": "no active spotify device"}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+_VALID_REPEAT_STATES = {"off", "context", "track"}
+
+
+def _spotify_repeat_blocking(state: str) -> dict:
+    """Pone repeat en ``off`` | ``context`` (playlist/álbum) | ``track``."""
+    state = state.lower()
+    if state not in _VALID_REPEAT_STATES:
+        return {"error": f"invalid repeat state {state!r}"}
+    try:
+        _spotify_send("PUT", f"/me/player/repeat?state={state}")
+        return {"ok": True, "repeat_state": state}
+    except SpotifyNoDeviceError:
+        return {"error": "no active spotify device"}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+def _spotify_volume_blocking(volume_percent: int) -> dict:
+    """Ajusta el volumen del *device activo* (0-100)."""
+    volume_percent = max(0, min(100, int(volume_percent)))
+    try:
+        _spotify_send("PUT", f"/me/player/volume?volume_percent={volume_percent}")
+        return {"ok": True, "volume_percent": volume_percent}
+    except SpotifyNoDeviceError:
+        return {"error": "no active spotify device"}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+def _track_id_from_uri(uri: str) -> str | None:
+    if not uri or not uri.startswith("spotify:track:"):
+        return None
+    return uri.split(":")[-1]
+
+
+def _spotify_like_blocking(track_uri: str | None) -> dict:
+    """Añade ``track_uri`` (o la pista activa) a Liked Songs."""
+    if not track_uri:
+        snapshot = _spotify_full_state_blocking()
+        track_uri = ((snapshot.get("track") or {}).get("uri")) or ""
+    track_id = _track_id_from_uri(track_uri)
+    if not track_id:
+        return {"error": "could not resolve a track uri to like"}
+    try:
+        _spotify_send("PUT", f"/me/tracks?ids={track_id}")
+        return {"ok": True, "liked": True, "track_id": track_id}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+def _spotify_unlike_blocking(track_uri: str | None) -> dict:
+    """Quita ``track_uri`` (o la pista activa) de Liked Songs."""
+    if not track_uri:
+        snapshot = _spotify_full_state_blocking()
+        track_uri = ((snapshot.get("track") or {}).get("uri")) or ""
+    track_id = _track_id_from_uri(track_uri)
+    if not track_id:
+        return {"error": "could not resolve a track uri to unlike"}
+    try:
+        _spotify_send("DELETE", f"/me/tracks?ids={track_id}")
+        return {"ok": True, "liked": False, "track_id": track_id}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+# ---- queue --------------------------------------------------------
+
+
+def _spotify_queue_blocking() -> dict:
+    """Devuelve la cola actual: pista en curso + siguientes."""
+    try:
+        payload = _spotify_get("/me/player/queue")
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    current = _spotify_track_dto(payload.get("currently_playing"))
+    queue = [
+        _spotify_track_dto(t) or {} for t in payload.get("queue") or []
+    ]
+    return {
+        "currently_playing": current,
+        "queue": queue,
+        "count": len(queue),
+    }
+
+
+def _spotify_add_to_queue_blocking(uri: str) -> dict:
+    """Añade ``uri`` (track) al final de la cola del device activo."""
+    if not uri or not uri.startswith("spotify:track:"):
+        return {"error": f"invalid track uri {uri!r}"}
+    try:
+        _spotify_send("POST", f"/me/player/queue?uri={uri}")
+        return {"ok": True, "queued": uri}
+    except SpotifyNoDeviceError:
+        return {"error": "no active spotify device"}
+    except SpotifyPremiumRequiredError:
+        return {"error": "spotify premium required"}
+    except SpotifyRateLimitedError as exc:
+        return {"error": "rate limited", "retry_after": exc.retry_after}
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+
+# ---- library (read) -----------------------------------------------
+
+
+def _playlist_summary_dto(p: dict) -> dict:
+    return {
+        "uri": p.get("uri"),
+        "title": p.get("name") or "",
+        "owner": (p.get("owner") or {}).get("display_name") or "",
+        "album_art_url": _spotify_image_url(p.get("images")),
+        "item_count": (p.get("tracks") or {}).get("total") or 0,
+    }
+
+
+def _album_summary_dto(a: dict) -> dict:
+    return {
+        "uri": a.get("uri"),
+        "title": a.get("name") or "",
+        "artist": ", ".join(
+            x.get("name", "") for x in a.get("artists") or []
+        ),
+        "album_art_url": _spotify_image_url(a.get("images")),
+    }
+
+
+def _artist_summary_dto(a: dict) -> dict:
+    return {
+        "uri": a.get("uri"),
+        "title": a.get("name") or "",
+        "album_art_url": _spotify_image_url(a.get("images")),
+        "genres": a.get("genres") or [],
+    }
+
+
+def _spotify_my_playlists_blocking(limit: int = 20) -> dict:
+    limit = max(1, min(limit, 50))
+    try:
+        payload = _spotify_get("/me/playlists", params={"limit": limit})
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = [
+        _playlist_summary_dto(p) for p in payload.get("items") or [] if p
+    ]
+    return {"count": len(items), "items": items}
+
+
+def _spotify_recently_played_blocking(limit: int = 20) -> dict:
+    limit = max(1, min(limit, 50))
+    try:
+        payload = _spotify_get(
+            "/me/player/recently-played", params={"limit": limit},
+        )
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = []
+    seen_uris: set[str] = set()
+    for entry in payload.get("items") or []:
+        track = _spotify_track_dto(entry.get("track"))
+        if not track:
+            continue
+        uri = track.get("uri") or ""
+        if uri in seen_uris:  # dedup — Spotify repite tracks recientes
+            continue
+        seen_uris.add(uri)
+        track["played_at"] = entry.get("played_at")
+        items.append(track)
+    return {"count": len(items), "items": items}
+
+
+def _spotify_liked_songs_blocking(limit: int = 20, offset: int = 0) -> dict:
+    limit = max(1, min(limit, 50))
+    offset = max(0, offset)
+    try:
+        payload = _spotify_get(
+            "/me/tracks", params={"limit": limit, "offset": offset},
+        )
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = []
+    for entry in payload.get("items") or []:
+        track = _spotify_track_dto(entry.get("track"))
+        if track:
+            track["added_at"] = entry.get("added_at")
+            items.append(track)
+    return {
+        "count": len(items),
+        "total": payload.get("total") or len(items),
+        "offset": offset,
+        "items": items,
+    }
+
+
+def _spotify_featured_playlists_blocking(limit: int = 12) -> dict:
+    """Playlists destacadas globalmente (Daily Mix, Discover Weekly se
+    resuelven aquí cuando aparecen en la cuenta del usuario).
+
+    Spotify deprecó en 2024 el endpoint ``/browse/featured-playlists``
+    para apps nuevas — sigue funcionando para apps con consumo previo
+    pero puede devolver 404. Si falla, intentamos un fallback a
+    ``/me/playlists`` para no dejar la sección vacía.
+    """
+    limit = max(1, min(limit, 50))
+    try:
+        payload = _spotify_get(
+            "/browse/featured-playlists",
+            params={"limit": limit, "country": "ES"},
+        )
+        items = [
+            _playlist_summary_dto(p)
+            for p in ((payload.get("playlists") or {}).get("items") or [])
+            if p
+        ]
+        if items:
+            return {
+                "count": len(items),
+                "message": payload.get("message") or "",
+                "items": items,
+            }
+    except requests.HTTPError as exc:
+        if exc.response.status_code not in (403, 404):
+            return {"error": f"spotify api error: {exc.response.status_code}"}
+        # Fall through to fallback.
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    # Fallback: usa las playlists propias del usuario como sección
+    # "Hechas para ti" pobre. No es lo mismo pero al menos no queda
+    # vacío.
+    return _spotify_my_playlists_blocking(limit=limit)
+
+
+def _spotify_top_tracks_blocking(limit: int = 20) -> dict:
+    limit = max(1, min(limit, 50))
+    try:
+        payload = _spotify_get(
+            "/me/top/tracks",
+            params={"limit": limit, "time_range": "medium_term"},
+        )
+    except requests.HTTPError as exc:
+        if exc.response.status_code == 403:
+            return {"error": "spotify scope missing: user-top-read"}
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = [
+        _spotify_track_dto(t) or {} for t in payload.get("items") or []
+    ]
+    return {"count": len(items), "items": items}
+
+
+def _spotify_top_artists_blocking(limit: int = 20) -> dict:
+    limit = max(1, min(limit, 50))
+    try:
+        payload = _spotify_get(
+            "/me/top/artists",
+            params={"limit": limit, "time_range": "medium_term"},
+        )
+    except requests.HTTPError as exc:
+        if exc.response.status_code == 403:
+            return {"error": "spotify scope missing: user-top-read"}
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = [
+        _artist_summary_dto(a) for a in payload.get("items") or []
+    ]
+    return {"count": len(items), "items": items}
+
+
+def _spotify_playlist_tracks_blocking(playlist_uri: str, limit: int = 50) -> dict:
+    """Lista los tracks de ``playlist_uri`` (acepta URI completa o ID)."""
+    playlist_id = playlist_uri.split(":")[-1] if playlist_uri else ""
+    if not playlist_id:
+        return {"error": "missing playlist uri"}
+    limit = max(1, min(limit, 100))
+    try:
+        meta = _spotify_get(f"/playlists/{playlist_id}")
+        tracks_payload = _spotify_get(
+            f"/playlists/{playlist_id}/tracks",
+            params={"limit": limit, "market": "ES"},
+        )
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    items = []
+    for entry in tracks_payload.get("items") or []:
+        track = _spotify_track_dto(entry.get("track"))
+        if track:
+            items.append(track)
+    return {
+        "uri": meta.get("uri"),
+        "title": meta.get("name") or "",
+        "owner": (meta.get("owner") or {}).get("display_name") or "",
+        "album_art_url": _spotify_image_url(meta.get("images")),
+        "count": len(items),
+        "items": items,
+    }
+
+
+# ---- recommendations ---------------------------------------------
+
+
+# Mapeo mood → target audio features. Valores derivados de las
+# recommendations propias de Spotify; ver
+# https://developer.spotify.com/documentation/web-api/reference/get-recommendations.
+_MOOD_PROFILES: dict[str, dict[str, float]] = {
+    "chill":     {"target_energy": 0.35, "target_valence": 0.55, "target_acousticness": 0.6},
+    "energetic": {"target_energy": 0.85, "target_valence": 0.75, "target_danceability": 0.7},
+    "focus":     {"target_energy": 0.40, "target_valence": 0.45, "target_instrumentalness": 0.6, "target_speechiness": 0.1},
+    "party":     {"target_energy": 0.90, "target_valence": 0.80, "target_danceability": 0.85, "target_loudness": -5.0},
+    "sleep":     {"target_energy": 0.20, "target_valence": 0.40, "target_acousticness": 0.85, "target_instrumentalness": 0.7},
+    "happy":     {"target_energy": 0.70, "target_valence": 0.90},
+    "sad":       {"target_energy": 0.30, "target_valence": 0.20, "target_acousticness": 0.65},
+}
+
+
+def _spotify_recommend_blocking(
+    seed_track: str | None = None,
+    seed_artist: str | None = None,
+    seed_genre: str | None = None,
+    mood: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Devuelve recomendaciones basadas en seed(s) + perfil de mood.
+
+    Reglas:
+
+    * Hay que pasar al menos UNA semilla (track / artist / genre).
+    * Si ``mood`` está en :data:`_MOOD_PROFILES`, mezcla sus targets.
+    * Devuelve también ``seed_summary`` para que el caller pueda
+      mostrar qué semillas usó al usuario sin recalcularlas.
+    """
+    params: dict[str, Any] = {"limit": max(1, min(limit, 50)), "market": "ES"}
+    seeds: list[str] = []
+    if seed_track:
+        sid = _track_id_from_uri(seed_track) or seed_track
+        params["seed_tracks"] = sid
+        seeds.append(f"track:{sid}")
+    if seed_artist:
+        aid = seed_artist.split(":")[-1] if seed_artist.startswith("spotify:artist:") else seed_artist
+        params["seed_artists"] = aid
+        seeds.append(f"artist:{aid}")
+    if seed_genre:
+        params["seed_genres"] = seed_genre
+        seeds.append(f"genre:{seed_genre}")
+    if not seeds:
+        return {"error": "supply at least one seed (track/artist/genre)"}
+    if mood:
+        profile = _MOOD_PROFILES.get(mood.lower())
+        if profile is None:
+            return {
+                "error": (
+                    f"unknown mood {mood!r}. valid: "
+                    f"{sorted(_MOOD_PROFILES.keys())}"
+                ),
+            }
+        params.update(profile)
+
+    try:
+        payload = _spotify_get("/recommendations", params=params)
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+
+    items = [
+        _spotify_track_dto(t) or {} for t in payload.get("tracks") or []
+    ]
+    return {
+        "count": len(items),
+        "seeds": seeds,
+        "mood": mood,
+        "items": items,
+    }
+
+
 # ---- spotify connect: transfer between devices ---------------------
 
 
@@ -699,4 +1285,483 @@ register(
         required=["target"],
     ),
     handler=_spotify_transfer_to,
+)
+
+
+# ---- voice tools: shuffle / repeat / seek / like / queue / library
+
+
+async def _spotify_shuffle_tool(enabled: bool) -> dict:
+    return await asyncio.to_thread(_spotify_shuffle_blocking, enabled)
+
+
+async def _spotify_repeat_tool(mode: str) -> dict:
+    return await asyncio.to_thread(_spotify_repeat_blocking, mode)
+
+
+async def _spotify_seek_tool(position_ms: int) -> dict:
+    return await asyncio.to_thread(
+        _spotify_seek_blocking, max(0, int(position_ms)),
+    )
+
+
+async def _spotify_like_tool() -> dict:
+    return await asyncio.to_thread(_spotify_like_blocking, None)
+
+
+async def _spotify_unlike_tool() -> dict:
+    return await asyncio.to_thread(_spotify_unlike_blocking, None)
+
+
+async def _spotify_add_to_queue_tool(
+    uri: str | None = None, query: str | None = None,
+) -> dict:
+    target_uri = uri
+    if not target_uri and query:
+        match = await asyncio.to_thread(_try_resolve_first_track, query)
+        if not match:
+            return {"error": f"no spotify track found for {query!r}"}
+        target_uri = match.get("uri")
+    if not target_uri:
+        return {"error": "supply either uri or query"}
+    return await asyncio.to_thread(_spotify_add_to_queue_blocking, target_uri)
+
+
+async def _spotify_view_queue_tool() -> dict:
+    return await asyncio.to_thread(_spotify_queue_blocking)
+
+
+async def _spotify_my_playlists_tool(max_results: int = 20) -> ToolResult:
+    result = await asyncio.to_thread(_spotify_my_playlists_blocking, max_results)
+    scene = _spotify_results_scene("playlist", "Tus playlists", result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_recently_played_tool(max_results: int = 20) -> ToolResult:
+    result = await asyncio.to_thread(_spotify_recently_played_blocking, max_results)
+    scene = _spotify_results_scene("track", "Escuchado recientemente", result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_liked_songs_tool(max_results: int = 30) -> ToolResult:
+    result = await asyncio.to_thread(
+        _spotify_liked_songs_blocking, max_results, 0,
+    )
+    scene = _spotify_results_scene("track", "Tus canciones favoritas", result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_featured_playlists_tool(max_results: int = 12) -> ToolResult:
+    result = await asyncio.to_thread(
+        _spotify_featured_playlists_blocking, max_results,
+    )
+    scene = _spotify_results_scene(
+        "playlist", result.get("message") or "Hechas para ti", result,
+    )
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_top_tracks_tool(max_results: int = 20) -> ToolResult:
+    result = await asyncio.to_thread(_spotify_top_tracks_blocking, max_results)
+    scene = _spotify_results_scene("track", "Te encantan", result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_top_artists_tool(max_results: int = 20) -> ToolResult:
+    result = await asyncio.to_thread(_spotify_top_artists_blocking, max_results)
+    scene = _spotify_results_scene("artist", "Tus artistas", result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_recommend_tool(
+    seed_track: str | None = None,
+    seed_artist: str | None = None,
+    seed_genre: str | None = None,
+    mood: str | None = None,
+    max_results: int = 20,
+) -> ToolResult:
+    # Sin semilla pero con mood "chill"/"focus"/etc: usa la pista en
+    # curso como track-seed si la hay. Si no hay nada activo y nada
+    # explícito, seed_genre por defecto al primer género del top artist.
+    if not seed_track and not seed_artist and not seed_genre:
+        snapshot = await asyncio.to_thread(_spotify_full_state_blocking)
+        active_uri = ((snapshot.get("track") or {}).get("uri")) or ""
+        if active_uri.startswith("spotify:track:"):
+            seed_track = active_uri
+    result = await asyncio.to_thread(
+        _spotify_recommend_blocking,
+        seed_track, seed_artist, seed_genre, mood, max_results,
+    )
+    if "error" in result:
+        return ToolResult(response=result)
+    label = (
+        f"Recomendaciones · {mood}" if mood else "Recomendaciones"
+    )
+    scene = _spotify_results_scene("track", label, result)
+    return ToolResult(response=result, scene=scene)
+
+
+async def _spotify_play_mix_tool(name: str) -> ToolResult:
+    """Resuelve fuzzy ``name`` contra las playlists del usuario + las
+    "Made for You" / featured y reproduce la primera que case.
+
+    Útil para "Kiwi, pon mi Daily Mix 2" sin que el usuario tenga
+    que recordar la URI exacta. Si nada casa, devuelve error con
+    la lista de mixes disponibles.
+    """
+    if not name or not name.strip():
+        return ToolResult(response={"error": "missing mix name"})
+    mine = await asyncio.to_thread(_spotify_my_playlists_blocking, 50)
+    featured = await asyncio.to_thread(_spotify_featured_playlists_blocking, 50)
+    candidates: list[dict] = []
+    candidates.extend(mine.get("items") or [])
+    for p in featured.get("items") or []:
+        if not any(c.get("uri") == p.get("uri") for c in candidates):
+            candidates.append(p)
+    if not candidates:
+        return ToolResult(response={"error": "no playlists found"})
+    from .. import state_store
+    matched = state_store.fuzzy_match_one(
+        candidates, name, key=lambda p: p.get("title") or "",
+    )
+    if matched is None:
+        titles = [p.get("title") or "?" for p in candidates[:10]]
+        return ToolResult(response={
+            "error": f"no mix matched {name!r}. available: {titles}",
+        })
+    response, scene = await asyncio.to_thread(
+        _spotify_play_blocking, matched.get("uri"), None, None,
+    )
+    response = {**response, "mix_title": matched.get("title")}
+    return ToolResult(response=response, scene=scene)
+
+
+def _spotify_results_scene(
+    kind: str, title: str, payload: dict[str, Any],
+) -> dict | None:
+    """Construye una scene ``spotify_results`` con los items.
+
+    Devuelve ``None`` si el payload trae ``error`` o no hay items —
+    el caller decide cómo informar (típicamente: voice-only).
+    """
+    if "error" in payload:
+        return None
+    items = payload.get("items") or []
+    if not items:
+        return None
+    return {
+        "type": "spotify_results",
+        "kind": kind,
+        "title": title,
+        "count": len(items),
+        "items": items,
+    }
+
+
+register(
+    name="spotify_shuffle",
+    description=(
+        "Activa o desactiva el modo aleatorio en Spotify. Llama "
+        "cuando el usuario diga 'aleatorio sí/no', 'shuffle on/off', "
+        "'mezcla esto', 'sin mezclar'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "enabled": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="true para activar shuffle, false para desactivarlo.",
+            ),
+        },
+        required=["enabled"],
+    ),
+    handler=_spotify_shuffle_tool,
+)
+
+
+register(
+    name="spotify_repeat",
+    description=(
+        "Configura el modo de repetición de Spotify: 'off' (sin repe), "
+        "'context' (repite playlist/álbum) o 'track' (repite la canción "
+        "actual). Llama cuando el usuario diga 'repite esto / esta', "
+        "'pon en bucle', 'no repitas', etc."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "mode": types.Schema(
+                type=types.Type.STRING,
+                description="'off' / 'context' / 'track'.",
+            ),
+        },
+        required=["mode"],
+    ),
+    handler=_spotify_repeat_tool,
+)
+
+
+register(
+    name="spotify_seek",
+    description=(
+        "Salta a una posición concreta de la pista actual. Llama "
+        "cuando el usuario diga 'salta al minuto 2', 'vuelve al "
+        "principio', 'al final', etc. ``position_ms`` es absoluto "
+        "desde el inicio (1 minuto = 60000)."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "position_ms": types.Schema(
+                type=types.Type.INTEGER,
+                description="Posición absoluta en milisegundos.",
+            ),
+        },
+        required=["position_ms"],
+    ),
+    handler=_spotify_seek_tool,
+)
+
+
+register(
+    name="spotify_like",
+    description=(
+        "Añade la canción que suena ahora a 'Canciones que te gustan'. "
+        "Llama cuando el usuario diga 'me gusta esta', 'guárdala', "
+        "'añádela a favoritos', 'corazón a esta'."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_like_tool,
+)
+
+
+register(
+    name="spotify_unlike",
+    description=(
+        "Quita la canción que suena ahora de 'Canciones que te gustan'. "
+        "Llama cuando el usuario diga 'quítala de favoritos', 'ya no "
+        "me gusta', 'no era favorita'."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_unlike_tool,
+)
+
+
+register(
+    name="spotify_add_to_queue",
+    description=(
+        "Añade una canción al final de la cola de Spotify. Pasa 'uri' "
+        "(spotify:track:...) cuando lo tengas de un spotify_search, o "
+        "'query' (texto libre) si el usuario describe la canción. "
+        "Llama cuando diga 'encola X', 'añade a la cola Y', 'pon "
+        "después esta'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "uri": types.Schema(
+                type=types.Type.STRING,
+                description="URI de track (spotify:track:...).",
+            ),
+            "query": types.Schema(
+                type=types.Type.STRING,
+                description="Texto libre para resolver la pista a encolar.",
+            ),
+        },
+    ),
+    handler=_spotify_add_to_queue_tool,
+)
+
+
+register(
+    name="spotify_view_queue",
+    description=(
+        "Devuelve la cola actual de Spotify (pista en curso + las "
+        "siguientes). Útil cuando el usuario diga '¿qué viene "
+        "después?', 'cola', 'qué hay en la cola'."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_spotify_view_queue_tool,
+)
+
+
+register(
+    name="spotify_my_playlists",
+    description=(
+        "Lista las playlists del usuario en Spotify (las suyas + las "
+        "que sigue). Empuja la lista a la pantalla. Llama cuando el "
+        "usuario diga 'mis playlists', 'lista de listas', 'enséñame "
+        "mis listas'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo de playlists (1-50, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_spotify_my_playlists_tool,
+)
+
+
+register(
+    name="spotify_recently_played",
+    description=(
+        "Lista las pistas escuchadas recientemente (deduplicadas). "
+        "Llama cuando el usuario diga 'qué he escuchado', 'reciente', "
+        "'cosas que sonaron ayer'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo de pistas (1-50, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_spotify_recently_played_tool,
+)
+
+
+register(
+    name="spotify_liked_songs",
+    description=(
+        "Lista las pistas marcadas como favoritas ('Canciones que te "
+        "gustan'). Llama cuando el usuario diga 'mis favoritas', 'mis "
+        "likes', 'mis canciones guardadas'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo de pistas (1-50, por defecto 30).",
+            ),
+        },
+    ),
+    handler=_spotify_liked_songs_tool,
+)
+
+
+register(
+    name="spotify_featured_playlists",
+    description=(
+        "Playlists destacadas y curadas (Daily Mix, Discover Weekly y "
+        "similares). Llama cuando el usuario diga 'hechas para mí', "
+        "'sugerencias', 'recomendado'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo (1-50, por defecto 12).",
+            ),
+        },
+    ),
+    handler=_spotify_featured_playlists_tool,
+)
+
+
+register(
+    name="spotify_top_tracks",
+    description=(
+        "Las pistas más escuchadas del usuario (últimos ~6 meses). "
+        "Llama cuando diga 'lo que más escucho', 'top canciones', "
+        "'mis tops'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo (1-50, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_spotify_top_tracks_tool,
+)
+
+
+register(
+    name="spotify_top_artists",
+    description=(
+        "Los artistas más escuchados del usuario (últimos ~6 meses). "
+        "Llama cuando diga 'mis artistas favoritos', 'top artistas', "
+        "'a quién escucho más'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo (1-50, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_spotify_top_artists_tool,
+)
+
+
+register(
+    name="spotify_recommend",
+    description=(
+        "Genera recomendaciones musicales basadas en semillas y/o un "
+        "estado de ánimo. Útil para 'pon música chill', 'algo "
+        "parecido a esto' (sin seed usa la pista activa como track), "
+        "'recomiéndame algo de Aitana' (con seed_artist), 'pon flamenco' "
+        "(con seed_genre). Moods válidos: chill, energetic, focus, "
+        "party, sleep, happy, sad."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "seed_track": types.Schema(
+                type=types.Type.STRING,
+                description="URI o ID de track de partida.",
+            ),
+            "seed_artist": types.Schema(
+                type=types.Type.STRING,
+                description="URI o ID de artista de partida.",
+            ),
+            "seed_genre": types.Schema(
+                type=types.Type.STRING,
+                description="Género: 'pop' / 'flamenco' / 'electronic' …",
+            ),
+            "mood": types.Schema(
+                type=types.Type.STRING,
+                description="chill / energetic / focus / party / sleep / happy / sad.",
+            ),
+            "max_results": types.Schema(
+                type=types.Type.INTEGER,
+                description="Máximo (1-50, por defecto 20).",
+            ),
+        },
+    ),
+    handler=_spotify_recommend_tool,
+)
+
+
+register(
+    name="spotify_play_mix",
+    description=(
+        "Reproduce una playlist resuelta por nombre (fuzzy match contra "
+        "tus playlists + las 'Hechas para ti'). Llama cuando el "
+        "usuario diga 'pon mi Daily Mix 2', 'pon la de Discover "
+        "Weekly', 'reproduce la lista de chill'."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "name": types.Schema(
+                type=types.Type.STRING,
+                description="Nombre aproximado del mix / playlist.",
+            ),
+        },
+        required=["name"],
+    ),
+    handler=_spotify_play_mix_tool,
 )
