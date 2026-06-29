@@ -22,7 +22,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 
 /**
- * REST client for the ``/api/spotify/*`` endpoints.
+ * REST client for the ``/api/spotify/...`` endpoints.
  *
  * Espejo de [com.kiwi.assistant.network.TodoApi] pero para Spotify:
  *  - Cada función es ``suspend`` y devuelve un DTO Kotlin o ``null``

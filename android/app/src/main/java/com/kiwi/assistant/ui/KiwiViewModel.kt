@@ -391,6 +391,8 @@ class KiwiViewModel(application: Application) :
         is Scene.AlarmList,
         is Scene.ShoppingList,
         is Scene.UsageStats,
+        is Scene.SpotifyResults,
+        is Scene.SpotifyHub,
         -> true
         is Scene.VideoPlayer,
         is Scene.BrowseYouTube,
