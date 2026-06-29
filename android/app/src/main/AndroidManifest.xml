@@ -77,6 +77,27 @@
             android:foregroundServiceType="microphone" />
 
         <!--
+          MediaSessionMonitor: NotificationListenerService que escucha
+          sesiones de medios del sistema (Spotify, YouTube, podcasts,
+          cualquier app con MediaSession). El gating real es el permiso
+          de Acceso a Notificaciones que el usuario concede una vez en
+          Ajustes; ese mismo permiso desbloquea MediaSessionManager.
+          getActiveSessions, que es la API pública para controlar
+          reproductores ajenos. Sin esto sólo podríamos enviar media
+          keys "a ciegas" — con esto vemos qué suena y mandamos a la
+          sesión correcta directamente.
+        -->
+        <service
+            android:name=".service.MediaSessionMonitor"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!--
           AccessibilityService para pulsar botones de YouTube por voz
           (ui_click: Me gusta, Saltar anuncio, Suscribirse, etc.). El
           usuario lo habilita a mano en Ajustes → Accesibilidad → Kiwi.

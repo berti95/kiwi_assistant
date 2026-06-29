@@ -58,7 +58,9 @@ import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.theme.KiwiOpacity
 import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
+import com.kiwi.assistant.ui.theme.rememberAlbumDominantColor
 import com.kiwi.assistant.ui.theme.spotifyGreen
+import androidx.compose.ui.graphics.Brush
 
 /**
  * Spotify NowPlaying card — V2 interactiva.
@@ -88,10 +90,19 @@ fun NowPlayingScene(
     onOpenDeviceSheet: () -> Unit = {},
     onOpenQueueSheet: () -> Unit = {},
 ) {
+    // Fondo de gradiente con el color dominante de la carátula.
+    // Cae al negro plano si la imagen aún no ha cargado o no hay url.
+    val accent = rememberAlbumDominantColor(scene.albumArtUrl)
+    val gradient = Brush.verticalGradient(
+        colors = listOf(
+            accent.copy(alpha = 0.55f),
+            Color.Black,
+        ),
+    )
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(gradient)
             .padding(horizontal = KiwiSpacing.xxl, vertical = KiwiSpacing.huge),
     ) {
         Column(

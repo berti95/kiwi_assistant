@@ -265,6 +265,59 @@ def _now_line() -> str:
     )
 
 
+def _spotify_context_line() -> str:
+    """Contexto del player Spotify embebido en el system prompt cada turno.
+
+    Una sola línea con qué pista suena, en qué device, con qué shuffle/
+    repeat. Esto le permite a Gemini interpretar referencias como "otra
+    del mismo álbum", "pon esto en el salón", "más como esta", "sáltate
+    esta y la siguiente", sin llamar primero a ``spotify_currently_playing``.
+
+    Best-effort: cualquier fallo (no creds, red, etc.) devuelve cadena
+    vacía y Gemini sigue funcionando como antes.
+    """
+    try:
+        from . import spotify_service  # local import — circular si no
+        import asyncio
+        # spotify_service.current_state es async; este builder se llama
+        # desde código sync. asyncio.run dentro de un loop en ejecución
+        # explotaría, así que usamos el blocking helper directo.
+        from .tools import spotify as t
+        snapshot = t._spotify_full_state_blocking()
+    except Exception:  # noqa: BLE001
+        return ""
+    if not snapshot or not snapshot.get("available") or not snapshot.get("playing"):
+        return ""
+    track = snapshot.get("track") or {}
+    title = track.get("title") or ""
+    artist = track.get("artist") or ""
+    album = track.get("album") or ""
+    uri = track.get("uri") or ""
+    device = snapshot.get("device") or {}
+    device_name = device.get("name") or ""
+    shuffle = "sí" if snapshot.get("shuffle") else "no"
+    repeat = snapshot.get("repeat_state") or "off"
+    parts = [
+        "Spotify ahora mismo:",
+        f"pista «{title}»" if title else "pista desconocida",
+        f"de {artist}" if artist else "",
+        f"del álbum «{album}»" if album else "",
+        f"sonando en «{device_name}»" if device_name else "",
+        f"shuffle {shuffle}",
+        f"repeat {repeat}",
+    ]
+    line = " ".join(p for p in parts if p).strip()
+    extras = [
+        "Cuando el usuario diga 'esto', 'esta', 'la actual' o referencias "
+        "similares, refiérete a esta pista. Para 'otra del mismo álbum' "
+        "usa spotify_play con el URI del álbum. Para 'más como esta' usa "
+        "spotify_recommend sin semilla — usará la pista actual.",
+    ]
+    if uri:
+        extras.append(f"URI de la pista actual: {uri}.")
+    return line + " " + " ".join(extras)
+
+
 def _build_config(
     settings: Settings,
     history: list[dict[str, str]],
@@ -272,20 +325,25 @@ def _build_config(
     """Build a per-turn LiveConnectConfig with the prior turns inlined."""
     base_prompt = settings.gemini_system_prompt
     now_line = _now_line()
+    spotify_line = _spotify_context_line()
+    context_lines = [now_line]
+    if spotify_line:
+        context_lines.append(spotify_line)
+    context_block = "\n\n".join(context_lines)
     if history:
         formatted = "\n\n".join(
             f"Usuario: {h['user']}\nKiwi: {h['kiwi']}" for h in history
         )
         system_text = (
             f"{base_prompt}\n\n"
-            f"{now_line}\n\n"
+            f"{context_block}\n\n"
             f"Hasta ahora la conversación con el usuario en esta misma "
             f"sesión ha sido:\n\n{formatted}\n\n"
             f"Continúa la conversación con coherencia, recordando lo "
             f"anterior, sin saludarle de nuevo ni presentarte otra vez."
         )
     else:
-        system_text = f"{base_prompt}\n\n{now_line}"
+        system_text = f"{base_prompt}\n\n{context_block}"
 
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],

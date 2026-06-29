@@ -627,6 +627,211 @@ def test_play_mix_fuzzy_resolves_playlist(monkeypatch: pytest.MonkeyPatch) -> No
     assert result["mix_title"] == "Daily Mix 2"
 
 
+def test_spotify_context_line_includes_active_track(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        t, "_spotify_full_state_blocking",
+        lambda: {
+            "available": True, "playing": True,
+            "track": {
+                "uri": "spotify:track:abc",
+                "title": "Heroes",
+                "artist": "David Bowie",
+                "album": "Heroes",
+            },
+            "device": {"name": "Sonos Salón"},
+            "shuffle": True,
+            "repeat_state": "context",
+        },
+    )
+    from kiwi_backend import gemini
+    line = gemini._spotify_context_line()
+    assert "Heroes" in line
+    assert "David Bowie" in line
+    assert "Sonos Salón" in line
+    assert "shuffle sí" in line
+    assert "repeat context" in line
+    assert "spotify:track:abc" in line
+
+
+def test_spotify_context_line_empty_when_paused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        t, "_spotify_full_state_blocking",
+        lambda: {"available": True, "playing": False, "track": None},
+    )
+    from kiwi_backend import gemini
+    assert gemini._spotify_context_line() == ""
+
+
+def test_spotify_context_line_empty_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom() -> dict:
+        raise RuntimeError("creds missing")
+
+    monkeypatch.setattr(t, "_spotify_full_state_blocking", boom)
+    from kiwi_backend import gemini
+    assert gemini._spotify_context_line() == ""
+
+
+def test_unified_media_pause_uses_spotify_when_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        t, "_spotify_full_state_blocking",
+        lambda: {"available": True, "playing": True, "track": {"uri": "x"}},
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        t, "_spotify_simple_command",
+        lambda method, path: captured.update({"path": path}) or {"ok": True},
+    )
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    from kiwi_backend import tools as kt
+    _run(kt.dispatch("media_pause", None, on_scene=sink))
+    assert captured["path"] == "/me/player/pause"
+    assert pushed == []  # no media_key fallback needed
+
+
+def test_unified_media_pause_falls_back_to_media_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        t, "_spotify_full_state_blocking",
+        lambda: {"available": True, "playing": False, "track": None},
+    )
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    from kiwi_backend import tools as kt
+    result = _run(kt.dispatch("media_pause", None, on_scene=sink))
+    assert result["via"] == "media_key"
+    assert pushed[0]["type"] == "device_command"
+    assert pushed[0]["command"] == "media_key"
+    assert pushed[0]["label"] == "pause"
+
+
+def test_unified_media_next_prefers_spotify(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        t, "_spotify_full_state_blocking",
+        lambda: {"available": True, "playing": True, "track": {"uri": "x"}},
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        t, "_spotify_simple_command",
+        lambda method, path: captured.update({"path": path}) or {"ok": True},
+    )
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    from kiwi_backend import tools as kt
+    _run(kt.dispatch("media_next", None, on_scene=sink))
+    assert captured["path"] == "/me/player/next"
+    assert pushed == []
+
+
+def test_unified_media_tools_registered() -> None:
+    from kiwi_backend import tools as kt
+    names = kt.registered_names()
+    for n in ("media_pause", "media_resume", "media_next", "media_previous"):
+        assert n in names
+
+
+def test_send_classifies_premium_required(
+    monkeypatch: pytest.MonkeyPatch, requests_mock,
+) -> None:
+    """Spotify 403 con body PREMIUM_REQUIRED → SpotifyPremiumRequiredError."""
+    monkeypatch.setenv("KIWI_SPOTIFY_CREDENTIALS", '{}')
+    # Mock token holder to bypass auth.
+
+    class FakeHolder:
+        def access_token(self) -> str:
+            return "tok"
+
+    from kiwi_backend import spotify_auth
+    monkeypatch.setattr(spotify_auth, "token_holder", lambda: FakeHolder())
+    requests_mock.put(
+        "https://api.spotify.com/v1/me/player/pause",
+        status_code=403,
+        text='{"error":{"status":403,"reason":"PREMIUM_REQUIRED"}}',
+    )
+    with pytest.raises(t.SpotifyPremiumRequiredError):
+        t._spotify_send("PUT", "/me/player/pause")
+
+
+def test_send_classifies_rate_limit(
+    monkeypatch: pytest.MonkeyPatch, requests_mock,
+) -> None:
+    class FakeHolder:
+        def access_token(self) -> str:
+            return "tok"
+
+    from kiwi_backend import spotify_auth
+    monkeypatch.setattr(spotify_auth, "token_holder", lambda: FakeHolder())
+    requests_mock.put(
+        "https://api.spotify.com/v1/me/player/pause",
+        status_code=429,
+        headers={"Retry-After": "7"},
+        text="rate limited",
+    )
+    with pytest.raises(t.SpotifyRateLimitedError) as excinfo:
+        t._spotify_send("PUT", "/me/player/pause")
+    assert excinfo.value.retry_after == 7
+
+
+def test_spotify_full_state_includes_liked(
+    monkeypatch: pytest.MonkeyPatch, requests_mock,
+) -> None:
+    """El snapshot completo resuelve ``liked`` via /me/tracks/contains."""
+    class FakeHolder:
+        def access_token(self) -> str:
+            return "tok"
+
+    from kiwi_backend import spotify_auth
+    monkeypatch.setattr(spotify_auth, "token_holder", lambda: FakeHolder())
+    requests_mock.get(
+        "https://api.spotify.com/v1/me/player",
+        json={
+            "is_playing": True,
+            "progress_ms": 1000,
+            "item": {
+                "uri": "spotify:track:abc",
+                "name": "Heroes",
+                "artists": [{"name": "David Bowie"}],
+                "album": {"name": "Heroes", "images": []},
+                "duration_ms": 60000,
+            },
+            "shuffle_state": False,
+            "repeat_state": "off",
+            "device": {
+                "id": "d", "name": "Phone", "type": "Smartphone",
+                "is_active": True, "volume_percent": 60, "supports_volume": True,
+            },
+        },
+    )
+    requests_mock.get(
+        "https://api.spotify.com/v1/me/tracks/contains?ids=abc",
+        json=[True],
+    )
+    snapshot = t._spotify_full_state_blocking()
+    assert snapshot["available"] is True
+    assert snapshot["playing"] is True
+    assert snapshot["liked"] is True
+    assert snapshot["track"]["uri"] == "spotify:track:abc"
+    assert snapshot["device"]["name"] == "Phone"
+
+
 def test_voice_search_results_scene_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """Las nuevas tools que pueblan biblioteca empujan ``spotify_results``."""
     monkeypatch.setattr(

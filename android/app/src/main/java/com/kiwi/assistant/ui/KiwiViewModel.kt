@@ -1106,6 +1106,7 @@ class KiwiViewModel(application: Application) :
                 openUrlInApp(url, event.packageName)
             }
             "set_volume" -> applyVolume(level = event.level, delta = event.delta)
+            "media_key" -> dispatchMediaKey(event.label)
             "ui_click" -> {
                 val label = event.label
                 val svc = KiwiAccessibilityService.instance
@@ -1117,6 +1118,61 @@ class KiwiViewModel(application: Application) :
             }
             else -> KLog.w(TAG, "unknown device_command: ${event.command}")
         }
+    }
+
+    /**
+     * Manda un media key (play / pause / next / previous) al sistema.
+     * Cubre el escenario "no estoy seguro qué app de medios está
+     * sonando" — el SO enruta la pulsación a la sesión activa
+     * (típicamente la última en hacer foco de audio).
+     *
+     * Implementado vía broadcast intent que MediaSessionManager
+     * captura. No requiere notification listener service; funciona
+     * out-of-the-box en Android 5+.
+     */
+    private fun dispatchMediaKey(label: String?) {
+        // Prefer el MediaSessionMonitor si está activo: enruta a la
+        // sesión exacta en vez del broadcast a ciegas (más fiable y
+        // funciona aunque el SO esté confundido sobre quién tiene
+        // foco de audio).
+        val monitor = com.kiwi.assistant.service.MediaSessionMonitor.instance
+        val action = when (label?.lowercase()) {
+            "pause" -> com.kiwi.assistant.service.MediaSessionMonitor.TransportAction.PAUSE
+            "play" -> com.kiwi.assistant.service.MediaSessionMonitor.TransportAction.PLAY
+            "play_pause", "toggle" -> null   // sin equivalente directo; cae a media key
+            "next" -> com.kiwi.assistant.service.MediaSessionMonitor.TransportAction.NEXT
+            "previous", "prev" -> com.kiwi.assistant.service.MediaSessionMonitor.TransportAction.PREVIOUS
+            else -> {
+                KLog.w(TAG, "media_key: etiqueta desconocida $label")
+                return
+            }
+        }
+        if (monitor != null && action != null && monitor.dispatchTransportAction(action)) {
+            KLog.i(TAG, "media_key('$label') via MediaSessionMonitor")
+            return
+        }
+        // Fallback: broadcast media key al SO.
+        val keycode = when (label?.lowercase()) {
+            "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
+            "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
+            "play_pause", "toggle" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            "next" -> android.view.KeyEvent.KEYCODE_MEDIA_NEXT
+            "previous", "prev" -> android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS
+            else -> return
+        }
+        val ctx = getApplication<Application>().applicationContext
+        val audio = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (audio == null) {
+            KLog.w(TAG, "media_key: AudioManager unavailable")
+            return
+        }
+        audio.dispatchMediaKeyEvent(
+            android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keycode),
+        )
+        audio.dispatchMediaKeyEvent(
+            android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, keycode),
+        )
+        KLog.i(TAG, "media_key('$label') dispatched via broadcast")
     }
 
     /**

@@ -1765,3 +1765,97 @@ register(
     ),
     handler=_spotify_play_mix_tool,
 )
+
+
+# ---- media control unificado (Spotify ↔ YouTube ↔ otros) -------
+
+
+async def _media_pause_tool() -> ToolResult:
+    """Pausa lo que esté sonando. Preferencia: Spotify si está playing,
+    si no, manda media key al device (cubre YouTube y cualquier app
+    con MediaSession activa)."""
+    snapshot = await asyncio.to_thread(_spotify_full_state_blocking)
+    if snapshot.get("available") and snapshot.get("playing"):
+        return ToolResult(response=await _spotify_pause())
+    # Fallback: pulsar el media_key del SO via el tablet. El cliente
+    # Android implementa "media_key" → MediaSessionManager.dispatch…
+    return ToolResult(
+        response={"ok": True, "via": "media_key"},
+        scene={"type": "device_command", "command": "media_key", "label": "pause"},
+    )
+
+
+async def _media_resume_tool() -> ToolResult:
+    snapshot = await asyncio.to_thread(_spotify_full_state_blocking)
+    if snapshot.get("available") and snapshot.get("track") is not None:
+        return ToolResult(response=await _spotify_resume())
+    return ToolResult(
+        response={"ok": True, "via": "media_key"},
+        scene={"type": "device_command", "command": "media_key", "label": "play"},
+    )
+
+
+async def _media_next_tool() -> ToolResult:
+    snapshot = await asyncio.to_thread(_spotify_full_state_blocking)
+    if snapshot.get("available") and snapshot.get("playing"):
+        return ToolResult(response=await _spotify_next())
+    return ToolResult(
+        response={"ok": True, "via": "media_key"},
+        scene={"type": "device_command", "command": "media_key", "label": "next"},
+    )
+
+
+async def _media_previous_tool() -> ToolResult:
+    snapshot = await asyncio.to_thread(_spotify_full_state_blocking)
+    if snapshot.get("available") and snapshot.get("playing"):
+        return ToolResult(response=await _spotify_previous())
+    return ToolResult(
+        response={"ok": True, "via": "media_key"},
+        scene={"type": "device_command", "command": "media_key", "label": "previous"},
+    )
+
+
+register(
+    name="media_pause",
+    description=(
+        "Pausa lo que esté sonando (Spotify, YouTube, podcasts, etc.). "
+        "Prefiere Spotify si hay reproducción activa allí; si no, "
+        "manda la tecla 'pausa' al sistema."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_media_pause_tool,
+)
+
+
+register(
+    name="media_resume",
+    description=(
+        "Reanuda la reproducción pausada en cualquier app de medios. "
+        "Prefiere Spotify si hay sesión Spotify cargada."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_media_resume_tool,
+)
+
+
+register(
+    name="media_next",
+    description=(
+        "Salta al siguiente contenido (canción/episodio/video). "
+        "Prefiere Spotify si hay reproducción activa; si no, manda la "
+        "tecla 'siguiente' al sistema."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_media_next_tool,
+)
+
+
+register(
+    name="media_previous",
+    description=(
+        "Vuelve al contenido anterior. Prefiere Spotify si hay "
+        "reproducción activa; si no, manda la tecla 'anterior'."
+    ),
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+    handler=_media_previous_tool,
+)

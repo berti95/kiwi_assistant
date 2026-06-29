@@ -4,10 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,17 +23,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.WeatherInfo
 import com.kiwi.assistant.ui.theme.KiwiOpacity
+import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
 import com.kiwi.assistant.ui.theme.KiwiTypography
+import com.kiwi.assistant.ui.theme.rememberAlbumDominantColor
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDateTime
@@ -60,6 +73,113 @@ private val ALARM_DAY_FORMATTER: DateTimeFormatter =
  */
 @Composable
 fun AmbientHomeScene(snapshot: HomeSnapshot?) {
+    val nowPlaying = snapshot?.nowPlaying
+    if (nowPlaying != null) {
+        AmbientMusicView(chip = nowPlaying)
+    } else {
+        AmbientClockView(snapshot)
+    }
+}
+
+/**
+ * Variante "cinemática" del Ambient cuando hay música sonando:
+ * carátula enorme centrada, título + artista debajo, reloj pequeño
+ * arriba a la derecha. Sin botones — el tap sale al Home normal (lo
+ * gestiona [com.kiwi.assistant.ui.KiwiScreen]).
+ */
+@Composable
+private fun AmbientMusicView(chip: NowPlayingChip) {
+    val accent = rememberAlbumDominantColor(chip.albumArtUrl)
+    val gradient = Brush.verticalGradient(
+        colors = listOf(
+            accent.copy(alpha = 0.45f),
+            Color.Black,
+        ),
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(gradient)
+            .padding(KiwiSpacing.xxl),
+    ) {
+        // Reloj pequeño arriba derecha.
+        SmallClock(
+            modifier = Modifier
+                .align(Alignment.TopEnd),
+        )
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.45f)
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(KiwiRadii.md))
+                    .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (chip.albumArtUrl != null) {
+                    AsyncImage(
+                        model = chip.albumArtUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+            Spacer(Modifier.height(KiwiSpacing.lg))
+            Text(
+                text = chip.title.takeIf { it.isNotBlank() } ?: "Sonando",
+                color = Color.White.copy(alpha = 0.95f),
+                style = MaterialTheme.typography.displaySmall.copy(
+                    fontSize = KiwiTypography.ambientInfo,
+                    fontWeight = FontWeight.Light,
+                ),
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (chip.artist.isNotBlank()) {
+                Spacer(Modifier.height(KiwiSpacing.sm))
+                Text(
+                    text = chip.artist,
+                    color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Light,
+                    ),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SmallClock(modifier: Modifier = Modifier) {
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalDateTime.now()
+            val msToNextMinute = 60_000L - (System.currentTimeMillis() % 60_000L)
+            delay(msToNextMinute)
+        }
+    }
+    Text(
+        text = TIME_FORMATTER.format(now),
+        color = Color.White.copy(alpha = 0.7f),
+        style = MaterialTheme.typography.displaySmall.copy(
+            fontWeight = FontWeight.Thin,
+        ),
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun AmbientClockView(snapshot: HomeSnapshot?) {
     Box(
         modifier = Modifier
             .fillMaxSize()

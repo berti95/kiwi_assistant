@@ -150,6 +150,7 @@ dependencies {
     // Async image loading for video / playlist thumbnails on the YouTube
     // scenes. Disk + memory caching, drop-in AsyncImage composable.
     implementation(libs.coil.compose)
+    implementation(libs.androidx.palette)
     implementation(libs.android.vad.silero)
     // Silero VAD AAR pulls onnxruntime-android transitively pero como
     // runtime scope; mantenemos la dep explícita por si en el futuro

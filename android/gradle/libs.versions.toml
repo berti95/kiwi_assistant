@@ -12,6 +12,7 @@ androidVadSilero = "2.0.10"
 onnxruntimeAndroid = "1.22.0"
 voskAndroid = "0.3.47"
 coil = "2.7.0"
+palette = "1.0.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,7 @@ android-vad-silero = { module = "com.github.gkonovalov.android-vad:silero", vers
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntimeAndroid" }
 vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "voskAndroid" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+androidx-palette = { module = "androidx.palette:palette-ktx", version.ref = "palette" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
