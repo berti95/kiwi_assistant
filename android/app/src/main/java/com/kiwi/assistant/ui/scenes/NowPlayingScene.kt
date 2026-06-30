@@ -8,6 +8,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -193,19 +194,25 @@ fun NowPlayingScene(
 
 @Composable
 private fun AlbumArt(url: String?) {
-    Box(
+    // Tamaño adaptativo: la carátula nunca debe exceder el ~40% del
+    // ancho ni el ~45% del alto disponible. En portrait domina el
+    // ancho; en landscape (el modo natural del Pixel Tablet en dock)
+    // domina el alto y antes los controles se salían fuera de la
+    // pantalla porque la carátula al 38% del ancho era casi tan alta
+    // como toda la zona útil de la columna.
+    BoxWithConstraints(
         modifier = Modifier
-            // 38% del ancho (de 55%) — un Pixel Tablet renderiza
-            // ~840 dp en landscape, así que la carátula pasa de
-            // ~460 dp (que no dejaba sitio a título + controles) a
-            // ~320 dp, suficiente para reconocer la imagen sin
-            // ahogar el resto de la pantalla.
-            .fillMaxWidth(0.38f)
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(KiwiRadii.md))
-            .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG)),
+            .fillMaxWidth(),
         contentAlignment = Alignment.Center,
     ) {
+        val side = minOf(maxWidth * 0.40f, maxHeight * 0.45f)
+        Box(
+            modifier = Modifier
+                .size(side)
+                .clip(RoundedCornerShape(KiwiRadii.md))
+                .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG)),
+            contentAlignment = Alignment.Center,
+        ) {
         // AnimatedContent fade-crossfade entre carátulas al cambiar de
         // pista. contentKey por url para que el mismo url no re-anime.
         AnimatedContent(
@@ -227,6 +234,7 @@ private fun AlbumArt(url: String?) {
             } else {
                 Spacer(Modifier.fillMaxSize())
             }
+        }
         }
     }
 }
