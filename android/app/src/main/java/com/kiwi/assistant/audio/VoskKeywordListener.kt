@@ -328,14 +328,20 @@ class VoskKeywordListener(
 
         /**
          * Confianza media mínima (sobre los ``conf`` por palabra que
-         * Vosk devuelve con setWords(true)) para aceptar un wake. Un
-         * "oye kiwi" / "hey kiwi" real bien pronunciado ronda 0.8-1.0;
-         * un match forzado desde ruido o conversación de fondo cae
-         * claramente por debajo. Subido a 0.7 tras observar falsos
-         * positivos en producción con el viejo umbral de 0.5
-         * (conversación técnica en castellano captada por confusiones
-         * del grammar de Vosk, sin que se dijera la wake word).
+         * Vosk devuelve con setWords(true)) para aceptar un wake.
+         *
+         * Histórico de tuning con datos reales:
+         *   0.5 → 0.7: conversación técnica en castellano disparaba la
+         *          phrase "hey kiwi" a 0.73; 0.7 no la frenaba.
+         *   0.7 → 0.85: incluso a 0.7 se disparó otra vez con
+         *          "hey kiwi" 0.77 sobre charla de Google / mejoras.
+         *          La phrase "hey" es un atractor anglo brutal sobre
+         *          el que Vosk colapsa cualquier vocal abierta del
+         *          castellano, así que aceptamos pagar el coste de
+         *          tener que pronunciar la wake word con claridad —
+         *          mejor un falso negativo ocasional que sesiones
+         *          de 2 minutos grabando reuniones ajenas.
          */
-        const val MIN_WAKE_CONFIDENCE = 0.7
+        const val MIN_WAKE_CONFIDENCE = 0.85
     }
 }

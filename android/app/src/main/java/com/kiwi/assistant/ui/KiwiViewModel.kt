@@ -634,11 +634,40 @@ class KiwiViewModel(application: Application) :
         // play context. Artistas en particular tienen su "top tracks"
         // como contexto por defecto cuando se les pasa a /me/player/play.
         viewModelScope.launch(Dispatchers.IO) {
-            spotifyApi.play(uri = item.uri)
-            // Tras pulsar play, abre NowPlaying optimista — el SSE
-            // pintará el resto cuando llegue.
+            playWithAutoWake(item.uri)
         }
         openNowPlayingOptimistic(item, kind)
+    }
+
+    /**
+     * Intenta `spotifyApi.play(uri)` y, si falla (típicamente porque no
+     * hay device activo de Connect), levanta la app de Spotify local
+     * con un Intent y reintenta tras un delay corto — mismo flow que
+     * usa la voice tool ``spotify_play`` cuando ve "no active device".
+     *
+     * Sin esto, tocar una pista en el SpotifyHub mientras Spotify
+     * estaba dormido no reproducía nada y el usuario tenía que abrir
+     * la app a mano.
+     */
+    private suspend fun playWithAutoWake(uri: String) {
+        if (spotifyApi.play(uri = uri)) return
+        KLog.i(TAG, "play($uri) falló — despertando Spotify y reintentando")
+        // Lanza Spotify y vuelve a Kiwi en 2 s (igual que el flow
+        // ``device_command: open_app_then_return``).
+        viewModelScope.launch(Dispatchers.Main) {
+            openAppAndReturnToKiwi(SPOTIFY_PACKAGE)
+        }
+        // Espera a que Spotify se registre como Connect device y
+        // reintenta. 3 s es el sweet spot observado en producción:
+        // el wake del backend usa 12 s de polling, así que con 3 s
+        // cubrimos el cold start típico (~2-3 s) sin alargar la
+        // respuesta cuando el play original era recuperable.
+        kotlinx.coroutines.delay(3000)
+        if (!spotifyApi.play(uri = uri)) {
+            KLog.w(TAG, "retry play($uri) también falló")
+        } else {
+            spotifyState.refresh()
+        }
     }
 
     /**
@@ -1358,6 +1387,12 @@ class KiwiViewModel(application: Application) :
         // (como Connect device en Spotify) sin alargar la
         // experiencia del usuario.
         const val RETURN_TO_KIWI_DELAY_MS = 2_000L
+
+        // Paquete de la app oficial de Spotify, usado para despertarla
+        // local-mente cuando el tap en SpotifyHub falla porque no hay
+        // device de Connect activo. Mismo identificador que ya está
+        // declarado en AndroidManifest.xml ``<queries>``.
+        const val SPOTIFY_PACKAGE = "com.spotify.music"
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
         // PlaylistList / TodoList / AlarmList / ShoppingList /

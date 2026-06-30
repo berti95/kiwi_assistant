@@ -103,14 +103,16 @@ fun NowPlayingScene(
         modifier = Modifier
             .fillMaxSize()
             .background(gradient)
-            // Padding inferior dimensionado para dejar hueco al
-            // TalkAffordance que vive en BottomCenter (chip ~50 dp
-            // alto + 24 dp respiración) sin tapar los controles.
+            // El TalkAffordance vive en BottomCenter del Box raíz de
+            // KiwiScreen (chip de ~50 dp + 24 dp de respiración). En
+            // NowPlaying reservamos ~120 dp abajo para que la fila
+            // secundaria (♥ · device · cola) quede claramente por
+            // encima del chip de voz.
             .padding(
                 start = KiwiSpacing.xxl,
                 end = KiwiSpacing.xxl,
                 top = KiwiSpacing.lg,
-                bottom = KiwiSpacing.xxl + KiwiSpacing.xxl,
+                bottom = KiwiSpacing.xxl + KiwiSpacing.xxl + KiwiSpacing.lg,
             ),
     ) {
         Column(
