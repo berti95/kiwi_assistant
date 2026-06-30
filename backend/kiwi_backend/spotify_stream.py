@@ -27,7 +27,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from . import spotify_service
 
@@ -174,7 +175,7 @@ async def event_stream() -> AsyncIterator[bytes]:
                 return
             data = json.dumps(payload, ensure_ascii=False)
             event_type = payload.get("event") or "message"
-            chunk = f"event: {event_type}\ndata: {data}\n\n".encode("utf-8")
+            chunk = f"event: {event_type}\ndata: {data}\n\n".encode()
             yield chunk
     finally:
         await _PUMP.unsubscribe(queue)

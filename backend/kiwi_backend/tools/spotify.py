@@ -1086,13 +1086,40 @@ def _spotify_playlist_tracks_blocking(playlist_uri: str, limit: int = 50) -> dic
 # recommendations propias de Spotify; ver
 # https://developer.spotify.com/documentation/web-api/reference/get-recommendations.
 _MOOD_PROFILES: dict[str, dict[str, float]] = {
-    "chill":     {"target_energy": 0.35, "target_valence": 0.55, "target_acousticness": 0.6},
-    "energetic": {"target_energy": 0.85, "target_valence": 0.75, "target_danceability": 0.7},
-    "focus":     {"target_energy": 0.40, "target_valence": 0.45, "target_instrumentalness": 0.6, "target_speechiness": 0.1},
-    "party":     {"target_energy": 0.90, "target_valence": 0.80, "target_danceability": 0.85, "target_loudness": -5.0},
-    "sleep":     {"target_energy": 0.20, "target_valence": 0.40, "target_acousticness": 0.85, "target_instrumentalness": 0.7},
-    "happy":     {"target_energy": 0.70, "target_valence": 0.90},
-    "sad":       {"target_energy": 0.30, "target_valence": 0.20, "target_acousticness": 0.65},
+    "chill": {
+        "target_energy": 0.35,
+        "target_valence": 0.55,
+        "target_acousticness": 0.6,
+    },
+    "energetic": {
+        "target_energy": 0.85,
+        "target_valence": 0.75,
+        "target_danceability": 0.7,
+    },
+    "focus": {
+        "target_energy": 0.40,
+        "target_valence": 0.45,
+        "target_instrumentalness": 0.6,
+        "target_speechiness": 0.1,
+    },
+    "party": {
+        "target_energy": 0.90,
+        "target_valence": 0.80,
+        "target_danceability": 0.85,
+        "target_loudness": -5.0,
+    },
+    "sleep": {
+        "target_energy": 0.20,
+        "target_valence": 0.40,
+        "target_acousticness": 0.85,
+        "target_instrumentalness": 0.7,
+    },
+    "happy": {"target_energy": 0.70, "target_valence": 0.90},
+    "sad": {
+        "target_energy": 0.30,
+        "target_valence": 0.20,
+        "target_acousticness": 0.65,
+    },
 }
 
 # Mapeo mood → seed_genre por defecto cuando no hay otra seed. Cada
@@ -1134,7 +1161,11 @@ def _spotify_recommend_blocking(
         params["seed_tracks"] = sid
         seeds.append(f"track:{sid}")
     if seed_artist:
-        aid = seed_artist.split(":")[-1] if seed_artist.startswith("spotify:artist:") else seed_artist
+        aid = (
+            seed_artist.split(":")[-1]
+            if seed_artist.startswith("spotify:artist:")
+            else seed_artist
+        )
         params["seed_artists"] = aid
         seeds.append(f"artist:{aid}")
     if seed_genre:

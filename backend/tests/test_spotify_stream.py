@@ -89,7 +89,7 @@ def test_pump_emits_snapshot_then_updates(
             while asyncio.get_event_loop().time() < deadline:
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
                 events.append(ev)
                 if (
@@ -133,7 +133,7 @@ def test_pump_emits_error_event_on_failure(monkeypatch: pytest.MonkeyPatch) -> N
             while asyncio.get_event_loop().time() < deadline:
                 try:
                     ev = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
                 events.append(ev)
                 if ev.get("event") == "error":

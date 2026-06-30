@@ -277,11 +277,10 @@ def _spotify_context_line() -> str:
     vacía y Gemini sigue funcionando como antes.
     """
     try:
-        from . import spotify_service  # local import — circular si no
-        import asyncio
-        # spotify_service.current_state es async; este builder se llama
-        # desde código sync. asyncio.run dentro de un loop en ejecución
-        # explotaría, así que usamos el blocking helper directo.
+        # ``current_state`` del service es async; este builder se llama
+        # desde código sync (durante la construcción del system prompt
+        # por turno), así que vamos directos al helper blocking de
+        # tools.spotify y nos saltamos la capa async.
         from .tools import spotify as t
         snapshot = t._spotify_full_state_blocking()
     except Exception:  # noqa: BLE001

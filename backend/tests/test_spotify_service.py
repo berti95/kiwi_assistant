@@ -9,7 +9,6 @@ HTTP.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import pytest
 import requests
@@ -323,7 +322,7 @@ def test_pause_resume_next_previous_endpoints(
         return {"ok": True}
 
     monkeypatch.setattr(t, "_spotify_simple_command", fake_simple)
-    for path, expected in [
+    for path, _expected in [
         ("pause", ("PUT", "/me/player/pause")),
         ("resume", ("PUT", "/me/player/play")),
         ("next", ("POST", "/me/player/next")),
