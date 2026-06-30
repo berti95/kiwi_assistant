@@ -101,6 +101,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
     val spotifyDeviceSheetOpen by viewModel.spotifyDeviceSheetOpen.collectAsState()
     val spotifyQueueSheetOpen by viewModel.spotifyQueueSheetOpen.collectAsState()
     val spotifyQueue by viewModel.spotifyQueue.collectAsState()
+    val spotifyAutoWakeStatus by viewModel.spotifyAutoWakeStatus.collectAsState()
     // Modo nocturno: el tablet vive en pared cerca del dormitorio.
     // Entre 22:00 y 07:00 aplicamos un overlay marrón cálido para
     // que no moleste. La transición dura 1s al cruzar el umbral.
@@ -172,6 +173,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onSpotifyResultTap = viewModel::onSpotifyResultTap,
                 onSpotifyResultLongPress = viewModel::onSpotifyResultLongPress,
                 onSpotifyHubItemTap = viewModel::onSpotifyHubItemTap,
+                spotifyAutoWakeStatus = spotifyAutoWakeStatus,
             )
         }
 
@@ -438,6 +440,7 @@ private fun SceneLayer(
     onSpotifyResultTap: (SpotifyResultItem, String) -> Unit,
     onSpotifyResultLongPress: (SpotifyResultItem) -> Unit,
     onSpotifyHubItemTap: (SpotifyResultItem, String) -> Unit,
+    spotifyAutoWakeStatus: String?,
 ) {
     when (scene) {
         Scene.Idle -> HomeScene(
@@ -469,6 +472,7 @@ private fun SceneLayer(
             onToggleLike = onToggleLike,
             onOpenDeviceSheet = onOpenSpotifyDeviceSheet,
             onOpenQueueSheet = onOpenSpotifyQueueSheet,
+            autoWakeStatus = spotifyAutoWakeStatus,
         )
         is Scene.SpotifyResults -> SpotifyResultsScene(
             scene = scene,

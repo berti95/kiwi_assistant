@@ -225,6 +225,15 @@ class KiwiViewModel(application: Application) :
     private val _spotifyDeviceSheetOpen = MutableStateFlow(false)
     val spotifyDeviceSheetOpen: StateFlow<Boolean> = _spotifyDeviceSheetOpen.asStateFlow()
 
+    /**
+     * Mensaje de "loading" para la NowPlayingScene mientras el
+     * playWithAutoWake está despertando Spotify y reintentando el
+     * play. ``null`` cuando no hay nada en curso; cualquier string
+     * no-nulo se renderiza como banner con spinner.
+     */
+    private val _spotifyAutoWakeStatus = MutableStateFlow<String?>(null)
+    val spotifyAutoWakeStatus: StateFlow<String?> = _spotifyAutoWakeStatus.asStateFlow()
+
     private val _spotifyQueueSheetOpen = MutableStateFlow(false)
     val spotifyQueueSheetOpen: StateFlow<Boolean> = _spotifyQueueSheetOpen.asStateFlow()
 
@@ -658,25 +667,39 @@ class KiwiViewModel(application: Application) :
     private suspend fun playWithAutoWake(uri: String) {
         if (spotifyApi.play(uri = uri)) return
         KLog.i(TAG, "play($uri) falló — despertando Spotify y reintentando")
-        // Lanza Spotify y vuelve a Kiwi en 2 s (igual que el flow
-        // ``device_command: open_app_then_return``).
-        viewModelScope.launch(Dispatchers.Main) {
-            openAppAndReturnToKiwi(SPOTIFY_PACKAGE)
-        }
-        val deadline = System.currentTimeMillis() + PLAY_AUTOWAKE_TIMEOUT_MS
-        var attempt = 0
-        while (System.currentTimeMillis() < deadline) {
-            attempt++
-            // Backoff lineal: 2s, 2s, 2s… cubre el rango 2-10 s sin
-            // sobrecargar la API mientras esperamos al device.
-            kotlinx.coroutines.delay(PLAY_AUTOWAKE_BACKOFF_MS)
-            if (spotifyApi.play(uri = uri)) {
-                KLog.i(TAG, "play($uri) ok en reintento $attempt")
-                spotifyState.refresh()
-                return
+        _spotifyAutoWakeStatus.value = "Despertando Spotify…"
+        try {
+            // Lanza Spotify y vuelve a Kiwi en 2 s (igual que el flow
+            // ``device_command: open_app_then_return``).
+            viewModelScope.launch(Dispatchers.Main) {
+                openAppAndReturnToKiwi(SPOTIFY_PACKAGE)
             }
+            val deadline = System.currentTimeMillis() + PLAY_AUTOWAKE_TIMEOUT_MS
+            var attempt = 0
+            while (System.currentTimeMillis() < deadline) {
+                attempt++
+                // Backoff lineal: 2s, 2s, 2s… cubre el rango 2-10 s sin
+                // sobrecargar la API mientras esperamos al device.
+                kotlinx.coroutines.delay(PLAY_AUTOWAKE_BACKOFF_MS)
+                if (spotifyApi.play(uri = uri)) {
+                    KLog.i(TAG, "play($uri) ok en reintento $attempt")
+                    _spotifyAutoWakeStatus.value = null
+                    spotifyState.refresh()
+                    return
+                }
+            }
+            KLog.w(TAG, "play($uri): timeout tras $attempt reintentos sin éxito")
+            // Mensaje de error transitorio: lo dejamos 4 s para que el
+            // usuario lo vea y luego limpiamos.
+            _spotifyAutoWakeStatus.value = "No se pudo conectar con Spotify"
+            kotlinx.coroutines.delay(4000)
+            if (_spotifyAutoWakeStatus.value == "No se pudo conectar con Spotify") {
+                _spotifyAutoWakeStatus.value = null
+            }
+        } catch (e: Exception) {
+            _spotifyAutoWakeStatus.value = null
+            throw e
         }
-        KLog.w(TAG, "play($uri): timeout tras $attempt reintentos sin éxito")
     }
 
     /**

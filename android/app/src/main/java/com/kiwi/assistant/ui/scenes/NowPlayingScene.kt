@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -89,6 +90,7 @@ fun NowPlayingScene(
     onToggleLike: () -> Unit = {},
     onOpenDeviceSheet: () -> Unit = {},
     onOpenQueueSheet: () -> Unit = {},
+    autoWakeStatus: String? = null,
 ) {
     // Fondo de gradiente con el color dominante de la carátula.
     // Cae al negro plano si la imagen aún no ha cargado o no hay url.
@@ -153,6 +155,10 @@ fun NowPlayingScene(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (autoWakeStatus != null) {
+                Spacer(Modifier.height(KiwiSpacing.md))
+                AutoWakeBanner(text = autoWakeStatus)
             }
             if (scene.durationMs > 0) {
                 Spacer(Modifier.height(KiwiSpacing.lg - 4.dp))
@@ -222,6 +228,34 @@ private fun AlbumArt(url: String?) {
                 Spacer(Modifier.fillMaxSize())
             }
         }
+    }
+}
+
+/**
+ * Banner discreto con spinner + texto, usado mientras
+ * ``playWithAutoWake`` está intentando despertar Spotify y
+ * reintentando el play tras un tap en el Hub / Results.
+ */
+@Composable
+private fun AutoWakeBanner(text: String) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.spotifyGreen,
+        )
+        Text(
+            text = text,
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
