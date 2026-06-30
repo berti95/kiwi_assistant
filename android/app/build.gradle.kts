@@ -124,6 +124,12 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -163,4 +169,15 @@ dependencies {
     implementation(libs.vosk.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Compose UI tests corren en JVM via Robolectric (sin emulador).
+    // ``createComposeRule()`` + Robolectric monta el host de Android
+    // necesario para que ``onNodeWithText(...)`` etc. funcionen
+    // dentro de ``./gradlew testDebugUnitTest``.
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.runner)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
 }

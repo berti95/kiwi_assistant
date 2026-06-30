@@ -45,5 +45,8 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 
+      - name: Run unit + Compose UI tests
+        run: ./gradlew --no-daemon testDebugUnitTest
+
       - name: Assemble debug APK
         run: ./gradlew --no-daemon assembleDebug
