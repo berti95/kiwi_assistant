@@ -329,11 +329,13 @@ class VoskKeywordListener(
         /**
          * Confianza media mínima (sobre los ``conf`` por palabra que
          * Vosk devuelve con setWords(true)) para aceptar un wake. Un
-         * "oye kiwi" real ronda conf alta; un match forzado desde
-         * ruido la tiene baja. Arranca conservador; los logs imprimen
-         * la conf de cada detección (aceptada o rechazada) para
-         * afinarlo con datos reales.
+         * "oye kiwi" / "hey kiwi" real bien pronunciado ronda 0.8-1.0;
+         * un match forzado desde ruido o conversación de fondo cae
+         * claramente por debajo. Subido a 0.7 tras observar falsos
+         * positivos en producción con el viejo umbral de 0.5
+         * (conversación técnica en castellano captada por confusiones
+         * del grammar de Vosk, sin que se dijera la wake word).
          */
-        const val MIN_WAKE_CONFIDENCE = 0.5
+        const val MIN_WAKE_CONFIDENCE = 0.7
     }
 }
