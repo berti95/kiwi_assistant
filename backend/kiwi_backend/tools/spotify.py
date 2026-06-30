@@ -411,7 +411,23 @@ def _spotify_play_blocking(
         path = "/me/player/play"
         if device_id:
             path += f"?device_id={device_id}"
-        _spotify_send("PUT", path, json_body=body)
+        try:
+            _spotify_send("PUT", path, json_body=body)
+        except requests.HTTPError as exc_inner:
+            # Spotify devuelve 502/503 esporádico justo tras un cold
+            # start del device (aparece en /me/player/devices pero su
+            # backend interno aún no acepta play). Un único retry con
+            # ~1s de pausa lo arregla en la mayoría de casos sin
+            # alargar la respuesta cuando todo va bien.
+            if device_id and exc_inner.response.status_code in (502, 503):
+                log.info(
+                    "spotify_play: %d on first attempt, retrying in 1.2s",
+                    exc_inner.response.status_code,
+                )
+                time.sleep(1.2)
+                _spotify_send("PUT", path, json_body=body)
+            else:
+                raise
     except SpotifyNoDeviceError:
         return {
             "error": (
@@ -1079,6 +1095,21 @@ _MOOD_PROFILES: dict[str, dict[str, float]] = {
     "sad":       {"target_energy": 0.30, "target_valence": 0.20, "target_acousticness": 0.65},
 }
 
+# Mapeo mood → seed_genre por defecto cuando no hay otra seed. Cada
+# valor TIENE que aparecer en
+# /recommendations/available-genre-seeds; los he validado contra el
+# listado oficial. Sin esto, "Pon música chill" sin nada sonando fallaba
+# porque el helper exigía al menos una semilla.
+_MOOD_FALLBACK_GENRES: dict[str, str] = {
+    "chill":     "chill",
+    "energetic": "work-out",
+    "focus":     "study",
+    "party":     "party",
+    "sleep":     "sleep",
+    "happy":     "happy",
+    "sad":       "sad",
+}
+
 
 def _spotify_recommend_blocking(
     seed_track: str | None = None,
@@ -1109,10 +1140,19 @@ def _spotify_recommend_blocking(
     if seed_genre:
         params["seed_genres"] = seed_genre
         seeds.append(f"genre:{seed_genre}")
+    # Mood + no seed: usa el género default del mood como seed. Sin
+    # esto, "pon música chill" sin nada sonando fallaba por
+    # "supply at least one seed". El género default mapea 1:1 a
+    # un seed_genre válido de Spotify.
+    mood_key = mood.lower() if mood else None
+    if not seeds and mood_key and mood_key in _MOOD_FALLBACK_GENRES:
+        fallback = _MOOD_FALLBACK_GENRES[mood_key]
+        params["seed_genres"] = fallback
+        seeds.append(f"genre:{fallback}")
     if not seeds:
         return {"error": "supply at least one seed (track/artist/genre)"}
-    if mood:
-        profile = _MOOD_PROFILES.get(mood.lower())
+    if mood_key:
+        profile = _MOOD_PROFILES.get(mood_key)
         if profile is None:
             return {
                 "error": (

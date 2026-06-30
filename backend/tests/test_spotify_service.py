@@ -832,6 +832,92 @@ def test_spotify_full_state_includes_liked(
     assert snapshot["device"]["name"] == "Phone"
 
 
+def test_recommend_with_mood_no_seed_uses_fallback_genre(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`mood='chill'` sin seed debe usar 'chill' como seed_genre.
+
+    El bug original: "pon música chill" sin nada sonando fallaba con
+    "supply at least one seed". Ahora el mood mapea a un género válido
+    de Spotify y arranca la recomendación.
+    """
+    captured: dict = {}
+
+    def fake_get(path: str, params=None):
+        captured["path"] = path
+        captured["params"] = dict(params or {})
+        return {"tracks": [{"uri": "spotify:track:x", "name": "X"}]}
+
+    monkeypatch.setattr(t, "_spotify_get", fake_get)
+    result = t._spotify_recommend_blocking(mood="chill")
+    assert captured["params"].get("seed_genres") == "chill"
+    assert result["count"] == 1
+    assert "genre:chill" in result["seeds"]
+
+
+def test_recommend_every_mood_has_fallback_genre() -> None:
+    """Cada mood declarado debe tener un género de fallback válido."""
+    for mood in t._MOOD_PROFILES.keys():
+        assert mood in t._MOOD_FALLBACK_GENRES, (
+            f"mood {mood!r} sin fallback genre — sin esto, 'pon música "
+            f"{mood}' sin nada sonando falla."
+        )
+
+
+def test_play_retries_once_on_502_with_device_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Play tras wake-up: si Spotify devuelve 502, reintenta una vez.
+
+    Reproduce el bug visto en producción: tras despertar Spotify, el
+    device aparece en /me/player/devices pero el primer play da 502
+    porque su backend aún no terminó de inicializar. Un solo retry
+    con ~1s de pausa lo arregla.
+    """
+    calls: list[dict] = []
+
+    def fake_send(method: str, path: str, json_body=None):
+        calls.append({"method": method, "path": path})
+        if len(calls) == 1:
+            # 502 con un response object real para que el except entre.
+            response = requests.Response()
+            response.status_code = 502
+            raise requests.HTTPError(response=response)
+        return {}
+
+    # Sleep mock para no perder 1.2s en el test.
+    monkeypatch.setattr(t.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(t, "_spotify_send", fake_send)
+    response, _scene = t._spotify_play_blocking(
+        uri="spotify:track:abc", query=None, device_id="dev-1",
+    )
+    assert len(calls) == 2, "expected retry after 502"
+    assert "started" in response
+
+
+def test_play_does_not_retry_on_502_without_device_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si NO hay device_id (play "normal" sin wake), no reintentamos —
+    el 502 viene de otro motivo y reintentar gasta latencia para nada."""
+    calls: list[int] = []
+
+    def fake_send(method, path, json_body=None):  # noqa: ARG001
+        calls.append(1)
+        response = requests.Response()
+        response.status_code = 502
+        raise requests.HTTPError(response=response)
+
+    monkeypatch.setattr(t.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(t, "_spotify_send", fake_send)
+    response, _scene = t._spotify_play_blocking(
+        uri="spotify:track:abc", query=None, device_id=None,
+    )
+    assert len(calls) == 1
+    assert "error" in response
+    assert "502" in response["error"]
+
+
 def test_voice_search_results_scene_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     """Las nuevas tools que pueblan biblioteca empujan ``spotify_results``."""
     monkeypatch.setattr(
