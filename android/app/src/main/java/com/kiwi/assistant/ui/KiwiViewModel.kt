@@ -642,12 +642,18 @@ class KiwiViewModel(application: Application) :
     /**
      * Intenta `spotifyApi.play(uri)` y, si falla (típicamente porque no
      * hay device activo de Connect), levanta la app de Spotify local
-     * con un Intent y reintenta tras un delay corto — mismo flow que
-     * usa la voice tool ``spotify_play`` cuando ve "no active device".
+     * con un Intent y reintenta varias veces — mismo flow que usa la
+     * voice tool ``spotify_play`` cuando ve "no active device".
      *
      * Sin esto, tocar una pista en el SpotifyHub mientras Spotify
      * estaba dormido no reproducía nada y el usuario tenía que abrir
      * la app a mano.
+     *
+     * Reintentos con backoff lineal hasta [PLAY_AUTOWAKE_TIMEOUT_MS]:
+     * Spotify después de un cold start tarda entre 2 y 10 segundos en
+     * aparecer como Connect device. Un único reintento de 3 s (lo que
+     * teníamos antes) se quedaba corto en cuanto el tablet llevaba
+     * rato sin tocar la app.
      */
     private suspend fun playWithAutoWake(uri: String) {
         if (spotifyApi.play(uri = uri)) return
@@ -657,17 +663,20 @@ class KiwiViewModel(application: Application) :
         viewModelScope.launch(Dispatchers.Main) {
             openAppAndReturnToKiwi(SPOTIFY_PACKAGE)
         }
-        // Espera a que Spotify se registre como Connect device y
-        // reintenta. 3 s es el sweet spot observado en producción:
-        // el wake del backend usa 12 s de polling, así que con 3 s
-        // cubrimos el cold start típico (~2-3 s) sin alargar la
-        // respuesta cuando el play original era recuperable.
-        kotlinx.coroutines.delay(3000)
-        if (!spotifyApi.play(uri = uri)) {
-            KLog.w(TAG, "retry play($uri) también falló")
-        } else {
-            spotifyState.refresh()
+        val deadline = System.currentTimeMillis() + PLAY_AUTOWAKE_TIMEOUT_MS
+        var attempt = 0
+        while (System.currentTimeMillis() < deadline) {
+            attempt++
+            // Backoff lineal: 2s, 2s, 2s… cubre el rango 2-10 s sin
+            // sobrecargar la API mientras esperamos al device.
+            kotlinx.coroutines.delay(PLAY_AUTOWAKE_BACKOFF_MS)
+            if (spotifyApi.play(uri = uri)) {
+                KLog.i(TAG, "play($uri) ok en reintento $attempt")
+                spotifyState.refresh()
+                return
+            }
         }
+        KLog.w(TAG, "play($uri): timeout tras $attempt reintentos sin éxito")
     }
 
     /**
@@ -1393,6 +1402,17 @@ class KiwiViewModel(application: Application) :
         // device de Connect activo. Mismo identificador que ya está
         // declarado en AndroidManifest.xml ``<queries>``.
         const val SPOTIFY_PACKAGE = "com.spotify.music"
+
+        // Cuánto esperamos en total a que Spotify se registre como
+        // Connect device tras un cold start. El backend usa 12 s de
+        // polling en la voice tool ``spotify_play``; replicamos aquí
+        // el mismo presupuesto para que el tap tenga el mismo techo
+        // que la voz.
+        const val PLAY_AUTOWAKE_TIMEOUT_MS = 12_000L
+        // Tiempo entre reintentos del play. 2 s da tiempo suficiente
+        // para que Spotify avance en su arranque entre intentos sin
+        // disparar tantos llamadas como para preocupar al rate limit.
+        const val PLAY_AUTOWAKE_BACKOFF_MS = 2_000L
 
         // Auto-cierre de escenas informativas (Calendar / VideoList /
         // PlaylistList / TodoList / AlarmList / ShoppingList /
