@@ -228,12 +228,20 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onTap = viewModel::onTap,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    // En Home la QuickActionsRow ya vive al fondo
-                    // (Compra · Agenda · Alarmas · Uso). Sin este
-                    // offset extra el TalkAffordance se le superpondría.
-                    // En otras scenes no hay nada abajo así que se
-                    // queda pegado al borde como antes.
-                    .padding(bottom = if (scene is Scene.Idle) 88.dp else 0.dp),
+                    // Las scenes con afordancias propias al fondo
+                    // necesitan que el chip de "Habla con Kiwi" suba
+                    // un poco para no taparlas:
+                    //   • Home: la QuickActionsRow (Compra · Agenda · …).
+                    //   • NowPlaying: la fila secundaria (♥ · device · cola).
+                    // En el resto de scenes no hay nada abajo y el
+                    // chip se queda pegado al borde como antes.
+                    .padding(
+                        bottom = when (scene) {
+                            is Scene.Idle -> 88.dp
+                            is Scene.NowPlaying -> 88.dp
+                            else -> 0.dp
+                        },
+                    ),
             )
             scene is Scene.Idle -> PipelineFullscreenOverlay(pipeline)
             else -> PipelineHud(

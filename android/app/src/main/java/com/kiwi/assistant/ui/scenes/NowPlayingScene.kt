@@ -103,7 +103,15 @@ fun NowPlayingScene(
         modifier = Modifier
             .fillMaxSize()
             .background(gradient)
-            .padding(horizontal = KiwiSpacing.xxl, vertical = KiwiSpacing.huge),
+            // Padding inferior dimensionado para dejar hueco al
+            // TalkAffordance que vive en BottomCenter (chip ~50 dp
+            // alto + 24 dp respiración) sin tapar los controles.
+            .padding(
+                start = KiwiSpacing.xxl,
+                end = KiwiSpacing.xxl,
+                top = KiwiSpacing.lg,
+                bottom = KiwiSpacing.xxl + KiwiSpacing.xxl,
+            ),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -179,7 +187,12 @@ fun NowPlayingScene(
 private fun AlbumArt(url: String?) {
     Box(
         modifier = Modifier
-            .fillMaxWidth(0.55f)
+            // 38% del ancho (de 55%) — un Pixel Tablet renderiza
+            // ~840 dp en landscape, así que la carátula pasa de
+            // ~460 dp (que no dejaba sitio a título + controles) a
+            // ~320 dp, suficiente para reconocer la imagen sin
+            // ahogar el resto de la pantalla.
+            .fillMaxWidth(0.38f)
             .aspectRatio(1f)
             .clip(RoundedCornerShape(KiwiRadii.md))
             .background(Color.White.copy(alpha = KiwiOpacity.ROW_BG)),
@@ -223,7 +236,7 @@ private fun ProgressSlider(
     var draftMs by remember(progressMs) { mutableStateOf(progressMs.toFloat()) }
     val effectiveMs = if (dragging) draftMs.toLong() else progressMs
     Column(
-        modifier = Modifier.fillMaxWidth(0.6f),
+        modifier = Modifier.fillMaxWidth(0.7f),
     ) {
         Slider(
             value = (if (dragging) draftMs else progressMs.toFloat())
@@ -273,7 +286,7 @@ private fun TransportRow(
     onCycleRepeat: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(0.6f),
+        modifier = Modifier.fillMaxWidth(0.7f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -357,7 +370,7 @@ private fun SecondaryRow(
     onOpenQueueSheet: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(0.6f),
+        modifier = Modifier.fillMaxWidth(0.7f),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
