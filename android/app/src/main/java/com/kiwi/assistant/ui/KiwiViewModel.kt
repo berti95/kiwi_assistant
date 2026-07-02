@@ -678,19 +678,25 @@ class KiwiViewModel(application: Application) :
             var attempt = 0
             while (System.currentTimeMillis() < deadline) {
                 attempt++
-                // Backoff lineal: 2s, 2s, 2s… cubre el rango 2-10 s sin
-                // sobrecargar la API mientras esperamos al device.
                 kotlinx.coroutines.delay(PLAY_AUTOWAKE_BACKOFF_MS)
-                if (spotifyApi.play(uri = uri)) {
-                    KLog.i(TAG, "play($uri) ok en reintento $attempt")
-                    _spotifyAutoWakeStatus.value = null
-                    spotifyState.refresh()
-                    return
+                // Paso clave: transferir a "tablet" antes de reintentar
+                // play. Un ``PUT /me/player/play`` sin device_id
+                // devuelve 409 mientras Spotify tenga el tablet
+                // *listado* pero no *activo*; en cambio
+                // ``PUT /me/player`` (transfer) lo activa aunque
+                // estuviera dormido. Cuando el fuzzy match encuentra
+                // "tablet" en la lista de devices, el device queda
+                // como current y el siguiente play acierta.
+                if (spotifyApi.transferToName("tablet")) {
+                    if (spotifyApi.play(uri = uri)) {
+                        KLog.i(TAG, "play($uri) ok tras transfer en reintento $attempt")
+                        _spotifyAutoWakeStatus.value = null
+                        spotifyState.refresh()
+                        return
+                    }
                 }
             }
             KLog.w(TAG, "play($uri): timeout tras $attempt reintentos sin éxito")
-            // Mensaje de error transitorio: lo dejamos 4 s para que el
-            // usuario lo vea y luego limpiamos.
             _spotifyAutoWakeStatus.value = "No se pudo conectar con Spotify"
             kotlinx.coroutines.delay(4000)
             if (_spotifyAutoWakeStatus.value == "No se pudo conectar con Spotify") {
