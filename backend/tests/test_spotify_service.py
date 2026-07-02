@@ -602,10 +602,126 @@ def test_recommend_tool_with_no_seed_uses_active_track(
     assert captured["seed_track"] == "spotify:track:active"
 
 
+def test_all_playlists_paginates_across_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El helper con paginación debe llegar más allá de la primera página.
+
+    Reproduce el bug de producción: "Descubrimiento Semanal" (marcada
+    con corazón por el user) no salía en spotify_play_mix porque estaba
+    en la posición > 50 y solo se pedía una página. Este test simula
+    un user con 3 páginas de playlists y verifica que la búsqueda
+    completa las trae todas.
+    """
+    pages = {
+        0: {
+            "items": [{"uri": f"spotify:playlist:p{i}", "name": f"Fest {i}"}
+                      for i in range(50)],
+            "total": 120,
+        },
+        50: {
+            "items": [{"uri": f"spotify:playlist:p{i}", "name": f"Fest {i}"}
+                      for i in range(50, 100)],
+            "total": 120,
+        },
+        100: {
+            "items": [
+                *[{"uri": f"spotify:playlist:p{i}", "name": f"Fest {i}"}
+                  for i in range(100, 119)],
+                {"uri": "spotify:playlist:dw",
+                 "name": "Descubrimiento Semanal"},
+            ],
+            "total": 120,
+        },
+    }
+
+    captured_calls: list[dict] = []
+
+    def fake_get(path: str, params=None):
+        captured_calls.append(dict(params or {}))
+        offset = (params or {}).get("offset", 0)
+        return pages[offset]
+
+    monkeypatch.setattr(t, "_spotify_get", fake_get)
+    result = t._spotify_all_playlists_blocking(cap=200)
+    assert result["count"] == 120
+    titles = [p["title"] for p in result["items"]]
+    assert "Descubrimiento Semanal" in titles
+    # Se hicieron 3 páginas de 50 (última con menos ítems) — todos con offset creciente.
+    assert [c["offset"] for c in captured_calls] == [0, 50, 100]
+
+
+def test_all_playlists_respects_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El cap limita cuántas playlists trae en total."""
+    pages = {
+        0: {
+            "items": [{"uri": f"spotify:playlist:p{i}", "name": f"P{i}"}
+                      for i in range(50)],
+            "total": 200,
+        },
+    }
+
+    def fake_get(path: str, params=None):
+        offset = (params or {}).get("offset", 0)
+        limit = (params or {}).get("limit", 50)
+        # Simula 200 playlists paginadas de 50 en 50.
+        return {
+            "items": [{"uri": f"spotify:playlist:p{i}", "name": f"P{i}"}
+                      for i in range(offset, min(offset + limit, 200))],
+            "total": 200,
+        }
+
+    monkeypatch.setattr(t, "_spotify_get", fake_get)
+    result = t._spotify_all_playlists_blocking(cap=30)
+    # Cap 30 → solo trae 30 playlists en una sola llamada.
+    assert result["count"] == 30
+
+
+def test_play_mix_uses_pagination_and_finds_descubrimiento_semanal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spotify_play_mix('Descubrimiento Semanal') encuentra la playlist
+    aunque esté fuera de la primera página de 50."""
+    # 55 playlists en total; "Descubrimiento Semanal" en la posición 54.
+    def fake_get(path: str, params=None):
+        offset = (params or {}).get("offset", 0)
+        limit = (params or {}).get("limit", 50)
+        catalog = [
+            *[{"uri": f"spotify:playlist:p{i}", "name": f"Fest {i}"}
+              for i in range(54)],
+            {"uri": "spotify:playlist:dw",
+             "name": "Descubrimiento Semanal"},
+        ]
+        return {
+            "items": catalog[offset:offset + limit],
+            "total": len(catalog),
+        }
+
+    monkeypatch.setattr(t, "_spotify_get", fake_get)
+    # featured no aporta nada extra aquí.
+    monkeypatch.setattr(
+        t, "_spotify_featured_playlists_blocking",
+        lambda limit: {"items": []},  # noqa: ARG005
+    )
+    captured_uri: dict[str, str] = {}
+
+    def fake_play(uri, query, device_id=None):  # noqa: ARG001
+        captured_uri["uri"] = uri
+        return ({"started": uri}, None)
+
+    monkeypatch.setattr(t, "_spotify_play_blocking", fake_play)
+    from kiwi_backend import tools as kt
+    result = _run(kt.dispatch(
+        "spotify_play_mix", {"name": "descubrimiento semanal"},
+    ))
+    assert captured_uri["uri"] == "spotify:playlist:dw"
+    assert result["mix_title"] == "Descubrimiento Semanal"
+
+
 def test_play_mix_fuzzy_resolves_playlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        t, "_spotify_my_playlists_blocking",
-        lambda limit: {  # noqa: ARG005
+        t, "_spotify_all_playlists_blocking",
+        lambda cap: {  # noqa: ARG005
             "count": 1, "items": [{"uri": "spotify:playlist:abc", "title": "Daily Mix 2"}],
         },
     )

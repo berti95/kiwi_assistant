@@ -922,6 +922,51 @@ def _spotify_my_playlists_blocking(limit: int = 20) -> dict:
     return {"count": len(items), "items": items}
 
 
+def _spotify_all_playlists_blocking(cap: int = 200) -> dict:
+    """Como :func:`_spotify_my_playlists_blocking` pero paginado.
+
+    ``/me/playlists`` acepta un ``limit`` máximo de 50 y ``offset`` para
+    paginar. Muchos usuarios activos superan 50 playlists (playlists de
+    festivales, colaborativas, seguidas, más las auto-generadas
+    Discover Weekly / Daily Mix cuando se marcan con corazón), así que
+    hacer una sola llamada deja fuera todo lo que esté por encima. Este
+    helper itera con offset hasta agotarse o tocar el ``cap``.
+
+    Cap por defecto 200: cubre el 99% de bibliotecas sin generar más
+    de 4 llamadas contra la API (5 rps es un ancho de banda holgado).
+    """
+    cap = max(1, cap)
+    per_page = 50
+    items: list[dict] = []
+    offset = 0
+    try:
+        while len(items) < cap:
+            remaining = cap - len(items)
+            page_limit = min(per_page, remaining)
+            payload = _spotify_get(
+                "/me/playlists",
+                params={"limit": page_limit, "offset": offset},
+            )
+            page_items = [
+                _playlist_summary_dto(p)
+                for p in payload.get("items") or [] if p
+            ]
+            items.extend(page_items)
+            # ``total`` es opcional; si no viene, salimos cuando la
+            # página deje de traer resultados.
+            total = payload.get("total")
+            if not page_items:
+                break
+            offset += len(page_items)
+            if total is not None and offset >= total:
+                break
+    except requests.HTTPError as exc:
+        return {"error": f"spotify api error: {exc.response.status_code}"}
+    except spotify_auth.SpotifyAuthUnavailableError as exc:
+        return {"error": str(exc)}
+    return {"count": len(items), "items": items}
+
+
 def _spotify_recently_played_blocking(limit: int = 20) -> dict:
     limit = max(1, min(limit, 50))
     try:
@@ -1482,7 +1527,13 @@ async def _spotify_play_mix_tool(name: str) -> ToolResult:
     """
     if not name or not name.strip():
         return ToolResult(response={"error": "missing mix name"})
-    mine = await asyncio.to_thread(_spotify_my_playlists_blocking, 50)
+    # Paginamos hasta 200 playlists: la /me/playlists nativa capa a 50
+    # por request, y las playlists auto-generadas de Spotify
+    # (Descubrimiento Semanal, Daily Mix N, Radar de Novedades, On
+    # Repeat) suelen quedar por debajo de las de festivales / usuario
+    # cuando el user tiene muchas seguidas. Sin paginación se quedaban
+    # invisibles aunque estuvieran marcadas con corazón.
+    mine = await asyncio.to_thread(_spotify_all_playlists_blocking, 200)
     featured = await asyncio.to_thread(_spotify_featured_playlists_blocking, 50)
     candidates: list[dict] = []
     candidates.extend(mine.get("items") or [])
