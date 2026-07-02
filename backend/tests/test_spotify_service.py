@@ -677,6 +677,61 @@ def test_all_playlists_respects_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["count"] == 30
 
 
+def test_play_mix_triggers_auto_wake_when_no_active_device(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """spotify_play_mix debe replicar el flow de auto-wake de spotify_play.
+
+    Bug real de producción: el user pedía por voz "pon la de FIB 2026",
+    la playlist se encontraba correctamente pero el play daba "no
+    active device" y se rendía sin llamar al Waze-pattern de despertar
+    Spotify — porque play_mix llamaba directo a ``_spotify_play_blocking``
+    sin ``on_scene``. Este test asegura que el auto-wake se dispara.
+    """
+    monkeypatch.setattr(
+        t, "_spotify_all_playlists_blocking",
+        lambda cap: {  # noqa: ARG005
+            "count": 1, "items": [{"uri": "spotify:playlist:fib", "title": "FIB 2026"}],
+        },
+    )
+    monkeypatch.setattr(
+        t, "_spotify_featured_playlists_blocking",
+        lambda limit: {"count": 0, "items": []},  # noqa: ARG005
+    )
+    calls: list[tuple[str | None, str | None, str | None]] = []
+
+    def fake_play_blocking(uri, query, device_id=None):
+        calls.append((uri, query, device_id))
+        if len(calls) == 1:
+            return ({"error": "no active spotify device"}, None)
+        return ({"started": uri}, {"type": "now_playing", "title": "FIB 2026",
+                                    "artist": "", "album": "",
+                                    "album_art_url": None, "is_playing": True,
+                                    "duration_ms": 0, "progress_ms": 0})
+
+    monkeypatch.setattr(t, "_spotify_play_blocking", fake_play_blocking)
+    monkeypatch.setattr(
+        t, "_wait_for_device_blocking",
+        lambda pattern: "tablet-dev-id",  # noqa: ARG005
+    )
+
+    pushed: list[dict] = []
+
+    async def sink(scene: dict) -> None:
+        pushed.append(scene)
+
+    from kiwi_backend import tools as kt
+    result = _run(kt.dispatch(
+        "spotify_play_mix", {"name": "FIB 2026"}, on_scene=sink,
+    ))
+    # 1er play sin device_id → falló → wake push → 2do play con device_id.
+    assert len(calls) == 2
+    assert calls[1][2] == "tablet-dev-id"
+    assert pushed[0]["type"] == "device_command"
+    assert pushed[0]["package"] == "com.spotify.music"
+    assert "started" in result
+
+
 def test_play_mix_uses_pagination_and_finds_descubrimiento_semanal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

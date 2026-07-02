@@ -509,31 +509,28 @@ def _wait_for_device_blocking(name_pattern: str) -> str | None:
     return None
 
 
-async def _spotify_play(
-    uri: str | None = None,
-    query: str | None = None,
+async def _play_with_wake(
+    uri: str | None,
+    query: str | None,
+    on_scene: SceneSink | None,
     *,
-    on_scene: SceneSink | None = None,
-) -> ToolResult:
-    """Reproduce algo en Spotify; si no hay device activo, "despierta"
-    la app de Spotify en el tablet y reintenta apuntando a él.
+    caller: str = "spotify_play",
+) -> tuple[dict, dict | None]:
+    """Intenta ``_spotify_play_blocking`` y, si no hay device activo,
+    dispara el flow "abre Spotify en el tablet + espera + retry con
+    device_id explícito" — mismo Waze-pattern que ya existía en
+    :func:`_spotify_play`, extraído aquí para poder reusarlo desde
+    ``_spotify_play_mix_tool``, ``_spotify_recommend_tool`` y
+    cualquier futura tool que dispare un play sin device_id.
 
-    El flow auto-wake imita lo que hace Waze: si no hay nadie
-    escuchando, le pedimos al tablet que lance la app de Spotify
-    (Intent ``launchIntentForPackage``). Luego sondeamos
-    /me/player/devices hasta que el tablet aparece como dispositivo
-    Connect (cold start ~5-10s) y reproducimos con ``device_id``
-    explícito — porque recién abierto Spotify está *disponible* pero
-    no *activo*, así que un play sin device_id volvería a dar 404.
-
-    Una sola llamada a la tool orquesta todo, así que Kiwi sólo
-    habla una vez (con el resultado final) en lugar de pedir al
-    usuario que abra Spotify a mano.
+    Devuelve el par ``(response, scene)`` para que el caller lo
+    embale en un :class:`ToolResult`. Loggea con ``caller`` para
+    poder diferenciar en producción quién disparó el wake.
     """
     response, scene = await asyncio.to_thread(_spotify_play_blocking, uri, query)
 
     if _looks_like_no_active_device(response) and on_scene is not None:
-        log.info("spotify_play: no active device → waking Spotify on tablet")
+        log.info("%s: no active device → waking Spotify on tablet", caller)
         try:
             await on_scene({
                 "type": "device_command",
@@ -547,13 +544,24 @@ async def _spotify_play(
         pattern = _settings.kiwi_spotify_tablet_name or "tablet"
         device_id = await asyncio.to_thread(_wait_for_device_blocking, pattern)
         if device_id is not None:
-            log.info("spotify_play: retrying targeting device %s", device_id)
+            log.info("%s: retrying targeting device %s", caller, device_id)
             response, scene = await asyncio.to_thread(
                 _spotify_play_blocking, uri, query, device_id,
             )
         else:
-            log.info("spotify_play: tablet device never appeared after wake")
+            log.info("%s: tablet device never appeared after wake", caller)
 
+    return response, scene
+
+
+async def _spotify_play(
+    uri: str | None = None,
+    query: str | None = None,
+    *,
+    on_scene: SceneSink | None = None,
+) -> ToolResult:
+    """Reproduce algo en Spotify con auto-wake. Ver :func:`_play_with_wake`."""
+    response, scene = await _play_with_wake(uri, query, on_scene, caller="spotify_play")
     return ToolResult(response=response, scene=scene)
 
 
@@ -1517,13 +1525,21 @@ async def _spotify_recommend_tool(
     return ToolResult(response=result, scene=scene)
 
 
-async def _spotify_play_mix_tool(name: str) -> ToolResult:
+async def _spotify_play_mix_tool(
+    name: str,
+    *,
+    on_scene: SceneSink | None = None,
+) -> ToolResult:
     """Resuelve fuzzy ``name`` contra las playlists del usuario + las
     "Made for You" / featured y reproduce la primera que case.
 
     Útil para "Kiwi, pon mi Daily Mix 2" sin que el usuario tenga
     que recordar la URI exacta. Si nada casa, devuelve error con
     la lista de mixes disponibles.
+
+    Incluye el mismo auto-wake que :func:`_spotify_play`: si no hay
+    device activo tras encontrar la playlist, despierta Spotify en
+    el tablet y reintenta antes de rendirse.
     """
     if not name or not name.strip():
         return ToolResult(response={"error": "missing mix name"})
@@ -1551,8 +1567,8 @@ async def _spotify_play_mix_tool(name: str) -> ToolResult:
         return ToolResult(response={
             "error": f"no mix matched {name!r}. available: {titles}",
         })
-    response, scene = await asyncio.to_thread(
-        _spotify_play_blocking, matched.get("uri"), None, None,
+    response, scene = await _play_with_wake(
+        matched.get("uri"), None, on_scene, caller="spotify_play_mix",
     )
     response = {**response, "mix_title": matched.get("title")}
     return ToolResult(response=response, scene=scene)
