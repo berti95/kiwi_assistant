@@ -653,14 +653,6 @@ def test_all_playlists_paginates_across_pages(
 
 def test_all_playlists_respects_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """El cap limita cuántas playlists trae en total."""
-    pages = {
-        0: {
-            "items": [{"uri": f"spotify:playlist:p{i}", "name": f"P{i}"}
-                      for i in range(50)],
-            "total": 200,
-        },
-    }
-
     def fake_get(path: str, params=None):
         offset = (params or {}).get("offset", 0)
         limit = (params or {}).get("limit", 50)
