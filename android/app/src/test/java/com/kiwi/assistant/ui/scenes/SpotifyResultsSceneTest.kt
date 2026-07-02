@@ -4,10 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.assertIsDisplayed  // still used por si acaso
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.SpotifyResultItem
@@ -83,7 +84,7 @@ class SpotifyResultsSceneTest {
                 )
             }
         }
-        rule.onNodeWithText("Suburbia").performClick()
+        rule.onNodeWithText("Suburbia").performSemanticsAction(SemanticsActions.OnClick)
         assert(tapped?.uri == "spotify:track:1")
     }
 

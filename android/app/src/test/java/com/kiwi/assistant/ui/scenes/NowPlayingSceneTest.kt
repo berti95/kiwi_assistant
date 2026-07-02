@@ -4,12 +4,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.dp
 import com.kiwi.assistant.ui.Scene
 import com.kiwi.assistant.ui.SpotifyDevice
@@ -83,6 +85,16 @@ class NowPlayingSceneTest {
         Box(modifier = Modifier.size(1280.dp, 800.dp)) { content() }
     }
 
+    /**
+     * Dispara la acción semántica de click directamente sin pasar por
+     * el pipeline de touch de Compose. En Robolectric ese pipeline
+     * puede no completar el evento y ``performClick()`` acaba sin
+     * invocar el callback aunque el nodo se encuentre.
+     */
+    private fun SemanticsNodeInteraction.clickSemantically() {
+        performSemanticsAction(SemanticsActions.OnClick)
+    }
+
     // ---- render ----
 
     @Test
@@ -115,7 +127,7 @@ class NowPlayingSceneTest {
                 )
             }
         }
-        rule.onNodeWithTag(NowPlayingTags.PLAY_PAUSE).performClick()
+        rule.onNodeWithTag(NowPlayingTags.PLAY_PAUSE).clickSemantically()
         assert(clicks == 1)
     }
 
@@ -132,8 +144,8 @@ class NowPlayingSceneTest {
                 )
             }
         }
-        rule.onNodeWithTag(NowPlayingTags.NEXT).performClick()
-        rule.onNodeWithTag(NowPlayingTags.PREVIOUS).performClick()
+        rule.onNodeWithTag(NowPlayingTags.NEXT).clickSemantically()
+        rule.onNodeWithTag(NowPlayingTags.PREVIOUS).clickSemantically()
         assert(nextHits == 1)
         assert(prevHits == 1)
     }
@@ -149,7 +161,7 @@ class NowPlayingSceneTest {
                 )
             }
         }
-        rule.onNodeWithTag(NowPlayingTags.SHUFFLE).performClick()
+        rule.onNodeWithTag(NowPlayingTags.SHUFFLE).clickSemantically()
         assert(hits == 1)
     }
 
@@ -164,7 +176,7 @@ class NowPlayingSceneTest {
                 )
             }
         }
-        rule.onNodeWithTag(NowPlayingTags.REPEAT).performClick()
+        rule.onNodeWithTag(NowPlayingTags.REPEAT).clickSemantically()
         assert(hits == 1)
     }
 
@@ -179,7 +191,7 @@ class NowPlayingSceneTest {
                 )
             }
         }
-        rule.onNodeWithTag(NowPlayingTags.LIKE).performClick()
+        rule.onNodeWithTag(NowPlayingTags.LIKE).clickSemantically()
         assert(hits == 1)
     }
 
