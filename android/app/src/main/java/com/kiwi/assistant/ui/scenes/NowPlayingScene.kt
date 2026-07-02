@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -334,7 +335,10 @@ private fun TransportRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        IconButton(onClick = onToggleShuffle, modifier = Modifier.size(48.dp)) {
+        IconButton(
+            onClick = onToggleShuffle,
+            modifier = Modifier.size(48.dp).testTag(NowPlayingTags.SHUFFLE),
+        ) {
             Icon(
                 imageVector = Icons.Filled.Shuffle,
                 contentDescription = if (shuffle) "Quitar aleatorio" else "Aleatorio",
@@ -346,7 +350,10 @@ private fun TransportRow(
                 modifier = Modifier.size(24.dp),
             )
         }
-        IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp)) {
+        IconButton(
+            onClick = onPrevious,
+            modifier = Modifier.size(56.dp).testTag(NowPlayingTags.PREVIOUS),
+        ) {
             Icon(
                 imageVector = Icons.Filled.SkipPrevious,
                 contentDescription = "Anterior",
@@ -356,7 +363,7 @@ private fun TransportRow(
         }
         FilledIconButton(
             onClick = onPlayPause,
-            modifier = Modifier.size(72.dp),
+            modifier = Modifier.size(72.dp).testTag(NowPlayingTags.PLAY_PAUSE),
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = Color.White,
                 contentColor = Color.Black,
@@ -369,7 +376,10 @@ private fun TransportRow(
                 modifier = Modifier.size(36.dp),
             )
         }
-        IconButton(onClick = onNext, modifier = Modifier.size(56.dp)) {
+        IconButton(
+            onClick = onNext,
+            modifier = Modifier.size(56.dp).testTag(NowPlayingTags.NEXT),
+        ) {
             Icon(
                 imageVector = Icons.Filled.SkipNext,
                 contentDescription = "Siguiente",
@@ -377,7 +387,10 @@ private fun TransportRow(
                 modifier = Modifier.size(40.dp),
             )
         }
-        IconButton(onClick = onCycleRepeat, modifier = Modifier.size(48.dp)) {
+        IconButton(
+            onClick = onCycleRepeat,
+            modifier = Modifier.size(48.dp).testTag(NowPlayingTags.REPEAT),
+        ) {
             val (icon, tint, desc) = when (repeatState) {
                 "track" -> Triple(
                     Icons.Filled.RepeatOne,
@@ -418,7 +431,10 @@ private fun SecondaryRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        IconButton(onClick = onToggleLike, modifier = Modifier.size(48.dp)) {
+        IconButton(
+            onClick = onToggleLike,
+            modifier = Modifier.size(48.dp).testTag(NowPlayingTags.LIKE),
+        ) {
             Icon(
                 imageVector = if (liked == true) Icons.Filled.Favorite
                               else Icons.Filled.FavoriteBorder,
@@ -478,4 +494,25 @@ private fun formatMs(ms: Long): String {
     val mins = totalSeconds / 60
     val secs = totalSeconds % 60
     return "%d:%02d".format(mins, secs)
+}
+
+/**
+ * Test tags de los controles interactivos de la [NowPlayingScene].
+ *
+ * Los tests UI de Compose bajo Robolectric son frágiles cuando se
+ * intenta localizar botones por su ``contentDescription`` — la
+ * merge-tree y el layout de ``BoxWithConstraints`` no siempre exponen
+ * los nodos como se esperaría. Etiquetar cada IconButton con un tag
+ * fijo elimina esa ambigüedad y hace los tests deterministas.
+ *
+ * Los tags son cadenas planas para poder usarlos también desde
+ * ``androidTest`` sin arrastrar imports.
+ */
+object NowPlayingTags {
+    const val SHUFFLE = "np_shuffle"
+    const val PREVIOUS = "np_previous"
+    const val PLAY_PAUSE = "np_play_pause"
+    const val NEXT = "np_next"
+    const val REPEAT = "np_repeat"
+    const val LIKE = "np_like"
 }
