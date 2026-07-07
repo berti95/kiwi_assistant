@@ -64,9 +64,9 @@ jobs:
             --service-account="$RUNTIME_SA" \
             --allow-unauthenticated \
             --port=8080 \
-            --memory=512Mi \
+            --memory=256Mi \
             --cpu=1 \
-            --min-instances=1 \
+            --min-instances=0 \
             --max-instances=1 \
             --timeout=3600 \
             --session-affinity \
