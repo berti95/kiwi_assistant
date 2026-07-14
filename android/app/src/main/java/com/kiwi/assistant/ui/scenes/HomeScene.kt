@@ -202,12 +202,29 @@ fun HomeScene(
             ClockBlock(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = KiwiSpacing.lg),
+                    .padding(bottom = KiwiSpacing.sm),
                 compact = true,
                 weather = snapshot?.weather,
                 nextAlarmMs = nextAlarmMs,
                 onNextAlarmTap = onOpenAlarmList,
             )
+
+            // #7 Chip contextual justo bajo el reloj compacto — se
+            // pinta antes del pair de cards para que el usuario lo
+            // vea de reojo sin buscarlo.
+            HomeContextualHeader(
+                events = snapshot?.eventsToday.orEmpty(),
+            )
+            Spacer(Modifier.height(KiwiSpacing.md))
+
+            // #5 Barra "próximo evento en X min". Sólo aparece si hay
+            // uno dentro de las próximas 2h — no roba espacio cuando
+            // no aplica.
+            val eventsForBar = snapshot?.eventsToday.orEmpty()
+            if (eventsForBar.isNotEmpty()) {
+                NextEventBar(events = eventsForBar)
+                Spacer(Modifier.height(KiwiSpacing.sm))
+            }
 
             Row(
                 modifier = Modifier
@@ -555,9 +572,20 @@ private fun AgendaCard(
             CardEmpty("Nada en la agenda.")
             return@DashboardCard
         }
+        // Tick por minuto para que el clasificador de estado
+        // (past/active/upcoming) no se quede rancio mientras el
+        // usuario está mirando la home. Reusa el mismo pulso que el
+        // reloj para no doblar timers.
+        var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                nowMs = System.currentTimeMillis()
+                delay(60_000L - (System.currentTimeMillis() % 60_000L))
+            }
+        }
         Column(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm + 2.dp)) {
             events.take(MAX_AGENDA_ROWS).forEach { event ->
-                EventRow(event)
+                EventRow(event, eventStatus(event, nowMs))
             }
         }
     }
@@ -961,21 +989,253 @@ private fun CardEmpty(text: String) {
     }
 }
 
+/**
+ * Estado temporal de un evento dentro del día. ``Active`` marca los
+ * que están sucediendo ahora mismo — el usuario lo verá con un chip
+ * "▶ En curso" y un borde de acento (#4).
+ */
+private enum class EventStatus { Past, Active, Upcoming }
+
+private fun eventStatus(event: CalendarEvent, nowMs: Long): EventStatus {
+    if (event.allDay) {
+        // All-day: si hoy cae dentro del rango, "Active"; si el rango
+        // ya pasó (poco común porque el backend filtra por hoy), "Past".
+        return runCatching {
+            val start = LocalDate.parse(event.startsAt)
+            val endExclusive = LocalDate.parse(event.endsAt)
+            val today = LocalDate.now()
+            if (today in start..endExclusive.minusDays(1)) EventStatus.Active
+            else if (today.isAfter(endExclusive.minusDays(1))) EventStatus.Past
+            else EventStatus.Upcoming
+        }.getOrDefault(EventStatus.Upcoming)
+    }
+    return runCatching {
+        val start = OffsetDateTime.parse(event.startsAt).toInstant().toEpochMilli()
+        val end = OffsetDateTime.parse(event.endsAt).toInstant().toEpochMilli()
+        when {
+            nowMs < start -> EventStatus.Upcoming
+            nowMs in start..end -> EventStatus.Active
+            else -> EventStatus.Past
+        }
+    }.getOrDefault(EventStatus.Upcoming)
+}
+
 @Composable
-private fun EventRow(event: CalendarEvent) {
-    Column {
+private fun EventRow(event: CalendarEvent, status: EventStatus) {
+    val isActive = status == EventStatus.Active
+    val isPast = status == EventStatus.Past
+    val slotColor = when {
+        isActive -> Color(0xFF7AD97F)  // Verde suave para "en curso"
+        isPast -> Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY)
+        else -> Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY)
+    }
+    val titleColor = if (isPast) Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY)
+        else Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY)
+    val titleDecoration = if (isPast) TextDecoration.LineThrough else null
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (isActive) {
+            // Punto verde pulsando (visualmente: fixed dot, sin
+            // animación por ahora — animación cuesta recomposition
+            // en un loop de un tick por segundo).
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF7AD97F)),
+            )
+            Spacer(Modifier.width(KiwiSpacing.sm))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = formatEventSlot(event),
+                    color = slotColor,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (isActive) {
+                    Spacer(Modifier.width(KiwiSpacing.sm))
+                    Text(
+                        text = "En curso",
+                        color = Color(0xFF7AD97F),
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFF7AD97F).copy(alpha = 0.15f))
+                            .padding(horizontal = KiwiSpacing.sm, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(
+                text = event.title,
+                color = titleColor,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    textDecoration = titleDecoration,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Barra sobre la agenda con "próximo evento en X min" cuando hay uno
+ * dentro de las próximas dos horas (#5). Se auto-actualiza cada minuto
+ * (mismo tick que el reloj). Devuelve null si no hay evento próximo
+ * relevante — la home queda igual que antes.
+ */
+@Composable
+private fun NextEventBar(events: List<CalendarEvent>) {
+    var tickMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            tickMs = System.currentTimeMillis()
+            val toNextMinute = 60_000L - (System.currentTimeMillis() % 60_000L)
+            delay(toNextMinute)
+        }
+    }
+    val next = remember(events, tickMs) {
+        nextUpcomingEventWithinHours(events, tickMs, hoursAhead = 2)
+    } ?: return
+    val (event, startMs) = next
+    val minutes = ((startMs - tickMs) / 60_000L).coerceAtLeast(0).toInt()
+    val label = when {
+        minutes <= 1 -> "en 1 min"
+        minutes < 60 -> "en $minutes min"
+        else -> {
+            val h = minutes / 60
+            val m = minutes % 60
+            if (m == 0) "en ${h}h" else "en ${h}h${m}"
+        }
+    }
+    // Progreso hacia el evento: 0 = ahora mismo, 1 = hace 2h. Se
+    // interpreta al revés para que la barra crezca a medida que se
+    // acerca (más útil visualmente que decrezca).
+    val totalWindowMs = 2 * 60 * 60 * 1000L
+    val progress = (1f - (startMs - tickMs).toFloat() / totalWindowMs).coerceIn(0f, 1f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(KiwiRadii.sm))
+            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.sm),
+    ) {
         Text(
-            text = formatEventSlot(event),
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-            style = MaterialTheme.typography.labelLarge,
-        )
-        Text(
-            text = event.title,
+            text = "Próximo · ${event.title} · $label",
             color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        Spacer(Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.08f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(progress)
+                    .background(Color(0xFF7AD97F)),
+            )
+        }
+    }
+}
+
+private fun nextUpcomingEventWithinHours(
+    events: List<CalendarEvent>,
+    nowMs: Long,
+    hoursAhead: Int,
+): Pair<CalendarEvent, Long>? {
+    val horizonMs = nowMs + hoursAhead * 60L * 60_000L
+    var best: Pair<CalendarEvent, Long>? = null
+    for (ev in events) {
+        if (ev.allDay) continue
+        val startMs = runCatching {
+            OffsetDateTime.parse(ev.startsAt).toInstant().toEpochMilli()
+        }.getOrNull() ?: continue
+        if (startMs < nowMs || startMs > horizonMs) continue
+        if (best == null || startMs < best!!.second) best = ev to startMs
+    }
+    return best
+}
+
+/**
+ * Chip contextual sobre el ClockBlock (#7). Cambia según hora del día
+ * + qué hay hoy — para dar un latido de vida al home cuando el resto
+ * del contenido es estático. Ejemplos:
+ *   - Mañana laborable: "Buenos días · Café ☕"
+ *   - Mañana fin de semana: "Buen finde"
+ *   - Mediodía con evento próximo: "Comer pronto"
+ *   - Tarde tranquila: "Tarde tranquila"
+ *   - Noche con alarma: "Buenas noches"
+ */
+private fun contextualSuggestion(
+    hour: Int,
+    weekday: java.time.DayOfWeek,
+    hasEventNext2h: Boolean,
+    hasEventsToday: Boolean,
+): String? {
+    val isWeekend = weekday == java.time.DayOfWeek.SATURDAY ||
+        weekday == java.time.DayOfWeek.SUNDAY
+    return when (hour) {
+        in 5..8 -> if (isWeekend) "Buen finde · ☕ tranquila" else "Buenos días · ☕"
+        in 9..11 -> if (hasEventNext2h) "Prepara el próximo" else "Buena mañana"
+        in 12..14 -> if (hasEventNext2h) "Come pronto" else "Hora de comer 🍽️"
+        in 15..17 -> if (hasEventsToday) "Media tarde" else "Tarde tranquila"
+        in 18..20 -> if (isWeekend) "Buena tarde de fin de semana" else "Casi noche"
+        in 21..23 -> "Buenas noches 🌙"
+        in 0..4 -> "Todavía de madrugada"
+        else -> null
+    }
+}
+
+@Composable
+private fun ContextualChip(text: String) {
+    Text(
+        text = text,
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = KiwiOpacity.BADGE_BG))
+            .padding(horizontal = KiwiSpacing.md, vertical = KiwiSpacing.xs + 2.dp),
+    )
+}
+
+/**
+ * Envoltorio con tick por minuto para el chip contextual — así el
+ * saludo pasa de "Buenos días" a "Hora de comer" sin necesidad de
+ * refresh manual. Devuelve un Box en lugar de null cuando no hay
+ * texto para no colapsar el padding del contenedor padre.
+ */
+@Composable
+private fun HomeContextualHeader(events: List<CalendarEvent>) {
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalDateTime.now()
+            delay(60_000L - (System.currentTimeMillis() % 60_000L))
+        }
+    }
+    val nowMs = now.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    val hasEventNext2h = nextUpcomingEventWithinHours(events, nowMs, 2) != null
+    val text = contextualSuggestion(
+        hour = now.hour,
+        weekday = now.dayOfWeek,
+        hasEventNext2h = hasEventNext2h,
+        hasEventsToday = events.isNotEmpty(),
+    ) ?: return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        ContextualChip(text = text)
     }
 }
 
