@@ -172,51 +172,6 @@ def aggregate(period: Period, now_ms: int | None = None) -> dict:
     }
 
 
-def daily_costs(days: int = 7, now_ms: int | None = None) -> list[dict]:
-    """Coste estimado de los últimos ``days`` días, uno por elemento.
-
-    Alimenta el sparkline del home (#10): una serie corta y estable
-    con la que dibujar la línea sin que el cliente tenga que hacer
-    agregaciones. La lista está ordenada del más antiguo al más
-    reciente para que la sparkline se pinte "hacia la derecha".
-    Cada elemento tiene ``{date, cost_eur, conversation_count}``.
-    """
-    days = max(1, min(days, 30))
-    now = now_ms if now_ms is not None else int(time.time() * 1000)
-    items = _load_raw()
-
-    day_windows: list[tuple[int, int]] = []
-    # Empezamos por el día más antiguo — hoy es el último. UTC-day
-    # granularity (mismo compromise que aggregate("today")).
-    for offset in range(days - 1, -1, -1):
-        # 00:00 UTC del día objetivo
-        start_of_now = now - ((now // 1000) % (24 * 3600)) * 1000
-        day_start = start_of_now - offset * _DAY_MS
-        day_end = day_start + _DAY_MS - 1
-        day_windows.append((day_start, day_end))
-
-    out: list[dict] = []
-    from datetime import UTC, datetime  # noqa: PLC0415  (local: evita ciclo)
-
-    for start, end in day_windows:
-        in_win = [
-            it for it in items if start <= it.started_at_ms <= end
-        ]
-        audio_in = sum(it.audio_in_seconds for it in in_win)
-        audio_out = sum(it.audio_out_seconds for it in in_win)
-        cost = (
-            audio_in * settings.kiwi_cost_audio_in_eur_per_second
-            + audio_out * settings.kiwi_cost_audio_out_eur_per_second
-        )
-        iso = datetime.fromtimestamp(start / 1000, tz=UTC).date().isoformat()
-        out.append({
-            "date": iso,
-            "cost_eur": round(cost, 4),
-            "conversation_count": len(in_win),
-        })
-    return out
-
-
 def reset_for_tests() -> None:
     """Clears the on-disk log — only for tests."""
     _save([])

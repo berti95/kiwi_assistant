@@ -58,13 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import com.kiwi.assistant.ui.CalendarEvent
-import com.kiwi.assistant.ui.DailyCost
 import com.kiwi.assistant.ui.FactoidItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
@@ -222,6 +216,10 @@ fun HomeScene(
             HomeContextualHeader(
                 events = snapshot?.eventsToday.orEmpty(),
             )
+            snapshot?.factoid?.let { f ->
+                Spacer(Modifier.height(KiwiSpacing.xs))
+                FactoidLine(factoid = f)
+            }
             Spacer(Modifier.height(KiwiSpacing.md))
 
             // #5 Barra "próximo evento en X min". Sólo aparece si hay
@@ -288,34 +286,6 @@ fun HomeScene(
                 onAdd = onAddPostIt,
                 onRemove = onRemovePostIt,
             )
-
-            // Bundle D · row de widgets de datos: sparkline de gasto
-            // (#10) + "hoy en el mundo" (#14). Se pintan a lo largo
-            // de la fila; si alguno falta (backend viejo, factoid
-            // caído) el otro ocupa todo el ancho.
-            val hasCost = snapshot?.costSeries?.any { it.costEur > 0 } == true
-            val factoidData = snapshot?.factoid
-            if (hasCost || factoidData != null) {
-                Spacer(Modifier.height(KiwiSpacing.md))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.md),
-                ) {
-                    if (hasCost) {
-                        CostSparklineCard(
-                            series = snapshot?.costSeries.orEmpty(),
-                            onOpen = onOpenUsageStats,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (factoidData != null) {
-                        FactoidCard(
-                            factoid = factoidData,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
         }
 
         Spacer(Modifier.height(KiwiSpacing.md))
@@ -1339,126 +1309,23 @@ private fun formatEventSlot(event: CalendarEvent): String {
 }
 
 /**
- * Sparkline del gasto de los últimos 7 días (#10). Card ligera —
- * label + coste total + una línea que sube/baja según los daily
- * costs del backend. El área bajo la línea se rellena con un alpha
- * bajo para dar peso visual sin ruido.
+ * Línea única "Hoy en 1223 · En Francia…" bajo el chip contextual,
+ * apretada al top del home para no competir con el chip "Habla con
+ * Kiwi" en el borde inferior. Sin fondo — sólo texto secundario para
+ * que sea un latido de información, no una card gorda.
  */
 @Composable
-private fun CostSparklineCard(
-    series: List<DailyCost>,
-    onOpen: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val total = series.sumOf { it.costEur }
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(KiwiRadii.md))
-            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
-            .clickable { onOpen() }
-            .padding(KiwiSpacing.md),
-    ) {
-        Text(
-            text = "Gasto semana",
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = "%.2f €".format(total),
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(KiwiSpacing.sm))
-        Sparkline(
-            values = series.map { it.costEur.toFloat() },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(32.dp),
-        )
-    }
-}
-
-@Composable
-private fun Sparkline(values: List<Float>, modifier: Modifier = Modifier) {
-    val color = Color(0xFF7AD97F)
-    Canvas(modifier = modifier) {
-        if (values.size < 2) return@Canvas
-        val maxV = (values.max()).coerceAtLeast(0.001f)
-        val minV = 0f
-        val w = size.width
-        val h = size.height
-        val stepX = w / (values.size - 1)
-        val points = values.mapIndexed { i, v ->
-            val x = i * stepX
-            // Reservamos 2dp arriba y abajo para que el stroke no
-            // se corte contra el borde del canvas.
-            val yNorm = (v - minV) / (maxV - minV)
-            val y = h - (yNorm * (h - 4f)) - 2f
-            Offset(x, y)
-        }
-
-        // Área rellena bajo la línea (alpha bajo para no competir
-        // con la línea principal).
-        val fill = Path().apply {
-            moveTo(points.first().x, h)
-            points.forEach { lineTo(it.x, it.y) }
-            lineTo(points.last().x, h)
-            close()
-        }
-        drawPath(fill, color.copy(alpha = 0.15f))
-
-        // Línea principal.
-        val stroke = Path().apply {
-            moveTo(points.first().x, points.first().y)
-            points.drop(1).forEach { lineTo(it.x, it.y) }
-        }
-        drawPath(
-            stroke,
-            color,
-            style = Stroke(width = 3f, cap = StrokeCap.Round),
-        )
-    }
-}
-
-/**
- * Card "Hoy en el mundo" (#14): dato histórico corto. Se muestra
- * como texto secundario para no dominar; el año en negrita da
- * anclaje temporal.
- */
-@Composable
-private fun FactoidCard(
-    factoid: FactoidItem,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(KiwiRadii.md))
-            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
-            .padding(KiwiSpacing.md),
-    ) {
-        Text(
-            text = "Hoy en el mundo",
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = "· ${factoid.year} ·",
-            color = Color(0xFF7AD97F),
-            style = MaterialTheme.typography.titleSmall.copy(
-                fontWeight = FontWeight.SemiBold,
-            ),
-        )
-        Spacer(Modifier.height(KiwiSpacing.xs))
-        Text(
-            text = factoid.text,
-            color = Color.White.copy(alpha = KiwiOpacity.TEXT_PRIMARY),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+private fun FactoidLine(factoid: FactoidItem) {
+    Text(
+        text = "Hoy en ${factoid.year} · ${factoid.text}",
+        color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = KiwiSpacing.md),
+    )
 }
 
 /**

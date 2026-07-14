@@ -3,7 +3,6 @@ package com.kiwi.assistant.network
 import com.kiwi.assistant.log.KLog
 import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.AlarmItem
-import com.kiwi.assistant.ui.DailyCost
 import com.kiwi.assistant.ui.FactoidItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
@@ -149,17 +148,6 @@ class HomeStatePoller(
             )
         }
 
-        val costsArr = root["cost_series"] as? JsonArray ?: JsonArray(emptyList())
-        val costSeries = costsArr.mapNotNull { el ->
-            val obj = el as? JsonObject ?: return@mapNotNull null
-            DailyCost(
-                date = obj.string("date") ?: return@mapNotNull null,
-                costEur = (obj["cost_eur"] as? JsonPrimitive)?.doubleOrNull ?: 0.0,
-                conversationCount = (obj["conversation_count"] as? JsonPrimitive)
-                    ?.intOrNull ?: 0,
-            )
-        }
-
         val factoid = (root["factoid"] as? JsonObject)?.let { obj ->
             FactoidItem(
                 date = obj.string("date") ?: return@let null,
@@ -177,7 +165,6 @@ class HomeStatePoller(
             alarms = alarms,
             postits = postits,
             recentlyPlayed = recentlyPlayed,
-            costSeries = costSeries,
             factoid = factoid,
         )
     }
