@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +53,9 @@ import com.kiwi.assistant.ui.WeatherInfo
 import com.kiwi.assistant.ui.theme.KiwiOpacity
 import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
+import com.kiwi.assistant.ui.theme.rememberAlbumDominantColor
+import com.kiwi.assistant.ui.theme.weatherBackgroundBrush
+import com.kiwi.assistant.ui.theme.weatherEmoji
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -113,12 +117,55 @@ fun HomeScene(
         ?.minOrNull()
     val alarmsCount = snapshot?.alarms?.size ?: 0
 
-    Column(
+    // #8: Fondo dinámico del home según clima. Recolectamos el mismo
+    // gradient que la Ambient view pero lo pintamos sobre negro con
+    // un alpha muy bajo (0.35): en la home queremos "un sabor" del
+    // cielo, no ahogar las cards. Sin snapshot → negro plano.
+    val weatherIcon = snapshot?.weather?.icon
+    val weatherBrush = weatherBackgroundBrush(weatherIcon)
+    // #2: Tinte del home cuando suena algo — color dominante de la
+    // carátula en un radial suave, arriba a la izquierda. Devuelve
+    // negro cuando no hay URL, así que el overlay se auto-oculta.
+    val albumTint = rememberAlbumDominantColor(snapshot?.nowPlaying?.albumArtUrl)
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
-            .padding(horizontal = KiwiSpacing.xl, vertical = KiwiSpacing.xl + KiwiSpacing.xs),
+            .background(Color.Black),
     ) {
+        // Fondo de cielo: 35% de alpha para no competir con las
+        // cards blancas semitransparentes de la home.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(weatherBrush, alpha = 0.35f),
+        )
+        if (snapshot?.nowPlaying != null) {
+            // Halo cálido del álbum en el rincón superior-izquierdo,
+            // fundido con Screen-like alpha. Sólo se ve cuando suena
+            // algo, así que el idle "clásico" no cambia.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                albumTint.copy(alpha = 0.28f),
+                                Color.Transparent,
+                            ),
+                            radius = 1200f,
+                        ),
+                    ),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = KiwiSpacing.xl,
+                    vertical = KiwiSpacing.xl + KiwiSpacing.xs,
+                ),
+        ) {
         // Empty home: clock takes most of the screen, quick
         // actions still pinned at the bottom so the user can
         // navigate into Compra / Alarmas / etc. without voice.
@@ -180,7 +227,8 @@ fun HomeScene(
             updateStatus = updateStatus,
             alarmsCount = alarmsCount,
         )
-    }
+        }  // Column
+    }  // Box (contenedor con fondos)
 }
 
 /**
@@ -372,37 +420,64 @@ private fun NextAlarmLine(
     )
 }
 
+/**
+ * Línea de clima bajo el reloj. En el modo "empty home" (no
+ * compact) se ve full: emoji + temperatura actual + descripción
+ * + fila con max/min y "lluvia XX%". En modo compact — cuando hay
+ * cards de agenda / TODOs / música — cae a una sola línea con
+ * los datos clave para no comerse espacio.
+ *
+ * Los datos "hoy" (max/min, prob. lluvia) pueden llegar null
+ * (backend viejo o Open-Meteo caído) y en ese caso la row extra
+ * simplemente no aparece: la línea principal es suficiente y
+ * evita mostrar dashes vacíos.
+ */
 @Composable
 private fun WeatherLine(weather: WeatherInfo, compact: Boolean) {
+    val emoji = weatherEmoji(weather.icon).orEmpty()
     val tempLabel = "${weather.temperatureC.toInt()}°"
-    val text = listOf(
-        weatherEmoji(weather.icon),
-        tempLabel,
-        weather.description,
-    ).filter { it.isNotBlank() }.joinToString("  ")
-    Text(
-        text = text,
-        color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-        style = if (compact) MaterialTheme.typography.titleMedium
-        else MaterialTheme.typography.headlineSmall,
-    )
-}
+    val hasForecast = weather.tempMaxC != null && weather.tempMinC != null
+    val forecastLabel = if (hasForecast) {
+        "${weather.tempMaxC!!.toInt()}° / ${weather.tempMinC!!.toInt()}°"
+    } else null
+    val rainLabel = weather.precipitationProbabilityMax
+        ?.takeIf { it >= 10 }
+        ?.let { "💧 $it%" }
 
-/**
- * Map the backend's coarse icon string to a single emoji. Stays in
- * sync with ``weather._icon`` on the Python side. We render an emoji
- * (rather than a vector drawable) because the home is glanceable —
- * single glyph + temperature is enough.
- */
-private fun weatherEmoji(icon: String): String = when (icon) {
-    "clear" -> "☀️"
-    "partly_cloudy" -> "⛅"
-    "cloudy" -> "☁️"
-    "fog" -> "🌫️"
-    "rain" -> "🌧️"
-    "snow" -> "🌨️"
-    "storm" -> "⛈️"
-    else -> ""
+    if (compact) {
+        // Todo en una línea: "☀️ 24°  ·  27°/16°  ·  💧 20%".
+        val parts = listOfNotNull(
+            listOfNotNull(emoji.takeIf { it.isNotBlank() }, tempLabel)
+                .joinToString(" ")
+                .takeIf { it.isNotBlank() },
+            forecastLabel,
+            rainLabel,
+        )
+        Text(
+            text = parts.joinToString("  ·  "),
+            color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+            style = MaterialTheme.typography.titleMedium,
+        )
+    } else {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = listOf(emoji, tempLabel, weather.description)
+                    .filter { it.isNotBlank() }
+                    .joinToString("  "),
+                color = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            val extras = listOfNotNull(forecastLabel, rainLabel)
+            if (extras.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = extras.joinToString("  ·  "),
+                    color = Color.White.copy(alpha = KiwiOpacity.TEXT_TERTIARY),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+    }
 }
 
 @Composable

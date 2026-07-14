@@ -256,13 +256,24 @@ data class NowPlayingChip(
 /**
  * Current-weather snapshot for the home dashboard, sourced from
  * Open-Meteo via the backend's /api/home endpoint. ``icon`` is one
- * of the strings emitted by ``weather._icon`` (clear / partly_cloudy
- * / cloudy / fog / rain / snow / storm); the UI maps it to an emoji.
+ * of los strings emitidos por ``weather._icon`` (clear / partly_cloudy
+ * / cloudy / fog / rain / snow / storm); la UI lo mapea a emoji.
+ *
+ * Los campos "hoy" (max/min, prob. lluvia, salida/puesta de sol)
+ * son opcionales — el backend los rellena cuando el forecast del
+ * día está cacheado; en el arranque en frío o si Open-Meteo falla
+ * pueden llegar null y la card del home cae al comportamiento
+ * viejo (sólo temperatura actual).
  */
 data class WeatherInfo(
     val temperatureC: Double,
     val description: String,
     val icon: String,
+    val tempMaxC: Double? = null,
+    val tempMinC: Double? = null,
+    val precipitationProbabilityMax: Int? = null,
+    val sunrise: String? = null,
+    val sunset: String? = null,
 )
 
 /**

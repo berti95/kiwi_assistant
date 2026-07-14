@@ -315,7 +315,12 @@ def _stub_spotify_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default weather stub: cloudy 18°. Individual tests override."""
+    """Default weather stub: cloudy 18°. Individual tests override.
+
+    Stubbeamos también ``weather.forecast`` a None para evitar
+    llamadas reales a Open-Meteo desde tests que no configuran su
+    propio forecast.
+    """
     weather.reset_cache()
     monkeypatch.setattr(
         weather, "current",
@@ -326,6 +331,7 @@ def _stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
             icon="partly_cloudy",
         ),
     )
+    monkeypatch.setattr(weather, "forecast", lambda date_iso: None)  # noqa: ARG005
 
 
 def test_get_home_happy_path_with_todos_and_no_calendar_no_spotify(
@@ -432,6 +438,58 @@ def test_get_home_weather_null_when_unavailable(
 
     body = client.get(f"/api/home?token={DEV_TOKEN}").json()
     assert body["weather"] is None
+
+
+def test_get_home_weather_includes_today_forecast_when_available(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La home añade max/min + prob. lluvia + sunrise/sunset cuando
+    el forecast de hoy está cacheado. Es lo que alimenta la card
+    ampliada del home (#3)."""
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+
+    monkeypatch.setattr(
+        weather, "forecast",
+        lambda date_iso: weather.DayForecast(  # noqa: ARG005
+            date=date_iso,
+            temp_max_c=22.7,
+            temp_min_c=10.1,
+            weather_code=2,
+            description="Parcialmente nublado",
+            icon="partly_cloudy",
+            precipitation_probability_max=40,
+            precipitation_sum_mm=0.0,
+            sunrise="07:12",
+            sunset="21:03",
+            hourly=[],
+        ),
+    )
+
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["weather"]["temp_max_c"] == 22.7
+    assert body["weather"]["temp_min_c"] == 10.1
+    assert body["weather"]["precipitation_probability_max"] == 40
+    assert body["weather"]["sunrise"] == "07:12"
+    assert body["weather"]["sunset"] == "21:03"
+
+
+def test_get_home_weather_omits_forecast_when_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin forecast (Open-Meteo caído o arranque en frío) la card
+    del home tiene que degradar limpia: sólo temperatura actual, sin
+    dashes vacíos para max/min."""
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+    # `_stub_weather` ya deja weather.forecast → None.
+
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert "temp_max_c" not in body["weather"]
+    assert "precipitation_probability_max" not in body["weather"]
+    assert body["weather"]["temperature_c"] == 18.0
 
 
 def test_get_home_skips_now_playing_when_spotify_paused(

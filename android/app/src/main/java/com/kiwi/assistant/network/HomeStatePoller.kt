@@ -8,6 +8,7 @@ import com.kiwi.assistant.ui.NowPlayingChip
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -98,6 +99,12 @@ class HomeStatePoller(
                 temperatureC = temp,
                 description = obj.string("description").orEmpty(),
                 icon = obj.string("icon") ?: "cloudy",
+                tempMaxC = (obj["temp_max_c"] as? JsonPrimitive)?.doubleOrNull,
+                tempMinC = (obj["temp_min_c"] as? JsonPrimitive)?.doubleOrNull,
+                precipitationProbabilityMax =
+                    (obj["precipitation_probability_max"] as? JsonPrimitive)?.intOrNull,
+                sunrise = obj.string("sunrise")?.takeIf { it.isNotBlank() },
+                sunset = obj.string("sunset")?.takeIf { it.isNotBlank() },
             )
         }
 

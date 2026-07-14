@@ -43,6 +43,8 @@ import com.kiwi.assistant.ui.theme.KiwiRadii
 import com.kiwi.assistant.ui.theme.KiwiSpacing
 import com.kiwi.assistant.ui.theme.KiwiTypography
 import com.kiwi.assistant.ui.theme.rememberAlbumDominantColor
+import com.kiwi.assistant.ui.theme.weatherBackgroundBrush
+import com.kiwi.assistant.ui.theme.weatherEmoji
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDateTime
@@ -212,55 +214,6 @@ private fun AmbientClockView(snapshot: HomeSnapshot?) {
             HighlightLine(snapshot)
         }
     }
-}
-
-/**
- * Gradient vertical de fondo para la vista de pared, dimensionado y
- * coloreado según el ``icon`` que devuelve el backend
- * (clear / partly_cloudy / cloudy / fog / rain / snow / storm).
- *
- * Todos empiezan oscuros en la parte inferior para que el
- * ``HighlightLine`` siga legible; la mitad superior es la que da la
- * "personalidad" del cielo — azul limpio para sol, gris para nublado,
- * gris-morado para tormenta, blanco frío para nieve.
- */
-private fun weatherBackgroundBrush(icon: String?): Brush = when (icon) {
-    "clear" -> Brush.verticalGradient(
-        listOf(Color(0xFF1E5B99), Color(0xFF0A2540), Color.Black),
-    )
-    "partly_cloudy" -> Brush.verticalGradient(
-        listOf(Color(0xFF2E6EA1), Color(0xFF1B2F44), Color.Black),
-    )
-    "cloudy" -> Brush.verticalGradient(
-        listOf(Color(0xFF4F5B66), Color(0xFF2A2F36), Color.Black),
-    )
-    "fog" -> Brush.verticalGradient(
-        listOf(Color(0xFF6E7278), Color(0xFF32363B), Color.Black),
-    )
-    "rain" -> Brush.verticalGradient(
-        listOf(Color(0xFF34506C), Color(0xFF1A2938), Color.Black),
-    )
-    "snow" -> Brush.verticalGradient(
-        listOf(Color(0xFF7C93B0), Color(0xFF2B3849), Color.Black),
-    )
-    "storm" -> Brush.verticalGradient(
-        listOf(Color(0xFF3A3548), Color(0xFF1A1826), Color.Black),
-    )
-    else -> Brush.verticalGradient(
-        listOf(Color.Black, Color.Black),
-    )
-}
-
-/** Emoji Unicode grande que ilustra el clima; ``null`` si desconocido. */
-private fun weatherEmoji(icon: String?): String? = when (icon) {
-    "clear" -> "☀️"
-    "partly_cloudy" -> "⛅"
-    "cloudy" -> "☁️"
-    "fog" -> "🌫️"
-    "rain" -> "🌧️"
-    "snow" -> "❄️"
-    "storm" -> "⛈️"
-    else -> null
 }
 
 @Composable

@@ -277,11 +277,25 @@ async def get_home(token: str = "") -> dict[str, object]:
 
     # Weather: cached at the module level (10 min TTL) so this is a
     # ~no-op most of the time; failures degrade to None.
+    # El home ahora también muestra el pronóstico del día (max/min +
+    # probabilidad de lluvia) para que no haya que abrir la scene de
+    # tiempo para saber si va a llover, así que le adjuntamos la
+    # entrada del daily forecast correspondiente a "hoy".
     current_weather: dict | None = None
     try:
         snap = await asyncio.to_thread(weather.current)
         if snap is not None:
             current_weather = weather.to_wire(snap)
+            today_iso = datetime.now(ZoneInfo(tools.DEFAULT_TIMEZONE)).date().isoformat()
+            today_forecast = await asyncio.to_thread(weather.forecast, today_iso)
+            if today_forecast is not None:
+                current_weather["temp_max_c"] = round(today_forecast.temp_max_c, 1)
+                current_weather["temp_min_c"] = round(today_forecast.temp_min_c, 1)
+                current_weather["precipitation_probability_max"] = (
+                    today_forecast.precipitation_probability_max
+                )
+                current_weather["sunrise"] = today_forecast.sunrise
+                current_weather["sunset"] = today_forecast.sunset
     except Exception as exc:  # noqa: BLE001
         logging.getLogger(__name__).info(
             "home: weather unavailable: %s: %s", type(exc).__name__, exc,
