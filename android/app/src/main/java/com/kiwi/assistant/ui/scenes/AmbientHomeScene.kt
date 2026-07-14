@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.CalendarEvent
@@ -180,12 +181,28 @@ private fun SmallClock(modifier: Modifier = Modifier) {
 
 @Composable
 private fun AmbientClockView(snapshot: HomeSnapshot?) {
+    // Fondo dinámico según el clima: gradient de cielo + emoji grande
+    // en la esquina. Si aún no ha llegado snapshot (arranque en frío)
+    // caemos al negro plano de siempre en vez de un gradient neutro.
+    val weatherIcon = snapshot?.weather?.icon
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(weatherBackgroundBrush(weatherIcon))
             .padding(KiwiSpacing.xxl),
     ) {
+        // Emoji del clima grande arriba a la derecha. Solo lo pinto
+        // si hay dato — el "hueco" en la esquina cuando no hay
+        // clima disponible es menos jarring que un default random.
+        weatherEmoji(weatherIcon)?.let { emoji ->
+            Text(
+                text = emoji,
+                fontSize = 180.sp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = KiwiSpacing.xxl, end = KiwiSpacing.xl),
+            )
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -195,6 +212,55 @@ private fun AmbientClockView(snapshot: HomeSnapshot?) {
             HighlightLine(snapshot)
         }
     }
+}
+
+/**
+ * Gradient vertical de fondo para la vista de pared, dimensionado y
+ * coloreado según el ``icon`` que devuelve el backend
+ * (clear / partly_cloudy / cloudy / fog / rain / snow / storm).
+ *
+ * Todos empiezan oscuros en la parte inferior para que el
+ * ``HighlightLine`` siga legible; la mitad superior es la que da la
+ * "personalidad" del cielo — azul limpio para sol, gris para nublado,
+ * gris-morado para tormenta, blanco frío para nieve.
+ */
+private fun weatherBackgroundBrush(icon: String?): Brush = when (icon) {
+    "clear" -> Brush.verticalGradient(
+        listOf(Color(0xFF1E5B99), Color(0xFF0A2540), Color.Black),
+    )
+    "partly_cloudy" -> Brush.verticalGradient(
+        listOf(Color(0xFF2E6EA1), Color(0xFF1B2F44), Color.Black),
+    )
+    "cloudy" -> Brush.verticalGradient(
+        listOf(Color(0xFF4F5B66), Color(0xFF2A2F36), Color.Black),
+    )
+    "fog" -> Brush.verticalGradient(
+        listOf(Color(0xFF6E7278), Color(0xFF32363B), Color.Black),
+    )
+    "rain" -> Brush.verticalGradient(
+        listOf(Color(0xFF34506C), Color(0xFF1A2938), Color.Black),
+    )
+    "snow" -> Brush.verticalGradient(
+        listOf(Color(0xFF7C93B0), Color(0xFF2B3849), Color.Black),
+    )
+    "storm" -> Brush.verticalGradient(
+        listOf(Color(0xFF3A3548), Color(0xFF1A1826), Color.Black),
+    )
+    else -> Brush.verticalGradient(
+        listOf(Color.Black, Color.Black),
+    )
+}
+
+/** Emoji Unicode grande que ilustra el clima; ``null`` si desconocido. */
+private fun weatherEmoji(icon: String?): String? = when (icon) {
+    "clear" -> "☀️"
+    "partly_cloudy" -> "⛅"
+    "cloudy" -> "☁️"
+    "fog" -> "🌫️"
+    "rain" -> "🌧️"
+    "snow" -> "❄️"
+    "storm" -> "⛈️"
+    else -> null
 }
 
 @Composable
