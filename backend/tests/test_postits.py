@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from kiwi_backend import postits, state_store, weather
+from kiwi_backend import factoid, postits, state_store, weather
 from kiwi_backend.main import app
 from kiwi_backend.settings import settings
 from kiwi_backend.tools import postit_tools
@@ -44,6 +44,12 @@ def _stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
     weather.reset_cache()
     monkeypatch.setattr(weather, "current", lambda: None)
     monkeypatch.setattr(weather, "forecast", lambda date_iso: None)  # noqa: ARG005
+
+
+@pytest.fixture(autouse=True)
+def _stub_factoid(monkeypatch: pytest.MonkeyPatch) -> None:
+    factoid.reset_cache()
+    monkeypatch.setattr(factoid, "for_today", lambda today=None: None)  # noqa: ARG005
 
 
 @pytest.fixture

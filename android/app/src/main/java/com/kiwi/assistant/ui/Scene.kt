@@ -291,6 +291,31 @@ data class HomeSnapshot(
     val alarms: List<AlarmItem>,
     val postits: List<PostIt> = emptyList(),
     val recentlyPlayed: List<SpotifyResultItem> = emptyList(),
+    val costSeries: List<DailyCost> = emptyList(),
+    val factoid: FactoidItem? = null,
+)
+
+/**
+ * Un punto en el sparkline semanal del home (#10). ``date`` en
+ * formato YYYY-MM-DD (referencia al día); ``costEur`` es 0.0 en los
+ * días sin conversaciones para que el sparkline mantenga la anchura
+ * fija (no comprimir 3 días activos a un ancho gigante).
+ */
+data class DailyCost(
+    val date: String,
+    val costEur: Double,
+    val conversationCount: Int,
+)
+
+/**
+ * Dato "hoy en el mundo" (#14). El backend cachea la efeméride del
+ * día y elige la más antigua (más icónica); si Wikipedia no
+ * responde, llega null y la card no se pinta.
+ */
+data class FactoidItem(
+    val date: String,
+    val year: Int,
+    val text: String,
 )
 
 /**

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from kiwi_backend import state_store, tools, weather
+from kiwi_backend import factoid, state_store, tools, weather
 from kiwi_backend.main import app
 from kiwi_backend.settings import settings
 
@@ -314,6 +314,13 @@ def _stub_spotify_off(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _stub_factoid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Impide llamadas reales a Wikipedia desde tests que golpean /api/home."""
+    factoid.reset_cache()
+    monkeypatch.setattr(factoid, "for_today", lambda today=None: None)  # noqa: ARG005
+
+
+@pytest.fixture(autouse=True)
 def _stub_weather(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default weather stub: cloudy 18°. Individual tests override.
 
@@ -473,6 +480,57 @@ def test_get_home_weather_includes_today_forecast_when_available(
     assert body["weather"]["precipitation_probability_max"] == 40
     assert body["weather"]["sunrise"] == "07:12"
     assert body["weather"]["sunset"] == "21:03"
+
+
+def test_get_home_includes_cost_series(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """El home devuelve la serie de 7 días para el sparkline (#10),
+    aunque sea todo ceros cuando la cuenta es nueva."""
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert isinstance(body["cost_series"], list)
+    assert len(body["cost_series"]) == 7
+    for entry in body["cost_series"]:
+        assert "date" in entry
+        assert "cost_eur" in entry
+
+
+def test_get_home_includes_factoid_when_available(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#14: la efeméride se propaga tal cual al wire format."""
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+
+    monkeypatch.setattr(
+        factoid, "for_today",
+        lambda today=None: factoid.Factoid(  # noqa: ARG005
+            date_iso="2026-05-07",
+            year=1945,
+            text="Fin de la Segunda Guerra Mundial en Europa.",
+        ),
+    )
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["factoid"] == {
+        "date": "2026-05-07",
+        "year": 1945,
+        "text": "Fin de la Segunda Guerra Mundial en Europa.",
+    }
+
+
+def test_get_home_factoid_null_when_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_calendar_unavailable(monkeypatch)
+    _stub_spotify_off(monkeypatch)
+    # _stub_factoid ya lo pone a None por defecto.
+    body = client.get(f"/api/home?token={DEV_TOKEN}").json()
+    assert body["factoid"] is None
 
 
 def test_get_home_weather_omits_forecast_when_unavailable(

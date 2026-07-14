@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import (
     alarms,
+    factoid,
     google_auth,
     log_buffer,
     postits,
@@ -347,6 +348,31 @@ async def get_home(token: str = "") -> dict[str, object]:
             "home: recently_played unavailable: %s: %s", type(exc).__name__, exc,
         )
 
+    # Sparkline de gasto de la semana (#10): 7 días de coste
+    # estimado. Silencioso si algo falla — un sparkline vacío no
+    # es un error, es un home nuevo sin historial.
+    cost_series: list[dict] = []
+    try:
+        cost_series = await asyncio.to_thread(usage.daily_costs, 7)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: cost series unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
+    # "Hoy en el mundo" (#14): un dato histórico. Cacheado por día
+    # dentro de factoid, así que el hit real a Wikipedia es una vez
+    # cada 24h. Fallo también silencioso — mejor sin card que con
+    # dashes vacíos.
+    factoid_wire: dict | None = None
+    try:
+        f = await asyncio.to_thread(factoid.for_today)
+        if f is not None:
+            factoid_wire = factoid.to_wire(f)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).info(
+            "home: factoid unavailable: %s: %s", type(exc).__name__, exc,
+        )
+
     return {
         "events_today": events_today,
         "events_today_error": events_today_error,
@@ -356,6 +382,8 @@ async def get_home(token: str = "") -> dict[str, object]:
         "alarms": alarm_items,
         "postits": postit_items,
         "recently_played": recent_items,
+        "cost_series": cost_series,
+        "factoid": factoid_wire,
     }
 
 
