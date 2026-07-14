@@ -136,6 +136,38 @@ class TodoApi(
     )
 
     /**
+     * Añade un post-it desde la home. ``color`` puede ser null y el
+     * backend usará el default (yellow). Devuelve `true` si el POST
+     * fue OK — la home se recarga vía HomeStatePoller para ver el
+     * cambio, así que no necesitamos deserializar la respuesta.
+     */
+    suspend fun addPostIt(text: String, color: String? = null): Boolean {
+        if (baseUrl.isEmpty() || devToken.isEmpty()) return false
+        if (text.isBlank()) return false
+        val url = "${baseUrl.trimEnd('/')}/api/postits?token=$devToken"
+        val payload = buildString {
+            append('{')
+            append("\"text\":\"").append(text.replace("\"", "\\\"")).append('"')
+            if (color != null) {
+                append(",\"color\":\"").append(color).append('"')
+            }
+            append('}')
+        }
+        val body = payload.toRequestBody("application/json".toMediaType())
+        val request = Request.Builder().url(url).post(body).build()
+        return try {
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            KLog.w(TAG, "POST $url failed: ${e::class.simpleName}: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun removePostIt(id: String): Boolean = simplePost(
+        "/api/postits/$id/remove",
+    )
+
+    /**
      * GET /api/stats con un periodo. Devuelve directamente
      * [Scene.UsageStats] para que el ViewModel sólo tenga que
      * empujarla a la escena. Null si la red falla o el JSON

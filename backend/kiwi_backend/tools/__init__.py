@@ -62,7 +62,10 @@ from .calendar import (  # noqa: F401
     _calendar_window,
     _list_events_blocking,
 )
-from .spotify import _spotify_currently_playing_blocking  # noqa: F401
+from .spotify import (  # noqa: F401
+    _spotify_currently_playing_blocking,
+    _spotify_recently_played_blocking,
+)
 from .youtube import (  # noqa: F401
     _YT_MAX_RESULTS_HARD_CAP,
     _parse_iso8601_duration,
@@ -75,6 +78,7 @@ from .youtube import (  # noqa: F401
 # alfabético para que sea fácil ver de un vistazo qué grupos hay.
 from . import (  # noqa: F401
     alarm_tools,
+    postit_tools,
     shopping_tools,
     system,
     timer_tools,
