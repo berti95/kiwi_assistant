@@ -935,39 +935,6 @@ class KiwiViewModel(application: Application) :
         }
     }
 
-    /**
-     * Muestra el diálogo de nuevo post-it desde el "+" del home.
-     * ``_addPostItDialogOpen`` es un flag simple: la UI expone el
-     * diálogo cuando es `true`; el ViewModel lo cierra tras un
-     * submit o cuando el usuario cancela.
-     */
-    private val _addPostItDialogOpen = MutableStateFlow(false)
-    val addPostItDialogOpen: StateFlow<Boolean> = _addPostItDialogOpen.asStateFlow()
-
-    fun onOpenAddPostIt() {
-        _addPostItDialogOpen.value = true
-    }
-
-    fun onDismissAddPostIt() {
-        _addPostItDialogOpen.value = false
-    }
-
-    fun onSubmitPostIt(text: String, color: String) {
-        _addPostItDialogOpen.value = false
-        if (text.isBlank()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            todoApi.addPostIt(text.trim(), color)
-            refreshHomeSnapshot()
-        }
-    }
-
-    fun onRemovePostIt(item: PostIt) {
-        viewModelScope.launch(Dispatchers.IO) {
-            todoApi.removePostIt(item.id)
-            refreshHomeSnapshot()
-        }
-    }
-
     fun onTodoTap(item: TodoItem) {
         viewModelScope.launch(Dispatchers.IO) {
             val updated = if (!item.completed) {

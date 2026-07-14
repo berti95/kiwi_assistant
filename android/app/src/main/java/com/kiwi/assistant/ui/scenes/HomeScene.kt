@@ -20,10 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -31,15 +29,10 @@ import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,7 +55,6 @@ import com.kiwi.assistant.ui.CalendarEvent
 import com.kiwi.assistant.ui.FactoidItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
-import com.kiwi.assistant.ui.PostIt
 import com.kiwi.assistant.ui.SpotifyResultItem
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
@@ -123,16 +115,13 @@ fun HomeScene(
     onPlayPause: () -> Unit = {},
     onNext: () -> Unit = {},
     onSpotifyResultTap: (SpotifyResultItem, String) -> Unit = { _, _ -> },
-    onAddPostIt: () -> Unit = {},
-    onRemovePostIt: (PostIt) -> Unit = {},
     updateStatus: String? = null,
 ) {
     val hasAgenda = snapshot?.eventsToday?.isNotEmpty() == true
     val hasTodos = snapshot?.todos?.isNotEmpty() == true
     val hasNowPlaying = snapshot?.nowPlaying != null
     val hasRecent = snapshot?.recentlyPlayed?.isNotEmpty() == true
-    val hasPostits = snapshot?.postits?.isNotEmpty() == true
-    val hasContent = hasAgenda || hasTodos || hasNowPlaying || hasRecent || hasPostits
+    val hasContent = hasAgenda || hasTodos || hasNowPlaying || hasRecent
 
     val nextAlarmMs = snapshot?.alarms
         ?.map { it.firesAtMs }
@@ -276,16 +265,6 @@ fun HomeScene(
                 )
             }
 
-            // #12 Post-its: notas rápidas, siempre visibles con un
-            // botón "+" para añadir. Aunque estén vacíos pintamos la
-            // fila con el "+" — es la única forma de descubrir la
-            // feature sin abrir el manual.
-            Spacer(Modifier.height(KiwiSpacing.md))
-            PostItsRow(
-                items = snapshot?.postits.orEmpty(),
-                onAdd = onAddPostIt,
-                onRemove = onRemovePostIt,
-            )
         }
 
         Spacer(Modifier.height(KiwiSpacing.md))
@@ -776,177 +755,6 @@ private fun RecentTile(track: SpotifyResultItem, onTap: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-/**
- * Post-its de colores (#12): notas cortas ancladas al home. Fila
- * horizontal con scroll, cada uno con su color de pastel. El botón
- * "+" siempre visible al inicio para añadir uno nuevo (abre un
- * diálogo simple). Tap normal en un post-it: nada; tap en la X:
- * eliminarlo.
- */
-@Composable
-private fun PostItsRow(
-    items: List<PostIt>,
-    onAdd: () -> Unit,
-    onRemove: (PostIt) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.sm),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AddPostItButton(onClick = onAdd)
-        items.forEach { postit ->
-            PostItCard(postit = postit, onRemove = { onRemove(postit) })
-        }
-    }
-}
-
-@Composable
-private fun AddPostItButton(onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(96.dp)
-            .clip(RoundedCornerShape(KiwiRadii.sm))
-            .background(Color.White.copy(alpha = KiwiOpacity.CARD_BG))
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Default.Add,
-            contentDescription = "Añadir post-it",
-            tint = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-            modifier = Modifier.size(28.dp),
-        )
-    }
-}
-
-@Composable
-private fun PostItCard(postit: PostIt, onRemove: () -> Unit) {
-    val bg = postItColor(postit.color)
-    Box(
-        modifier = Modifier
-            .size(width = 140.dp, height = 96.dp)
-            .clip(RoundedCornerShape(KiwiRadii.sm))
-            .background(bg),
-    ) {
-        Text(
-            text = postit.text,
-            color = Color.Black.copy(alpha = 0.82f),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(
-                    horizontal = KiwiSpacing.sm,
-                    vertical = KiwiSpacing.xs,
-                ),
-        )
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .size(28.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Quitar post-it",
-                tint = Color.Black.copy(alpha = 0.55f),
-                modifier = Modifier.size(16.dp),
-            )
-        }
-    }
-}
-
-/**
- * Color de fondo para cada post-it. Tonos pastel saturados-suaves
- * para que texto negro se lea bien sin dañar la vista sobre el
- * fondo oscuro del home. Cualquier color no listado cae a amarillo.
- */
-private fun postItColor(color: String): Color = when (color) {
-    "yellow" -> Color(0xFFFFE58A)
-    "pink" -> Color(0xFFF7B7C3)
-    "blue" -> Color(0xFFA8CFF0)
-    "green" -> Color(0xFFB6E2B0)
-    "orange" -> Color(0xFFFFC59B)
-    "purple" -> Color(0xFFD3B8F0)
-    else -> Color(0xFFFFE58A)
-}
-
-/**
- * Diálogo simple para añadir un post-it. Un ``TextField`` + chips de
- * colores + botones Cancelar / Guardar. Se muestra desde
- * [HomeScene] cuando el usuario toca el "+"; se cierra con back o
- * tras un guardado exitoso.
- */
-@Composable
-fun AddPostItDialog(
-    onDismiss: () -> Unit,
-    onSubmit: (String, String) -> Unit,
-) {
-    var text by remember { mutableStateOf("") }
-    var color by remember { mutableStateOf("yellow") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Nuevo post-it") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(KiwiSpacing.sm)) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it.take(140) },
-                    placeholder = { Text("¿Qué quieres recordar?") },
-                    maxLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White.copy(alpha = 0.06f),
-                        unfocusedContainerColor = Color.White.copy(alpha = 0.06f),
-                    ),
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(KiwiSpacing.sm),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    listOf("yellow", "pink", "blue", "green", "orange", "purple").forEach { c ->
-                        Box(
-                            modifier = Modifier
-                                .size(if (c == color) 34.dp else 28.dp)
-                                .clip(CircleShape)
-                                .background(postItColor(c))
-                                .clickable { color = c },
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (text.isNotBlank()) {
-                        onSubmit(text.trim(), color)
-                    }
-                },
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = Color.White,
-                ),
-                enabled = text.isNotBlank(),
-            ) { Text("Guardar") }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-                ),
-            ) { Text("Cancelar") }
-        },
-        containerColor = Color(0xFF141414),
-        titleContentColor = Color.White,
-        textContentColor = Color.White.copy(alpha = KiwiOpacity.TEXT_SECONDARY),
-    )
 }
 
 // ---- internal pieces ------------------------------------------------

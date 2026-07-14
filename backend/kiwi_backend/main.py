@@ -16,7 +16,6 @@ from . import (
     factoid,
     google_auth,
     log_buffer,
-    postits,
     shopping,
     spotify_service,
     spotify_stream,
@@ -313,19 +312,6 @@ async def get_home(token: str = "") -> dict[str, object]:
             "home: alarms unavailable: %s: %s", type(exc).__name__, exc,
         )
 
-    # Post-its: notas rápidas ancladas al home. Cap para que N=200
-    # post-its no ahoguen la respuesta ni el layout — el usuario que
-    # apunte tanto se los tratará mejor como TODOs.
-    postit_items: list[dict] = []
-    try:
-        postit_items = postits.to_wire(
-            (await asyncio.to_thread(postits.list_all))[:postits.MAX_HOME_POSTITS]
-        )
-    except Exception as exc:  # noqa: BLE001
-        logging.getLogger(__name__).info(
-            "home: postits unavailable: %s: %s", type(exc).__name__, exc,
-        )
-
     # Recently played en el home: 6 pistas para poder tap-to-resume
     # desde la home sin abrir el Spotify Hub. Fallo tiene que ser
     # silencioso — el usuario preferirá home sin carrusel que home
@@ -368,7 +354,6 @@ async def get_home(token: str = "") -> dict[str, object]:
         "now_playing": now_playing,
         "weather": current_weather,
         "alarms": alarm_items,
-        "postits": postit_items,
         "recently_played": recent_items,
         "factoid": factoid_wire,
     }
@@ -415,60 +400,6 @@ async def clear_shopping(token: str = "") -> dict[str, object]:
     """Clear the entire shopping list ("ya he hecho la compra")."""
     _require_dev_token(token)
     cleared = await asyncio.to_thread(shopping.clear_all)
-    return {"cleared": cleared, "items": []}
-
-
-# ---- Post-its (notas rápidas ancladas al home) ----------------------
-
-
-class PostItPayload(BaseModel):
-    text: str = Field(..., min_length=1, max_length=140)
-    color: str | None = None
-
-
-@app.get("/api/postits")
-async def list_postits(token: str = "") -> dict[str, object]:
-    """Post-its actuales en orden "más reciente primero"."""
-    _require_dev_token(token)
-    items = await asyncio.to_thread(postits.list_all)
-    return {"items": postits.to_wire(items)}
-
-
-@app.post("/api/postits")
-async def add_postit(
-    payload: PostItPayload, token: str = "",
-) -> dict[str, object]:
-    """Añade un post-it desde el tap "+" del home."""
-    _require_dev_token(token)
-    try:
-        await asyncio.to_thread(
-            postits.add, payload.text, payload.color or postits.DEFAULT_COLOR,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    items = await asyncio.to_thread(postits.list_all)
-    return {"items": postits.to_wire(items)}
-
-
-@app.post("/api/postits/{postit_id}/remove")
-async def remove_postit(postit_id: str, token: str = "") -> dict[str, object]:
-    """Borra un post-it (tap para quitarlo)."""
-    _require_dev_token(token)
-    try:
-        await asyncio.to_thread(postits.remove, postit_id)
-    except postits.PostItNotFoundError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"postit not found: {postit_id}",
-        ) from exc
-    items = await asyncio.to_thread(postits.list_all)
-    return {"items": postits.to_wire(items)}
-
-
-@app.post("/api/postits/clear")
-async def clear_postits(token: str = "") -> dict[str, object]:
-    """Borra todos los post-its."""
-    _require_dev_token(token)
-    cleared = await asyncio.to_thread(postits.clear)
     return {"cleared": cleared, "items": []}
 
 

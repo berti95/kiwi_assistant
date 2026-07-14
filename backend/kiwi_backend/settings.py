@@ -101,7 +101,6 @@ class Settings(BaseSettings):
     kiwi_state_alarms_path: str = "alarms.json"
     kiwi_state_shopping_path: str = "shopping.json"
     kiwi_state_usage_path: str = "usage.json"
-    kiwi_state_postits_path: str = "postits.json"
 
     # Tarifas EUR por segundo de audio para la pantalla de costes.
     # Defaults aproximan al modelo Flash Live (precios en USD del

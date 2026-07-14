@@ -47,7 +47,6 @@ import com.kiwi.assistant.ui.scenes.AmbientHomeScene
 import com.kiwi.assistant.ui.scenes.BrowseYouTubeScene
 import com.kiwi.assistant.ui.scenes.CalendarScene
 import com.kiwi.assistant.ui.scenes.HomeScene
-import com.kiwi.assistant.ui.PostIt
 import com.kiwi.assistant.ui.SpotifyResultItem
 import com.kiwi.assistant.ui.scenes.NowPlayingScene
 import com.kiwi.assistant.ui.scenes.PlaylistListScene
@@ -174,20 +173,7 @@ fun KiwiScreen(viewModel: KiwiViewModel = viewModel()) {
                 onSpotifyResultTap = viewModel::onSpotifyResultTap,
                 onSpotifyResultLongPress = viewModel::onSpotifyResultLongPress,
                 onSpotifyHubItemTap = viewModel::onSpotifyHubItemTap,
-                onAddPostIt = viewModel::onOpenAddPostIt,
-                onRemovePostIt = viewModel::onRemovePostIt,
                 spotifyAutoWakeStatus = spotifyAutoWakeStatus,
-            )
-        }
-
-        // Diálogo global "Nuevo post-it" — vive fuera del switch de
-        // escenas para que sobreviva a AnimatedContent (que
-        // desmontaría el composable si viviera dentro).
-        val postItDialogOpen by viewModel.addPostItDialogOpen.collectAsState()
-        if (postItDialogOpen) {
-            com.kiwi.assistant.ui.scenes.AddPostItDialog(
-                onDismiss = viewModel::onDismissAddPostIt,
-                onSubmit = viewModel::onSubmitPostIt,
             )
         }
 
@@ -454,8 +440,6 @@ private fun SceneLayer(
     onSpotifyResultTap: (SpotifyResultItem, String) -> Unit,
     onSpotifyResultLongPress: (SpotifyResultItem) -> Unit,
     onSpotifyHubItemTap: (SpotifyResultItem, String) -> Unit,
-    onAddPostIt: () -> Unit,
-    onRemovePostIt: (PostIt) -> Unit,
     spotifyAutoWakeStatus: String?,
 ) {
     when (scene) {
@@ -472,8 +456,6 @@ private fun SceneLayer(
             onPlayPause = onPlayPause,
             onNext = onNext,
             onSpotifyResultTap = onSpotifyResultTap,
-            onAddPostIt = onAddPostIt,
-            onRemovePostIt = onRemovePostIt,
             updateStatus = updateStatus,
         )
         Scene.Ambient -> AmbientHomeScene(snapshot = homeSnapshot)

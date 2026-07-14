@@ -6,11 +6,9 @@ import com.kiwi.assistant.ui.AlarmItem
 import com.kiwi.assistant.ui.FactoidItem
 import com.kiwi.assistant.ui.HomeSnapshot
 import com.kiwi.assistant.ui.NowPlayingChip
-import com.kiwi.assistant.ui.PostIt
 import com.kiwi.assistant.ui.SpotifyResultItem
 import com.kiwi.assistant.ui.TodoItem
 import com.kiwi.assistant.ui.WeatherInfo
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import java.util.concurrent.TimeUnit
@@ -124,18 +122,6 @@ class HomeStatePoller(
             )
         }
 
-        val postitsArr = root["postits"] as? JsonArray ?: JsonArray(emptyList())
-        val postits = postitsArr.mapNotNull { el ->
-            val obj = el as? JsonObject ?: return@mapNotNull null
-            PostIt(
-                id = obj.string("id") ?: return@mapNotNull null,
-                text = obj.string("text").orEmpty(),
-                color = obj.string("color") ?: "yellow",
-                createdMs = (obj["created_ms"] as? JsonPrimitive)
-                    ?.longOrNull ?: 0L,
-            )
-        }
-
         val recentArr = root["recently_played"] as? JsonArray
             ?: JsonArray(emptyList())
         val recentlyPlayed = recentArr.mapNotNull { el ->
@@ -163,7 +149,6 @@ class HomeStatePoller(
             nowPlaying = nowPlaying,
             weather = weather,
             alarms = alarms,
-            postits = postits,
             recentlyPlayed = recentlyPlayed,
             factoid = factoid,
         )

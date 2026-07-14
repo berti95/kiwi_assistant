@@ -289,7 +289,6 @@ data class HomeSnapshot(
     val nowPlaying: NowPlayingChip?,
     val weather: WeatherInfo?,
     val alarms: List<AlarmItem>,
-    val postits: List<PostIt> = emptyList(),
     val recentlyPlayed: List<SpotifyResultItem> = emptyList(),
     val factoid: FactoidItem? = null,
 )
@@ -303,20 +302,6 @@ data class FactoidItem(
     val date: String,
     val year: Int,
     val text: String,
-)
-
-/**
- * Post-it de colores anclado al home. Los colores están tipados
- * como string (matcheados con lo que emite el backend: yellow /
- * pink / blue / green / orange / purple) para no obligar a un
- * enum: si el backend gana un color nuevo, la UI puede aún
- * pintarlo con un fallback en lugar de rebotarlo.
- */
-data class PostIt(
-    val id: String,
-    val text: String,
-    val color: String,
-    val createdMs: Long,
 )
 
 /** A YouTube video item, used in [Scene.VideoList]. */
